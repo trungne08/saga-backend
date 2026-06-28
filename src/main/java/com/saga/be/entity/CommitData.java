@@ -1,0 +1,58 @@
+package com.saga.be.entity;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.Table;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+import java.time.LocalDateTime;
+
+@Entity
+@Table(name = "commit_data")
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class CommitData extends BaseEntity {
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "repo_id")
+    private GitRepo repo;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "task_id")
+    private Task task;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "pr_id")
+    private PullRequest pullRequest;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "author_id")
+    private Student author;
+
+    @Column(name = "sha_hash")
+    private String shaHash;
+
+    @Column(name = "message")
+    private String message;
+
+    @Column(name = "timestamp")
+    private LocalDateTime timestamp;
+
+    @Column(name = "additions")
+    private Integer additions;
+
+    @Column(name = "deletions")
+    private Integer deletions;
+
+    @Column(name = "files_changed")
+    private Integer filesChanged;
+}
