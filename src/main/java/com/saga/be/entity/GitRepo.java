@@ -26,6 +26,11 @@ public class GitRepo extends BaseEntity {
     @JoinColumn(name = "project_id")
     private Project project;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "team_id")
+    private Team team;
+
+
     @Column(name = "name")
     private String name;
 

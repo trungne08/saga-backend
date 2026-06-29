@@ -1,5 +1,6 @@
 package com.saga.be.entity;
 
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.JoinColumn;
@@ -27,4 +28,7 @@ public class MeetingAttendee extends BaseEntity {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "student_id")
     private Student student;
+
+    @Column(name = "joined_at")
+    private java.time.LocalDateTime joinedAt;
 }
