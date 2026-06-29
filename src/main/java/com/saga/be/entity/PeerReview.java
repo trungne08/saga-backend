@@ -13,28 +13,29 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 @Entity
-@Table(name = "cam_config")
+@Table(name = "peer_review")
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class CamConfig extends BaseEntity {
+public class PeerReview extends BaseEntity {
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "subject_id")
-    private Subject subject;
+    @JoinColumn(name = "sprint_id")
+    private Sprint sprint;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "class_id", nullable = true)
-    private Class clazz;
+    @JoinColumn(name = "reviewer_id")
+    private Student reviewer;
 
-    @Column(name = "metric_name")
-    private String metricName;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "reviewee_id")
+    private Student reviewee;
 
-    @Column(name = "threshold")
-    private Float threshold;
+    @Column(name = "star_rating")
+    private Integer starRating;
 
-    @Column(name = "weight")
-    private Float weight;
+    @Column(name = "comment", columnDefinition = "TEXT")
+    private String comment;
 }

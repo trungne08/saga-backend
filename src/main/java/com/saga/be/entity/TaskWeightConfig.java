@@ -13,13 +13,13 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 @Entity
-@Table(name = "cam_config")
+@Table(name = "task_weight_config")
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class CamConfig extends BaseEntity {
+public class TaskWeightConfig extends BaseEntity {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "subject_id")
@@ -29,11 +29,8 @@ public class CamConfig extends BaseEntity {
     @JoinColumn(name = "class_id", nullable = true)
     private Class clazz;
 
-    @Column(name = "metric_name")
-    private String metricName;
-
-    @Column(name = "threshold")
-    private Float threshold;
+    @Column(name = "task_type")
+    private String taskType;
 
     @Column(name = "weight")
     private Float weight;
