@@ -1,7 +1,10 @@
 package com.saga.be.entity;
 
+import com.saga.be.entity.enums.BoardType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
@@ -14,13 +17,13 @@ import lombok.Setter;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "git_repo")
+@Table(name = "jira_board")
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class GitRepo extends BaseEntity {
+public class JiraBoard extends BaseEntity {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "project_id")
@@ -29,11 +32,12 @@ public class GitRepo extends BaseEntity {
     @Column(name = "name")
     private String name;
 
-    @Column(name = "url")
-    private String url;
+    @Enumerated(EnumType.STRING)
+    @Column(name = "type")
+    private BoardType type;
 
-    @Column(name = "provider")
-    private String provider;
+    @Column(name = "jira_board_id")
+    private String jiraBoardId;
 
     @Column(name = "last_synced_at")
     private LocalDateTime lastSyncedAt;

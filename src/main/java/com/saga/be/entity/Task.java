@@ -36,10 +36,6 @@ public class Task extends BaseEntity {
     private Sprint sprint;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "repo_id")
-    private GitRepo repo;
-
-    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "assignee_id")
     private Student assignee;
 
@@ -50,9 +46,6 @@ public class Task extends BaseEntity {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "blocks_task_id")
     private Task blocksTask;
-
-    @Column(name = "source_provider")
-    private String sourceProvider;
 
     @Column(name = "external_key")
     private String externalKey;

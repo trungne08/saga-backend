@@ -1,6 +1,6 @@
 package com.saga.be.entity;
 
-import com.saga.be.entity.enums.PullRequestStatus;
+import com.saga.be.entity.enums.IssueState;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -17,13 +17,13 @@ import lombok.Setter;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "pull_request")
+@Table(name = "git_issue")
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class PullRequest extends BaseEntity {
+public class GitIssue extends BaseEntity {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "repo_id")
@@ -34,26 +34,19 @@ public class PullRequest extends BaseEntity {
     private Student author;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "task_id", nullable = true)
-    private Task task;
+    @JoinColumn(name = "assignee_id")
+    private Student assignee;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "git_issue_id", nullable = true)
-    private GitIssue gitIssue;
+    @Column(name = "issue_number")
+    private Integer issueNumber;
 
     @Column(name = "title")
     private String title;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "status")
-    private PullRequestStatus status;
+    @Column(name = "state")
+    private IssueState state;
 
-    @Column(name = "merged_at")
-    private LocalDateTime mergedAt;
-
-    @Column(name = "review_count")
-    private Integer reviewCount;
-
-    @Column(name = "comment_count")
-    private Integer commentCount;
+    @Column(name = "closed_at")
+    private LocalDateTime closedAt;
 }

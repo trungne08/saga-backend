@@ -18,11 +18,11 @@ import lombok.Setter;
 @Builder
 public class Lecturer extends BaseEntity {
 
-    @Column(name = "email")
-    private String email;
+    @Column(name = "cognito_sub", unique = true)
+    private String cognitoSub;
 
-    @Column(name = "password")
-    private String password;
+    @Column(name = "email", unique = true)
+    private String email;
 
     @Column(name = "full_name")
     private String fullName;

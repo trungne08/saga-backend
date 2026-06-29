@@ -8,22 +8,26 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "admin")
+@Table(name = "semester")
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class Admin extends BaseEntity {
+public class Semester extends BaseEntity {
 
-    @Column(name = "cognito_sub", unique = true)
-    private String cognitoSub;
+    @Column(name = "code")
+    private String code;
 
-    @Column(name = "email", unique = true)
-    private String email;
+    @Column(name = "name")
+    private String name;
 
-    @Column(name = "full_name")
-    private String fullName;
+    @Column(name = "start_date")
+    private LocalDateTime startDate;
+
+    @Column(name = "end_date")
+    private LocalDateTime endDate;
 }

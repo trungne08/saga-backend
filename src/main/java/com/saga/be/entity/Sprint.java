@@ -23,8 +23,8 @@ import java.time.LocalDateTime;
 public class Sprint extends BaseEntity {
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "project_id")
-    private Project project;
+    @JoinColumn(name = "board_id")
+    private JiraBoard board;
 
     @Column(name = "name")
     private String name;

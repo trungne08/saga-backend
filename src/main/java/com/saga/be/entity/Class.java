@@ -10,20 +10,17 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 @Entity
-@Table(name = "admin")
+@Table(name = "class")
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class Admin extends BaseEntity {
+public class Class extends BaseEntity {
 
-    @Column(name = "cognito_sub", unique = true)
-    private String cognitoSub;
+    @Column(name = "class_code")
+    private String classCode;
 
-    @Column(name = "email", unique = true)
-    private String email;
-
-    @Column(name = "full_name")
-    private String fullName;
+    @Column(name = "name")
+    private String name;
 }

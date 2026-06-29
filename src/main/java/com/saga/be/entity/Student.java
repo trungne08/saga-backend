@@ -25,14 +25,14 @@ import java.time.LocalDateTime;
 @Builder
 public class Student extends BaseEntity {
 
-    @Column(name = "student_code")
+    @Column(name = "cognito_sub", unique = true)
+    private String cognitoSub;
+
+    @Column(name = "student_code", unique = true)
     private String studentCode;
 
-    @Column(name = "email")
+    @Column(name = "email", unique = true)
     private String email;
-
-    @Column(name = "password")
-    private String password;
 
     @Column(name = "full_name")
     private String fullName;

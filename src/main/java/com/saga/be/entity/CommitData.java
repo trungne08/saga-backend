@@ -27,11 +27,15 @@ public class CommitData extends BaseEntity {
     private GitRepo repo;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "task_id")
+    @JoinColumn(name = "task_id", nullable = true)
     private Task task;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "pr_id")
+    @JoinColumn(name = "git_issue_id", nullable = true)
+    private GitIssue gitIssue;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "pr_id", nullable = true)
     private PullRequest pullRequest;
 
     @ManyToOne(fetch = FetchType.LAZY)
