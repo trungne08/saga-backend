@@ -1,48 +1,24 @@
-package com.saga.be.entity;
+package com.saga.be.entity; // Nhớ check lại tên package của ní nha
 
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.Table;
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
-import java.util.UUID;
+import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.mapping.Document;
+import lombok.Data;
+import java.time.LocalDateTime;
 
-@Entity
-@Table(name = "system_audit_log")
-@Getter
-@Setter
-@NoArgsConstructor
-@AllArgsConstructor
-@Builder
-public class SystemAuditLog extends BaseEntity {
+@Data // Dùng Lombok cho gọn, khỏi tự gen Getter/Setter
+@Document(collection = "system_audit_log")
+public class SystemAuditLog {
 
-    @Column(name = "actor_id")
-    private UUID actorId;
+    @Id
+    private String id; // Mongo dùng String làm ID
 
-    @Column(name = "actor_role")
-    private String actorRole;
-
-    @Column(name = "action")
+    private String actorId;
     private String action;
+    private String targetEntity;
 
-    @Column(name = "table_name")
-    private String tableName;
+    private Object oldValues; // Hứng cục JSON cũ
+    private Object newValues; // Hứng cục JSON mới
 
-    @Column(name = "record_id")
-    private String recordId;
-
-    @Column(name = "old_values", columnDefinition = "TEXT")
-    private String oldValues;
-
-    @Column(name = "new_values", columnDefinition = "TEXT")
-    private String newValues;
-
-    @Column(name = "ip_address")
+    private LocalDateTime timestamp = LocalDateTime.now();
     private String ipAddress;
-
-    @Column(name = "endpoint")
-    private String endpoint;
 }
