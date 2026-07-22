@@ -8,7 +8,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-import java.util.List;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 import java.util.UUID;
 
 @Service
@@ -17,23 +18,20 @@ public class ClassService {
 
     private final ClassRepository classRepository;
 
-    public List<Class> getAllClasses() {
-        return classRepository.findAll();
-    }
-
     public Class getClassById(UUID id) {
         return classRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Class not found"));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Class not found"));
     }
 
     @Transactional
     public Class createClass(ClassRequest request) {
-        if (classRepository.existsByClassCode(request.getClassCode())) {
-            throw new RuntimeException("Class code already exists");
+        String classCode = request.getClassCode().trim();
+        if (classRepository.existsByClassCode(classCode)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Class code already exists");
         }
         Class clazz = Class.builder()
-                .classCode(request.getClassCode())
-                .name(request.getName())
+                .classCode(classCode)
+                .name(request.getName().trim())
                 .build();
         return classRepository.save(clazz);
     }

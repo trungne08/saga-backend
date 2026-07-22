@@ -2,14 +2,17 @@ package com.saga.be.config;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Profile;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
+import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 
 @Configuration
 @EnableWebSecurity
+@Profile("!local")
 public class SecurityConfig {
 
     @Bean
@@ -19,6 +22,9 @@ public class SecurityConfig {
             .csrf(AbstractHttpConfigurer::disable)
             // Kích hoạt CORS (sẽ tự động dùng cấu hình CorsConfig đã định nghĩa trước đó)
             .cors(Customizer.withDefaults())
+            .sessionManagement(session ->
+                session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+            )
             // Cấu hình phân quyền đường dẫn
             .authorizeHttpRequests(auth -> auth
                 // Bỏ qua xác thực cho các endpoint của Swagger và OpenAPI Docs

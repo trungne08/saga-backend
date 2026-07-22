@@ -8,7 +8,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-import java.util.List;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 import java.util.UUID;
 
 @Service
@@ -17,23 +18,23 @@ public class SemesterService {
 
     private final SemesterRepository semesterRepository;
 
-    public List<Semester> getAllSemesters() {
-        return semesterRepository.findAll();
-    }
-
     public Semester getSemesterById(UUID id) {
         return semesterRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Semester not found"));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Semester not found"));
     }
 
     @Transactional
     public Semester createSemester(SemesterRequest request) {
-        if (semesterRepository.existsByCode(request.getCode())) {
-            throw new RuntimeException("Semester code already exists");
+        String code = request.getCode().trim();
+        if (semesterRepository.existsByCode(code)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Semester code already exists");
+        }
+        if (request.getEndDate().isBefore(request.getStartDate())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Semester end date must not be before start date");
         }
         Semester semester = Semester.builder()
-                .code(request.getCode())
-                .name(request.getName())
+                .code(code)
+                .name(request.getName().trim())
                 .startDate(request.getStartDate())
                 .endDate(request.getEndDate())
                 .build();
