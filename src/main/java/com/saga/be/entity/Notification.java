@@ -3,12 +3,14 @@ package com.saga.be.entity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.JdbcTypeCode;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 import java.util.UUID;
+import java.sql.Types;
 
 @Entity
 @Table(name = "notification")
@@ -19,7 +21,8 @@ import java.util.UUID;
 @Builder
 public class Notification extends BaseEntity {
 
-    @Column(name = "recipient_id")
+    @JdbcTypeCode(Types.CHAR)
+    @Column(name = "recipient_id", columnDefinition = "char(36)")
     private UUID recipientId;
 
     @Column(name = "recipient_role")

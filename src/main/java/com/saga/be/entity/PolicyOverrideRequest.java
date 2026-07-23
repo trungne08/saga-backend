@@ -9,6 +9,7 @@ import jakarta.persistence.FetchType;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.JdbcTypeCode;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -16,6 +17,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 import java.time.LocalDateTime;
 import java.util.UUID;
+import java.sql.Types;
 
 @Entity
 @Table(name = "policy_override_request")
@@ -34,7 +36,12 @@ public class PolicyOverrideRequest extends BaseEntity {
     @JoinColumn(name = "lecturer_id")
     private Lecturer lecturer;
 
-    @Column(name = "target_config_id", nullable = true)
+    @JdbcTypeCode(Types.CHAR)
+    @Column(
+            name = "target_config_id",
+            columnDefinition = "char(36)",
+            nullable = true
+    )
     private UUID targetConfigId;
 
     @Column(name = "type")

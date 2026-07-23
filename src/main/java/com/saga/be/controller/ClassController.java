@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Page;
+import org.springframework.security.access.prepost.PreAuthorize;
 import java.util.UUID;
 
 @RestController
@@ -31,6 +32,7 @@ public class ClassController {
     }
 
     @PostMapping
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Class> createClass(@Valid @RequestBody ClassRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(classService.createClass(request));
     }

@@ -9,12 +9,14 @@ import jakarta.persistence.FetchType;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.JdbcTypeCode;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 import java.util.UUID;
+import java.sql.Types;
 
 @Entity
 @Table(name = "assessment_evidence")
@@ -33,6 +35,7 @@ public class AssessmentEvidence extends BaseEntity {
     @Column(name = "artifact_type")
     private ArtifactType artifactType;
 
-    @Column(name = "artifact_id")
+    @JdbcTypeCode(Types.CHAR)
+    @Column(name = "artifact_id", columnDefinition = "char(36)")
     private UUID artifactId;
 }

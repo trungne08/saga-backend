@@ -7,6 +7,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.JdbcTypeCode;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -14,6 +15,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 import java.time.LocalDateTime;
 import java.util.UUID;
+import java.sql.Types;
 
 @Entity
 @Table(name = "sync_job_log")
@@ -27,7 +29,8 @@ public class SyncJobLog extends BaseEntity {
     @Column(name = "target_system")
     private String targetSystem;
 
-    @Column(name = "target_id")
+    @JdbcTypeCode(Types.CHAR)
+    @Column(name = "target_id", columnDefinition = "char(36)")
     private UUID targetId;
 
     @Enumerated(EnumType.STRING)

@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Page;
+import org.springframework.security.access.prepost.PreAuthorize;
 import java.util.UUID;
 
 @RestController
@@ -31,6 +32,7 @@ public class SemesterController {
     }
 
     @PostMapping
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Semester> createSemester(@Valid @RequestBody SemesterRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(semesterService.createSemester(request));
     }
