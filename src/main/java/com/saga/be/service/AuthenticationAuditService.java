@@ -6,11 +6,18 @@ import com.saga.be.exception.IdentityServiceException;
 import com.saga.be.repository.SystemAuditLogRepository;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 
 @Service
 public class AuthenticationAuditService {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(
+            AuthenticationAuditService.class
+    );
 
     private final SystemAuditLogRepository auditLogRepository;
 
@@ -42,6 +49,35 @@ public class AuthenticationAuditService {
             throw new IdentityServiceException(
                     "The authentication audit service is unavailable",
                     exception
+            );
+        }
+    }
+
+    public void recordStudentCodeConflict(
+            String cognitoSub,
+            UUID localProfileId,
+            String remoteAddress
+    ) {
+        Map<String, Object> safeValues = new LinkedHashMap<>();
+        safeValues.put("reason", "STUDENT_CODE_MISMATCH");
+        if (localProfileId != null) {
+            safeValues.put("localProfileId", localProfileId.toString());
+        }
+
+        SystemAuditLog entry = new SystemAuditLog();
+        entry.setActorId(cognitoSub);
+        entry.setAction("AUTH_STUDENT_CODE_CONFLICT");
+        entry.setTargetEntity("STUDENT");
+        entry.setOldValues(null);
+        entry.setNewValues(safeValues);
+        entry.setIpAddress(remoteAddress);
+
+        try {
+            auditLogRepository.save(entry);
+        } catch (DataAccessException exception) {
+            LOGGER.warn(
+                    "Could not persist student-code conflict audit: {}",
+                    exception.getClass().getSimpleName()
             );
         }
     }

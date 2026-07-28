@@ -5,6 +5,7 @@ import com.saga.be.auth.AuthenticatedProfile;
 import com.saga.be.exception.IdentityConflictException;
 import com.saga.be.exception.IdentityServiceException;
 import com.saga.be.exception.InvalidIdentityException;
+import com.saga.be.exception.StudentCodeConflictException;
 import com.saga.be.service.AuthenticatedProfileService;
 import com.saga.be.service.AuthenticationAuditService;
 import com.saga.be.service.OidcIdentityService;
@@ -83,6 +84,13 @@ public class CognitoAuthenticationSuccessHandler implements AuthenticationSucces
                     profile
             );
             response.sendRedirect(successRedirectUri.toString());
+        } catch (StudentCodeConflictException exception) {
+            auditService.recordStudentCodeConflict(
+                    exception.getCognitoSub(),
+                    exception.getLocalProfileId(),
+                    request.getRemoteAddr()
+            );
+            reject(request, response, HttpStatus.CONFLICT, exception.getMessage());
         } catch (IdentityConflictException exception) {
             reject(request, response, HttpStatus.CONFLICT, exception.getMessage());
         } catch (InvalidIdentityException exception) {

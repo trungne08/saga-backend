@@ -9,6 +9,9 @@ import com.saga.be.entity.Student;
 import com.saga.be.entity.enums.AccountStatus;
 import com.saga.be.exception.IdentityConflictException;
 import com.saga.be.exception.IdentityServiceException;
+import com.saga.be.exception.InvalidIdentityException;
+import com.saga.be.exception.StudentCodeConflictException;
+import com.saga.be.helper.StudentCodeExtractor;
 import com.saga.be.repository.AdminRepository;
 import com.saga.be.repository.LecturerRepository;
 import com.saga.be.repository.StudentRepository;
@@ -28,21 +31,25 @@ public class AuthenticatedProfileService {
     private final AdminRepository adminRepository;
     private final LecturerRepository lecturerRepository;
     private final StudentRepository studentRepository;
+    private final StudentCodeExtractor studentCodeExtractor;
 
     public AuthenticatedProfileService(
             AdminRepository adminRepository,
             LecturerRepository lecturerRepository,
-            StudentRepository studentRepository
+            StudentRepository studentRepository,
+            StudentCodeExtractor studentCodeExtractor
     ) {
         this.adminRepository = adminRepository;
         this.lecturerRepository = lecturerRepository;
         this.studentRepository = studentRepository;
+        this.studentCodeExtractor = studentCodeExtractor;
     }
 
     @Transactional
     public AuthenticatedProfile synchronize(AuthenticatedIdentity identity) {
+        String extractedStudentCode = extractRequiredStudentCode(identity);
         try {
-            return synchronizeInternal(identity);
+            return synchronizeInternal(identity, extractedStudentCode);
         } catch (IdentityConflictException exception) {
             throw exception;
         } catch (DataIntegrityViolationException exception) {
@@ -57,7 +64,20 @@ public class AuthenticatedProfileService {
         }
     }
 
-    private AuthenticatedProfile synchronizeInternal(AuthenticatedIdentity identity) {
+    private String extractRequiredStudentCode(AuthenticatedIdentity identity) {
+        if (identity.role() != ApplicationRole.STUDENT) {
+            return null;
+        }
+        return studentCodeExtractor.extract(identity.email())
+                .orElseThrow(() -> new InvalidIdentityException(
+                        "A STUDENT email must end with a valid student code"
+                ));
+    }
+
+    private AuthenticatedProfile synchronizeInternal(
+            AuthenticatedIdentity identity,
+            String extractedStudentCode
+    ) {
         List<ProfileReference> subjectMatches = findBySubject(identity.cognitoSub());
         requireAtMostOne(subjectMatches, "Cognito subject is linked to multiple profiles");
 
@@ -65,7 +85,7 @@ public class AuthenticatedProfileService {
             ProfileReference match = subjectMatches.get(0);
             requireExpectedRole(match, identity.role());
             requireEmailAvailable(identity.email(), match);
-            return update(match, identity);
+            return update(match, identity, extractedStudentCode);
         }
 
         List<ProfileReference> emailMatches = findByEmail(identity.email());
@@ -82,10 +102,10 @@ public class AuthenticatedProfileService {
                         "Email is already linked to another Cognito identity"
                 );
             }
-            return update(match, identity);
+            return update(match, identity, extractedStudentCode);
         }
 
-        return create(identity);
+        return create(identity, extractedStudentCode);
     }
 
     private List<ProfileReference> findBySubject(String subject) {
@@ -142,12 +162,17 @@ public class AuthenticatedProfileService {
 
     private AuthenticatedProfile update(
             ProfileReference profile,
-            AuthenticatedIdentity identity
+            AuthenticatedIdentity identity,
+            String extractedStudentCode
     ) {
         return switch (profile.role()) {
             case ADMIN -> updateAdmin((Admin) profile.entity(), identity);
             case LECTURER -> updateLecturer((Lecturer) profile.entity(), identity);
-            case STUDENT -> updateStudent((Student) profile.entity(), identity);
+            case STUDENT -> updateStudent(
+                    (Student) profile.entity(),
+                    identity,
+                    extractedStudentCode
+            );
         };
     }
 
@@ -172,8 +197,10 @@ public class AuthenticatedProfileService {
 
     private AuthenticatedProfile updateStudent(
             Student student,
-            AuthenticatedIdentity identity
+            AuthenticatedIdentity identity,
+            String extractedStudentCode
     ) {
+        synchronizeStudentCode(student, identity, extractedStudentCode);
         student.setCognitoSub(identity.cognitoSub());
         student.setEmail(identity.email());
         student.setFullName(identity.fullName());
@@ -184,7 +211,28 @@ public class AuthenticatedProfileService {
         return toProfile(saved);
     }
 
-    private AuthenticatedProfile create(AuthenticatedIdentity identity) {
+    private void synchronizeStudentCode(
+            Student student,
+            AuthenticatedIdentity identity,
+            String extractedStudentCode
+    ) {
+        String storedStudentCode = student.getStudentCode();
+        if (storedStudentCode == null || storedStudentCode.isBlank()) {
+            student.setStudentCode(extractedStudentCode);
+            return;
+        }
+        if (!storedStudentCode.equalsIgnoreCase(extractedStudentCode)) {
+            throw new StudentCodeConflictException(
+                    identity.cognitoSub(),
+                    student.getId()
+            );
+        }
+    }
+
+    private AuthenticatedProfile create(
+            AuthenticatedIdentity identity,
+            String extractedStudentCode
+    ) {
         return switch (identity.role()) {
             case ADMIN -> {
                 Admin admin = Admin.builder()
@@ -207,7 +255,7 @@ public class AuthenticatedProfileService {
                         .cognitoSub(identity.cognitoSub())
                         .email(identity.email())
                         .fullName(identity.fullName())
-                        .studentCode(null)
+                        .studentCode(extractedStudentCode)
                         .accountStatus(AccountStatus.PENDING)
                         .build();
                 yield toProfile(studentRepository.saveAndFlush(student));

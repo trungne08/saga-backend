@@ -2,6 +2,7 @@ package com.saga.be.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 
@@ -44,5 +45,33 @@ class AuthenticationAuditServiceTest {
         assertEquals(profileId.toString(), values.get("localProfileId"));
         assertEquals("STUDENT", values.get("applicationRole"));
         assertEquals("PENDING", values.get("accountStatus"));
+    }
+
+    @Test
+    void savesStudentCodeConflictWithoutEmailOrStudentCodes() {
+        SystemAuditLogRepository repository = mock(SystemAuditLogRepository.class);
+        AuthenticationAuditService service = new AuthenticationAuditService(repository);
+        UUID profileId = UUID.randomUUID();
+
+        service.recordStudentCodeConflict(
+                "cognito-subject",
+                profileId,
+                "127.0.0.1"
+        );
+
+        ArgumentCaptor<SystemAuditLog> captor = ArgumentCaptor.forClass(
+                SystemAuditLog.class
+        );
+        verify(repository).save(captor.capture());
+        SystemAuditLog entry = captor.getValue();
+        Map<?, ?> values = assertInstanceOf(Map.class, entry.getNewValues());
+        assertEquals("cognito-subject", entry.getActorId());
+        assertEquals("AUTH_STUDENT_CODE_CONFLICT", entry.getAction());
+        assertEquals("STUDENT", entry.getTargetEntity());
+        assertEquals("STUDENT_CODE_MISMATCH", values.get("reason"));
+        assertEquals(profileId.toString(), values.get("localProfileId"));
+        assertFalse(values.containsKey("email"));
+        assertFalse(values.containsKey("storedStudentCode"));
+        assertFalse(values.containsKey("extractedStudentCode"));
     }
 }
