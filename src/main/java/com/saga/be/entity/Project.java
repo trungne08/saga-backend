@@ -33,4 +33,7 @@ public class Project extends BaseEntity {
 
     @Column(name = "jira_project_key")
     private String jiraProjectKey;
+
+    @Column(name = "created_by_cognito_sub")
+    private String createdByCognitoSub;
 }

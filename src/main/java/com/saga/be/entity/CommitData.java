@@ -45,6 +45,12 @@ public class CommitData extends BaseEntity {
     @Column(name = "sha_hash")
     private String shaHash;
 
+    @Column(name = "github_commit_id")
+    private String githubCommitId;
+
+    @Column(name = "author_external_id")
+    private String authorExternalId;
+
     @Column(name = "message")
     private String message;
 
@@ -59,4 +65,7 @@ public class CommitData extends BaseEntity {
 
     @Column(name = "files_changed")
     private Integer filesChanged;
+
+    @Column(name = "external_updated_at")
+    private LocalDateTime externalUpdatedAt;
 }

@@ -37,8 +37,20 @@ public class GitIssue extends BaseEntity {
     @JoinColumn(name = "assignee_id")
     private Student assignee;
 
+    @Column(name = "author_external_id")
+    private String authorExternalId;
+
+    @Column(name = "assignee_external_id")
+    private String assigneeExternalId;
+
     @Column(name = "issue_number")
     private Integer issueNumber;
+
+    @Column(name = "github_issue_id")
+    private Long githubIssueId;
+
+    @Column(name = "node_id")
+    private String nodeId;
 
     @Column(name = "title")
     private String title;
@@ -49,4 +61,7 @@ public class GitIssue extends BaseEntity {
 
     @Column(name = "closed_at")
     private LocalDateTime closedAt;
+
+    @Column(name = "external_updated_at")
+    private LocalDateTime externalUpdatedAt;
 }

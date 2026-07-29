@@ -4,5 +4,6 @@ public enum SyncJobStatus {
     PENDING,
     IN_PROGRESS,
     COMPLETED,
+    PARTIAL_FAILURE,
     FAILED
 }

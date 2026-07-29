@@ -3,19 +3,23 @@ package com.saga.be.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import com.saga.be.auth.AuthenticatedProfile;
 import com.saga.be.entity.SystemAuditLog;
 import com.saga.be.entity.enums.AccountStatus;
 import com.saga.be.exception.IdentityConflictException;
+import com.saga.be.exception.IdentityServiceException;
 import com.saga.be.repository.SystemAuditLogRepository;
 import com.saga.be.security.ApplicationRole;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.dao.DataAccessResourceFailureException;
 
 class AuthenticationAuditServiceTest {
 
@@ -103,5 +107,25 @@ class AuthenticationAuditServiceTest {
         );
         assertFalse(values.containsKey("email"));
         assertFalse(values.containsKey("existingCognitoSub"));
+    }
+
+    @Test
+    void requiredAdminOverrideAuditFailsClosedWhenStoreIsUnavailable() {
+        SystemAuditLogRepository repository = mock(SystemAuditLogRepository.class);
+        AuthenticationAuditService service = new AuthenticationAuditService(repository);
+        when(repository.save(org.mockito.ArgumentMatchers.any()))
+                .thenThrow(new DataAccessResourceFailureException("down"));
+
+        assertThrows(
+                IdentityServiceException.class,
+                () -> service.recordRequiredIntegrationEvent(
+                        "admin-sub",
+                        "PROJECT_INTEGRATION_ADMIN_OVERRIDE",
+                        "TEAM",
+                        UUID.randomUUID(),
+                        "AUTHORIZED",
+                        null
+                )
+        );
     }
 }

@@ -29,6 +29,9 @@ public class Sprint extends BaseEntity {
     @Column(name = "name")
     private String name;
 
+    @Column(name = "external_sprint_id")
+    private String externalSprintId;
+
     @Column(name = "start_date")
     private LocalDateTime startDate;
 

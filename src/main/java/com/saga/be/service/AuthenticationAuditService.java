@@ -108,4 +108,81 @@ public class AuthenticationAuditService {
             );
         }
     }
+
+    public void recordIntegrationEvent(
+            String cognitoSub,
+            String action,
+            String targetEntity,
+            UUID targetId,
+            String outcome,
+            String remoteAddress
+    ) {
+        SystemAuditLog entry = integrationEntry(
+                cognitoSub,
+                action,
+                targetEntity,
+                targetId,
+                outcome,
+                remoteAddress
+        );
+        try {
+            auditLogRepository.save(entry);
+        } catch (DataAccessException exception) {
+            LOGGER.warn(
+                    "Could not persist integration audit for action {}: {}",
+                    action,
+                    exception.getClass().getSimpleName()
+            );
+        }
+    }
+
+    public void recordRequiredIntegrationEvent(
+            String cognitoSub,
+            String action,
+            String targetEntity,
+            UUID targetId,
+            String outcome,
+            String remoteAddress
+    ) {
+        SystemAuditLog entry = integrationEntry(
+                cognitoSub,
+                action,
+                targetEntity,
+                targetId,
+                outcome,
+                remoteAddress
+        );
+        try {
+            auditLogRepository.save(entry);
+        } catch (DataAccessException exception) {
+            throw new IdentityServiceException(
+                    "The required integration audit service is unavailable",
+                    exception
+            );
+        }
+    }
+
+    private SystemAuditLog integrationEntry(
+            String cognitoSub,
+            String action,
+            String targetEntity,
+            UUID targetId,
+            String outcome,
+            String remoteAddress
+    ) {
+        Map<String, Object> safeValues = new LinkedHashMap<>();
+        safeValues.put("outcome", outcome);
+        if (targetId != null) {
+            safeValues.put("localTargetId", targetId.toString());
+        }
+
+        SystemAuditLog entry = new SystemAuditLog();
+        entry.setActorId(cognitoSub);
+        entry.setAction(action);
+        entry.setTargetEntity(targetEntity);
+        entry.setOldValues(null);
+        entry.setNewValues(safeValues);
+        entry.setIpAddress(remoteAddress);
+        return entry;
+    }
 }

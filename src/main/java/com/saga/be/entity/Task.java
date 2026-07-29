@@ -43,12 +43,21 @@ public class Task extends BaseEntity {
     @JoinColumn(name = "reporter_id")
     private Student reporter;
 
+    @Column(name = "assignee_external_id")
+    private String assigneeExternalId;
+
+    @Column(name = "reporter_external_id")
+    private String reporterExternalId;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "blocks_task_id")
     private Task blocksTask;
 
     @Column(name = "external_key")
     private String externalKey;
+
+    @Column(name = "external_id")
+    private String externalId;
 
     @Column(name = "title")
     private String title;
@@ -70,4 +79,13 @@ public class Task extends BaseEntity {
 
     @Column(name = "due_date")
     private LocalDateTime dueDate;
+
+    @Column(name = "external_updated_at")
+    private LocalDateTime externalUpdatedAt;
+
+    @Column(name = "resolved_at")
+    private LocalDateTime resolvedAt;
+
+    @Column(name = "resolution")
+    private String resolution;
 }

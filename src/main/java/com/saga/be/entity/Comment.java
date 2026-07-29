@@ -50,6 +50,15 @@ public class Comment extends BaseEntity {
     @Column(name = "source_system")
     private String sourceSystem;
 
+    @Column(name = "external_comment_id")
+    private String externalCommentId;
+
+    @Column(name = "author_external_id")
+    private String authorExternalId;
+
+    @Column(name = "external_updated_at")
+    private java.time.LocalDateTime externalUpdatedAt;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "target_type")
     private TargetType targetType;

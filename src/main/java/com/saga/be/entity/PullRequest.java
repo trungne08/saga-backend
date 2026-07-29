@@ -33,6 +33,9 @@ public class PullRequest extends BaseEntity {
     @JoinColumn(name = "author_id")
     private Student author;
 
+    @Column(name = "author_external_id")
+    private String authorExternalId;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "task_id", nullable = true)
     private Task task;
@@ -43,6 +46,15 @@ public class PullRequest extends BaseEntity {
 
     @Column(name = "title")
     private String title;
+
+    @Column(name = "github_pull_request_id")
+    private Long githubPullRequestId;
+
+    @Column(name = "node_id")
+    private String nodeId;
+
+    @Column(name = "pull_number")
+    private Integer pullNumber;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status")
@@ -56,4 +68,7 @@ public class PullRequest extends BaseEntity {
 
     @Column(name = "comment_count")
     private Integer commentCount;
+
+    @Column(name = "external_updated_at")
+    private LocalDateTime externalUpdatedAt;
 }

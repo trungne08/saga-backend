@@ -39,4 +39,13 @@ public class PrReview extends BaseEntity {
 
     @Column(name = "timestamp")
     private LocalDateTime timestamp;
+
+    @Column(name = "github_review_id")
+    private Long githubReviewId;
+
+    @Column(name = "reviewer_external_id")
+    private String reviewerExternalId;
+
+    @Column(name = "external_updated_at")
+    private LocalDateTime externalUpdatedAt;
 }

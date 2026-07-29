@@ -49,4 +49,16 @@ public class SyncJobLog extends BaseEntity {
 
     @Column(name = "completed_at")
     private LocalDateTime completedAt;
+
+    @Column(name = "items_processed")
+    private Integer itemsProcessed;
+
+    @Column(name = "items_failed")
+    private Integer itemsFailed;
+
+    @Column(name = "cursor_before")
+    private LocalDateTime cursorBefore;
+
+    @Column(name = "cursor_after")
+    private LocalDateTime cursorAfter;
 }

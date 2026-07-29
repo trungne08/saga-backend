@@ -73,6 +73,7 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf
                         .csrfTokenRepository(csrfTokenRepository)
                         .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
+                        .ignoringRequestMatchers("/api/webhooks/**")
                 )
                 .securityContext(context -> context
                         .securityContextRepository(securityContextRepository)
@@ -93,6 +94,11 @@ public class SecurityConfig {
                             "/api/auth/login",
                             "/actuator/health",
                             "/actuator/health/**"
+                    ).permitAll();
+                    authorize.requestMatchers(
+                            HttpMethod.POST,
+                            "/api/webhooks/github",
+                            "/api/webhooks/jira"
                     ).permitAll();
                     if (swaggerEnabled) {
                         authorize.requestMatchers(

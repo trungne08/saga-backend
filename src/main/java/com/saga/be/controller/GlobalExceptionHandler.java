@@ -3,6 +3,7 @@ package com.saga.be.controller;
 import com.saga.be.dto.response.ApiErrorResponse;
 import com.saga.be.exception.IdentityConflictException;
 import com.saga.be.exception.IdentityServiceException;
+import com.saga.be.exception.IntegrationException;
 import com.saga.be.exception.InvalidIdentityException;
 import com.saga.be.exception.UnauthenticatedRequestException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -44,6 +45,21 @@ public class GlobalExceptionHandler {
             HttpServletRequest request
     ) {
         return response(HttpStatus.BAD_GATEWAY, exception.getMessage(), request);
+    }
+
+    @ExceptionHandler(IntegrationException.class)
+    public ResponseEntity<ApiErrorResponse> integrationFailure(
+            IntegrationException exception,
+            HttpServletRequest request
+    ) {
+        return ResponseEntity.status(exception.getStatus()).body(
+                ApiErrorResponse.of(
+                exception.getStatus().value(),
+                exception.getCode(),
+                exception.getMessage(),
+                request.getRequestURI()
+            )
+        );
     }
 
     private ResponseEntity<ApiErrorResponse> response(
