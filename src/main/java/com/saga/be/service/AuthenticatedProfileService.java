@@ -99,7 +99,9 @@ public class AuthenticatedProfileService {
                     && !existingSubject.isBlank()
                     && !existingSubject.equals(identity.cognitoSub())) {
                 throw new IdentityConflictException(
-                        "Email is already linked to another Cognito identity"
+                        "Email is already linked to another Cognito identity",
+                        IdentityConflictException.Reason
+                                .EMAIL_LINKED_TO_DIFFERENT_COGNITO_SUB
                 );
             }
             return update(match, identity, extractedStudentCode);

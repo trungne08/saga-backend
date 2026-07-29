@@ -13,6 +13,7 @@ import static org.mockito.Mockito.when;
 import com.saga.be.auth.AuthenticatedIdentity;
 import com.saga.be.auth.AuthenticatedProfile;
 import com.saga.be.entity.enums.AccountStatus;
+import com.saga.be.exception.IdentityConflictException;
 import com.saga.be.exception.StudentCodeConflictException;
 import com.saga.be.service.AuthenticatedProfileService;
 import com.saga.be.service.AuthenticationAuditService;
@@ -218,6 +219,68 @@ class CognitoAuthenticationSuccessHandlerTest {
         verify(auditService).recordStudentCodeConflict(
                 identity.cognitoSub(),
                 profileId,
+                "127.0.0.1"
+        );
+        verify(errorWriter).write(
+                request,
+                response,
+                409,
+                "Conflict",
+                conflict.getMessage()
+        );
+    }
+
+    @Test
+    void auditsIdentityConflictAndReturns409() throws Exception {
+        OidcIdentityService identityService = mock(OidcIdentityService.class);
+        AuthenticatedProfileService profileService = mock(
+                AuthenticatedProfileService.class
+        );
+        AuthenticationAuditService auditService = mock(
+                AuthenticationAuditService.class
+        );
+        SecurityErrorResponseWriter errorWriter = mock(
+                SecurityErrorResponseWriter.class
+        );
+        CognitoAuthenticationSuccessHandler handler =
+                new CognitoAuthenticationSuccessHandler(
+                        identityService,
+                        profileService,
+                        auditService,
+                        new HttpSessionSecurityContextRepository(),
+                        errorWriter,
+                        "http://localhost:8080/api/auth/me"
+                );
+
+        OidcUser oidcUser = mock(OidcUser.class);
+        Authentication authentication = new OAuth2AuthenticationToken(
+                oidcUser,
+                List.of(),
+                "cognito"
+        );
+        AuthenticatedIdentity identity = new AuthenticatedIdentity(
+                "new-cognito-subject",
+                "lecturer@fpt.edu.vn",
+                "Lecturer User",
+                ApplicationRole.LECTURER
+        );
+        IdentityConflictException conflict = new IdentityConflictException(
+                "Email is already linked to another Cognito identity",
+                IdentityConflictException.Reason
+                        .EMAIL_LINKED_TO_DIFFERENT_COGNITO_SUB
+        );
+        when(identityService.extract(oidcUser)).thenReturn(identity);
+        when(profileService.synchronize(identity)).thenThrow(conflict);
+
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setRemoteAddr("127.0.0.1");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        handler.onAuthenticationSuccess(request, response, authentication);
+
+        verify(auditService).recordIdentityConflict(
+                identity.cognitoSub(),
+                conflict.getReason(),
                 "127.0.0.1"
         );
         verify(errorWriter).write(

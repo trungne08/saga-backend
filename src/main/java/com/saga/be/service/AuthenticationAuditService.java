@@ -2,6 +2,7 @@ package com.saga.be.service;
 
 import com.saga.be.auth.AuthenticatedProfile;
 import com.saga.be.entity.SystemAuditLog;
+import com.saga.be.exception.IdentityConflictException;
 import com.saga.be.exception.IdentityServiceException;
 import com.saga.be.repository.SystemAuditLogRepository;
 import java.util.LinkedHashMap;
@@ -77,6 +78,32 @@ public class AuthenticationAuditService {
         } catch (DataAccessException exception) {
             LOGGER.warn(
                     "Could not persist student-code conflict audit: {}",
+                    exception.getClass().getSimpleName()
+            );
+        }
+    }
+
+    public void recordIdentityConflict(
+            String cognitoSub,
+            IdentityConflictException.Reason reason,
+            String remoteAddress
+    ) {
+        Map<String, Object> safeValues = new LinkedHashMap<>();
+        safeValues.put("reason", reason.name());
+
+        SystemAuditLog entry = new SystemAuditLog();
+        entry.setActorId(cognitoSub);
+        entry.setAction("AUTH_IDENTITY_CONFLICT");
+        entry.setTargetEntity("IDENTITY");
+        entry.setOldValues(null);
+        entry.setNewValues(safeValues);
+        entry.setIpAddress(remoteAddress);
+
+        try {
+            auditLogRepository.save(entry);
+        } catch (DataAccessException exception) {
+            LOGGER.warn(
+                    "Could not persist identity-conflict audit: {}",
                     exception.getClass().getSimpleName()
             );
         }

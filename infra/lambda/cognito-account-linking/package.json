@@ -1,0 +1,17 @@
+{
+  "name": "saga-cognito-account-linking",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SAGA Cognito Pre Sign-up Lambda for verified Google-to-native account linking",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test",
+    "report:existing": "node scripts/report-existing-google-users.mjs"
+  },
+  "dependencies": {
+    "@aws-sdk/client-cognito-identity-provider": "3.1096.0"
+  }
+}

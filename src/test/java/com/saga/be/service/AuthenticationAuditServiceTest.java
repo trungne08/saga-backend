@@ -9,6 +9,7 @@ import static org.mockito.Mockito.verify;
 import com.saga.be.auth.AuthenticatedProfile;
 import com.saga.be.entity.SystemAuditLog;
 import com.saga.be.entity.enums.AccountStatus;
+import com.saga.be.exception.IdentityConflictException;
 import com.saga.be.repository.SystemAuditLogRepository;
 import com.saga.be.security.ApplicationRole;
 import java.util.Map;
@@ -73,5 +74,34 @@ class AuthenticationAuditServiceTest {
         assertFalse(values.containsKey("email"));
         assertFalse(values.containsKey("storedStudentCode"));
         assertFalse(values.containsKey("extractedStudentCode"));
+    }
+
+    @Test
+    void savesIdentityConflictWithoutEmailOrOtherCognitoSubjects() {
+        SystemAuditLogRepository repository = mock(SystemAuditLogRepository.class);
+        AuthenticationAuditService service = new AuthenticationAuditService(repository);
+
+        service.recordIdentityConflict(
+                "new-cognito-subject",
+                IdentityConflictException.Reason
+                        .EMAIL_LINKED_TO_DIFFERENT_COGNITO_SUB,
+                "127.0.0.1"
+        );
+
+        ArgumentCaptor<SystemAuditLog> captor = ArgumentCaptor.forClass(
+                SystemAuditLog.class
+        );
+        verify(repository).save(captor.capture());
+        SystemAuditLog entry = captor.getValue();
+        Map<?, ?> values = assertInstanceOf(Map.class, entry.getNewValues());
+        assertEquals("new-cognito-subject", entry.getActorId());
+        assertEquals("AUTH_IDENTITY_CONFLICT", entry.getAction());
+        assertEquals("IDENTITY", entry.getTargetEntity());
+        assertEquals(
+                "EMAIL_LINKED_TO_DIFFERENT_COGNITO_SUB",
+                values.get("reason")
+        );
+        assertFalse(values.containsKey("email"));
+        assertFalse(values.containsKey("existingCognitoSub"));
     }
 }

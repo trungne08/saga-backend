@@ -1,0 +1,15 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "LinkVerifiedGoogleIdentityToSagaNativeUser",
+      "Effect": "Allow",
+      "Action": [
+        "cognito-idp:ListUsers",
+        "cognito-idp:AdminGetUser",
+        "cognito-idp:AdminLinkProviderForUser"
+      ],
+      "Resource": "arn:aws:cognito-idp:REGION:ACCOUNT_ID:userpool/USER_POOL_ID"
+    }
+  ]
+}

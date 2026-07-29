@@ -305,6 +305,11 @@ class AuthenticatedProfileServiceTest {
                 "Email is already linked to another Cognito identity",
                 exception.getMessage()
         );
+        assertEquals(
+                IdentityConflictException.Reason
+                        .EMAIL_LINKED_TO_DIFFERENT_COGNITO_SUB,
+                exception.getReason()
+        );
         verify(lecturerRepository, never()).saveAndFlush(any(Lecturer.class));
     }
 

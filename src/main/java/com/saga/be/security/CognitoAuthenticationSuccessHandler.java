@@ -72,9 +72,10 @@ public class CognitoAuthenticationSuccessHandler implements AuthenticationSucces
             HttpServletResponse response,
             Authentication authentication
     ) throws IOException, ServletException {
+        AuthenticatedIdentity identity = null;
         try {
             OidcUser oidcUser = requireOidcUser(authentication);
-            AuthenticatedIdentity identity = identityService.extract(oidcUser);
+            identity = identityService.extract(oidcUser);
             AuthenticatedProfile profile = profileService.synchronize(identity);
             auditService.recordSuccessfulLogin(profile, request.getRemoteAddr());
             replaceWithTokenFreeSessionAuthentication(
@@ -92,6 +93,11 @@ public class CognitoAuthenticationSuccessHandler implements AuthenticationSucces
             );
             reject(request, response, HttpStatus.CONFLICT, exception.getMessage());
         } catch (IdentityConflictException exception) {
+            auditService.recordIdentityConflict(
+                    identity == null ? null : identity.cognitoSub(),
+                    exception.getReason(),
+                    request.getRemoteAddr()
+            );
             reject(request, response, HttpStatus.CONFLICT, exception.getMessage());
         } catch (InvalidIdentityException exception) {
             reject(
