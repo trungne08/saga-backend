@@ -65,6 +65,12 @@ public class IntegrationPublicUrlValidator {
         if (jiraProperties.enabled()) {
             requireConfigured(jiraProperties.clientId(), "JIRA_CLIENT_ID");
             requireConfigured(jiraProperties.clientSecret(), "JIRA_CLIENT_SECRET");
+            requireConfigured(
+                    jiraProperties.authorizationUrl(),
+                    "JIRA_AUTHORIZATION_URL"
+            );
+            requireConfigured(jiraProperties.tokenUrl(), "JIRA_TOKEN_URL");
+            requireConfigured(jiraProperties.apiBaseUrl(), "JIRA_API_BASE_URL");
             requireConfigured(jiraProperties.scopes(), "JIRA_SCOPES");
             requireDerived(
                     "JIRA_CALLBACK_URL",
@@ -93,6 +99,14 @@ public class IntegrationPublicUrlValidator {
                     "GITHUB_WEBHOOK_SECRET"
             );
             requireConfigured(gitHubProperties.appSlug(), "GITHUB_APP_SLUG");
+            requireConfigured(
+                    gitHubProperties.apiBaseUrl(),
+                    "GITHUB_API_BASE_URL"
+            );
+            requireConfigured(
+                    gitHubProperties.webBaseUrl(),
+                    "GITHUB_WEB_BASE_URL"
+            );
             requireDerived(
                     "GITHUB_PERSONAL_CALLBACK_URL",
                     gitHubProperties.personalCallbackUrl(),
@@ -155,6 +169,7 @@ public class IntegrationPublicUrlValidator {
         return normalized.equals("value")
                 || normalized.equals("changeme")
                 || normalized.equals("example-secret")
+                || (normalized.startsWith("<") && normalized.endsWith(">"))
                 || normalized.contains("${{")
                 || normalized.contains("{{");
     }

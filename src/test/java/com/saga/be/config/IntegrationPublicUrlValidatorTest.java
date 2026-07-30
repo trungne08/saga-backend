@@ -127,6 +127,33 @@ class IntegrationPublicUrlValidatorTest {
         ).validate());
     }
 
+    @Test
+    void enabledProvidersRequireEnvironmentSuppliedProviderEndpoints() {
+        JiraIntegrationProperties jiraWithoutApiUrl =
+                new JiraIntegrationProperties(
+                        true,
+                        "jira-client",
+                        "jira-secret",
+                        "https://auth.atlassian.example/authorize",
+                        "https://auth.atlassian.example/token",
+                        "",
+                        "https://saga.example/api/integrations/jira/callback",
+                        "https://saga.example/api/webhooks/jira",
+                        "read:jira-work"
+                );
+        GitHubIntegrationProperties github = github(false, "", "");
+
+        assertThrows(IllegalStateException.class, () ->
+                new IntegrationPublicUrlValidator(
+                        "https://saga.example",
+                        jiraWithoutApiUrl,
+                        github,
+                        new IntegrationUrlResolver(jiraWithoutApiUrl, github, ""),
+                        new MockEnvironment()
+                ).validate()
+        );
+    }
+
     private IntegrationPublicUrlValidator validator(
             String publicBaseUrl,
             String jiraCallbackUrl
@@ -188,4 +215,5 @@ class IntegrationPublicUrlValidatorTest {
                 enabled, "", "", "", "", "", "", "", "", "", "", "", ""
         );
     }
+
 }
