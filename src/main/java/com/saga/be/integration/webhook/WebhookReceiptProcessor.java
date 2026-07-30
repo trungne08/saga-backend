@@ -5,6 +5,7 @@ import tools.jackson.databind.ObjectMapper;
 import com.saga.be.entity.GitHubInstallation;
 import com.saga.be.entity.GitRepo;
 import com.saga.be.entity.WebhookReceipt;
+import com.saga.be.config.IntegrationAvailability;
 import com.saga.be.entity.enums.GitHubInstallationStatus;
 import com.saga.be.entity.enums.IntegrationProvider;
 import com.saga.be.entity.enums.IntegrationStatus;
@@ -35,6 +36,7 @@ public class WebhookReceiptProcessor {
     private final IntegrationSecretCipher cipher;
     private final ObjectMapper objectMapper;
     private final AutomaticSyncDispatcher dispatcher;
+    private final IntegrationAvailability availability;
 
     public WebhookReceiptProcessor(
             WebhookReceiptRepository receiptRepository,
@@ -42,7 +44,8 @@ public class WebhookReceiptProcessor {
             GitRepoRepository gitRepoRepository,
             IntegrationSecretCipher cipher,
             ObjectMapper objectMapper,
-            AutomaticSyncDispatcher dispatcher
+            AutomaticSyncDispatcher dispatcher,
+            IntegrationAvailability availability
     ) {
         this.receiptRepository = receiptRepository;
         this.installationRepository = installationRepository;
@@ -50,16 +53,23 @@ public class WebhookReceiptProcessor {
         this.cipher = cipher;
         this.objectMapper = objectMapper;
         this.dispatcher = dispatcher;
+        this.availability = availability;
     }
 
     @Async
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onReceipt(WebhookReceiptCreated event) {
+        if (!availability.jiraEnabled() && !availability.gitHubEnabled()) {
+            return;
+        }
         process(event.receiptId());
     }
 
     @Scheduled(fixedDelayString = "60000")
     public void retryIncomplete() {
+        if (!availability.jiraEnabled() && !availability.gitHubEnabled()) {
+            return;
+        }
         for (WebhookReceipt receipt : receiptRepository
                 .findTop100ByReceiptStatusInOrderByCreatedAtAsc(List.of(
                         WebhookReceiptStatus.RECEIVED,
@@ -93,6 +103,10 @@ public class WebhookReceiptProcessor {
             receipt == null
             || receipt.getReceiptStatus() == WebhookReceiptStatus.COMPLETED
             || receipt.getReceiptStatus() == WebhookReceiptStatus.PROCESSING
+            || (receipt.getProvider() == IntegrationProvider.JIRA
+                    && !availability.jiraEnabled())
+            || (receipt.getProvider() == IntegrationProvider.GITHUB
+                    && !availability.gitHubEnabled())
         ) {
             return;
         }

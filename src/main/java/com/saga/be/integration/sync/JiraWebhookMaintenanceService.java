@@ -1,6 +1,6 @@
 package com.saga.be.integration.sync;
 
-import com.saga.be.config.JiraIntegrationProperties;
+import com.saga.be.config.IntegrationUrlResolver;
 import com.saga.be.entity.JiraBoard;
 import com.saga.be.entity.enums.IntegrationStatus;
 import com.saga.be.integration.project.JiraCredentialService;
@@ -23,19 +23,19 @@ public class JiraWebhookMaintenanceService {
     private final JiraBoardRepository boardRepository;
     private final JiraCredentialService credentialService;
     private final JiraProviderClient jiraClient;
-    private final JiraIntegrationProperties properties;
+    private final IntegrationUrlResolver urlResolver;
     private final SecureRandom random = new SecureRandom();
 
     public JiraWebhookMaintenanceService(
             JiraBoardRepository boardRepository,
             JiraCredentialService credentialService,
             JiraProviderClient jiraClient,
-            JiraIntegrationProperties properties
+            IntegrationUrlResolver urlResolver
     ) {
         this.boardRepository = boardRepository;
         this.credentialService = credentialService;
         this.jiraClient = jiraClient;
-        this.properties = properties;
+        this.urlResolver = urlResolver;
     }
 
     public void refresh(UUID boardId) {
@@ -75,7 +75,7 @@ public class JiraWebhookMaintenanceService {
     }
 
     private URI callback(String secret) {
-        return UriComponentsBuilder.fromUriString(properties.webhookPublicUrl())
+        return UriComponentsBuilder.fromUriString(urlResolver.jiraWebhookPublicUrl())
                 .queryParam("token", secret)
                 .build()
                 .encode()

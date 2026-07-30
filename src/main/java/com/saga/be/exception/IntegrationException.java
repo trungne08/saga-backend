@@ -55,4 +55,12 @@ public class IntegrationException extends RuntimeException {
                 "The integration provider is temporarily unavailable"
         );
     }
+
+    public static IntegrationException notConfigured(String provider) {
+        return new IntegrationException(
+                HttpStatus.SERVICE_UNAVAILABLE,
+                "INTEGRATION_NOT_CONFIGURED",
+                provider + " integration is not configured"
+        );
+    }
 }

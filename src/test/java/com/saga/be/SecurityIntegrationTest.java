@@ -77,6 +77,34 @@ class SecurityIntegrationTest {
     }
 
     @Test
+    void disabledIntegrationEndpointsReturnSafeErrorsWhileCognitoApisWork()
+            throws Exception {
+        Authentication student = authenticationFor(ApplicationRole.STUDENT);
+
+        mockMvc.perform(get("/api/me/integrations/jira/connect")
+                        .with(authentication(student)))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.error")
+                        .value("INTEGRATION_NOT_CONFIGURED"));
+
+        mockMvc.perform(get("/api/me/integrations/github/connect")
+                        .with(authentication(student)))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.error")
+                        .value("INTEGRATION_NOT_CONFIGURED"));
+
+        mockMvc.perform(post("/api/webhooks/github")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.error")
+                        .value("INTEGRATION_NOT_CONFIGURED"));
+
+        mockMvc.perform(get("/api/auth/login"))
+                .andExpect(status().isFound());
+    }
+
+    @Test
     void oauthAuthorizedClientStorageIsDeliberatelyDisabled() {
         Map<String, OAuth2AuthorizedClientRepository> repositories =
                 applicationContext.getBeansOfType(OAuth2AuthorizedClientRepository.class);

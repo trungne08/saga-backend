@@ -7,6 +7,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.saga.be.config.IntegrationAvailability;
 import com.saga.be.entity.WebhookReceipt;
 import com.saga.be.entity.enums.IntegrationProvider;
 import com.saga.be.entity.enums.WebhookReceiptStatus;
@@ -28,6 +29,7 @@ class WebhookReceiptProcessorTest {
     private WebhookReceiptRepository receiptRepository;
     private IntegrationSecretCipher cipher;
     private AutomaticSyncDispatcher dispatcher;
+    private IntegrationAvailability availability;
     private WebhookReceiptProcessor processor;
 
     @BeforeEach
@@ -35,13 +37,17 @@ class WebhookReceiptProcessorTest {
         receiptRepository = mock(WebhookReceiptRepository.class);
         cipher = mock(IntegrationSecretCipher.class);
         dispatcher = mock(AutomaticSyncDispatcher.class);
+        availability = mock(IntegrationAvailability.class);
+        when(availability.jiraEnabled()).thenReturn(true);
+        when(availability.gitHubEnabled()).thenReturn(true);
         processor = new WebhookReceiptProcessor(
                 receiptRepository,
                 mock(GitHubInstallationRepository.class),
                 mock(GitRepoRepository.class),
                 cipher,
                 JsonMapper.builder().build(),
-                dispatcher
+                dispatcher,
+                availability
         );
         when(receiptRepository.saveAndFlush(any(WebhookReceipt.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));

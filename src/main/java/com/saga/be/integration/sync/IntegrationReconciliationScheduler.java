@@ -1,6 +1,7 @@
 package com.saga.be.integration.sync;
 
 import com.saga.be.config.IntegrationProperties;
+import com.saga.be.config.IntegrationAvailability;
 import com.saga.be.entity.GitHubInstallation;
 import com.saga.be.entity.GitRepo;
 import com.saga.be.entity.JiraBoard;
@@ -23,6 +24,7 @@ import org.springframework.stereotype.Component;
 public class IntegrationReconciliationScheduler {
 
     private final IntegrationProperties properties;
+    private final IntegrationAvailability availability;
     private final JiraBoardRepository jiraBoardRepository;
     private final GitRepoRepository gitRepoRepository;
     private final GitHubInstallationRepository installationRepository;
@@ -32,6 +34,7 @@ public class IntegrationReconciliationScheduler {
 
     public IntegrationReconciliationScheduler(
             IntegrationProperties properties,
+            IntegrationAvailability availability,
             JiraBoardRepository jiraBoardRepository,
             GitRepoRepository gitRepoRepository,
             GitHubInstallationRepository installationRepository,
@@ -40,6 +43,7 @@ public class IntegrationReconciliationScheduler {
             AutomaticSyncDispatcher dispatcher
     ) {
         this.properties = properties;
+        this.availability = availability;
         this.jiraBoardRepository = jiraBoardRepository;
         this.gitRepoRepository = gitRepoRepository;
         this.installationRepository = installationRepository;
@@ -61,21 +65,26 @@ public class IntegrationReconciliationScheduler {
                 IntegrationStatus.DEGRADED,
                 IntegrationStatus.BACKFILLING
         );
-        for (JiraBoard board : jiraBoardRepository.findByConnectionStatusIn(managed)) {
-            if (
-                board.getWebhookExpiresAt() == null
-                || board.getWebhookExpiresAt().isBefore(
-                        LocalDateTime.now().plusDays(3)
-                )
-            ) {
-                webhookMaintenanceService.refresh(board.getId());
+        if (availability.jiraEnabled()) {
+            for (JiraBoard board : jiraBoardRepository
+                    .findByConnectionStatusIn(managed)) {
+                if (
+                    board.getWebhookExpiresAt() == null
+                    || board.getWebhookExpiresAt().isBefore(
+                            LocalDateTime.now().plusDays(3)
+                    )
+                ) {
+                    webhookMaintenanceService.refresh(board.getId());
+                }
+                dispatcher.reconcileJira(board.getId());
             }
-            dispatcher.reconcileJira(board.getId());
         }
 
-        for (GitHubInstallation installation : installationRepository
-                .findByInstallationStatus(GitHubInstallationStatus.ACTIVE)) {
-            verifyInstallation(installation);
+        if (availability.gitHubEnabled()) {
+            for (GitHubInstallation installation : installationRepository
+                    .findByInstallationStatus(GitHubInstallationStatus.ACTIVE)) {
+                verifyInstallation(installation);
+            }
         }
     }
 

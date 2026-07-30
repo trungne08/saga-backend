@@ -24,12 +24,19 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.util.UriComponentsBuilder;
 
 @Component
+@ConditionalOnProperty(
+        prefix = "app.integrations.jira",
+        name = "enabled",
+        havingValue = "true",
+        matchIfMissing = true
+)
 public class JiraProviderClientImpl implements JiraProviderClient {
 
     private static final int MAX_GET_ATTEMPTS = 3;

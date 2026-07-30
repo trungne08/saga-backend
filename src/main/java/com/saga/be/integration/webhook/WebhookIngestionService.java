@@ -3,6 +3,7 @@ package com.saga.be.integration.webhook;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import com.saga.be.dto.response.WebhookAcceptedResponse;
+import com.saga.be.config.IntegrationAvailability;
 import com.saga.be.entity.GitRepo;
 import com.saga.be.entity.JiraBoard;
 import com.saga.be.entity.WebhookReceipt;
@@ -46,6 +47,7 @@ public class WebhookIngestionService {
     private final IntegrationSecretCipher cipher;
     private final ApplicationEventPublisher eventPublisher;
     private final AuthenticationAuditService auditService;
+    private final IntegrationAvailability availability;
 
     public WebhookIngestionService(
             GitHubWebhookSignatureVerifier gitHubVerifier,
@@ -55,7 +57,8 @@ public class WebhookIngestionService {
             WebhookReceiptRepository receiptRepository,
             IntegrationSecretCipher cipher,
             ApplicationEventPublisher eventPublisher,
-            AuthenticationAuditService auditService
+            AuthenticationAuditService auditService,
+            IntegrationAvailability availability
     ) {
         this.gitHubVerifier = gitHubVerifier;
         this.jiraAuthenticator = jiraAuthenticator;
@@ -65,6 +68,7 @@ public class WebhookIngestionService {
         this.cipher = cipher;
         this.eventPublisher = eventPublisher;
         this.auditService = auditService;
+        this.availability = availability;
     }
 
     @Transactional
@@ -76,9 +80,15 @@ public class WebhookIngestionService {
             String remoteAddress
     ) {
         try {
+            availability.requireGitHub();
             gitHubVerifier.verify(payload, signature);
             requireHeader(delivery, "GITHUB_DELIVERY_INVALID");
             requireHeader(event, "GITHUB_EVENT_INVALID");
+            if ("ping".equals(event)) {
+                // GitHub's endpoint verification event is intentionally not durable work.
+                // It has no installation/repository requirement and must not start sync.
+                return new WebhookAcceptedResponse("PING");
+            }
             if (!GITHUB_EVENTS.contains(event)) {
                 throw IntegrationException.invalid(
                         "GITHUB_EVENT_UNSUPPORTED",
@@ -116,6 +126,7 @@ public class WebhookIngestionService {
             String remoteAddress
     ) {
         try {
+            availability.requireJira();
             JiraBoard board = jiraAuthenticator.authenticate(
                     authorizationHeader,
                     token

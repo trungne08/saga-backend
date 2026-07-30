@@ -64,11 +64,13 @@ class GitHubWebhookSignatureVerifierTest {
     private GitHubWebhookSignatureVerifier verifier(String secret) {
         return new GitHubWebhookSignatureVerifier(
                 new GitHubIntegrationProperties(
+                        true,
                         null,
                         null,
                         null,
                         null,
                         secret,
+                        null,
                         null,
                         null,
                         null,

@@ -2,6 +2,7 @@ package com.saga.be.controller;
 
 import com.saga.be.dto.response.IdentityConnectionResponse;
 import com.saga.be.dto.response.PersonalIntegrationsResponse;
+import com.saga.be.config.IntegrationAvailability;
 import com.saga.be.entity.enums.IntegrationProvider;
 import com.saga.be.integration.identity.PersonalIntegrationService;
 import com.saga.be.security.SagaPrincipal;
@@ -22,11 +23,14 @@ import org.springframework.web.bind.annotation.RestController;
 public class PersonalIntegrationController {
 
     private final PersonalIntegrationService integrationService;
+    private final IntegrationAvailability availability;
 
     public PersonalIntegrationController(
-            PersonalIntegrationService integrationService
+            PersonalIntegrationService integrationService,
+            IntegrationAvailability availability
     ) {
         this.integrationService = integrationService;
+        this.availability = availability;
     }
 
     @GetMapping
@@ -41,6 +45,7 @@ public class PersonalIntegrationController {
             @AuthenticationPrincipal SagaPrincipal principal,
             HttpSession session
     ) {
+        availability.requireJira();
         return redirect(integrationService.beginJira(principal, session));
     }
 
@@ -62,6 +67,7 @@ public class PersonalIntegrationController {
             @AuthenticationPrincipal SagaPrincipal principal,
             HttpSession session
     ) {
+        availability.requireGitHub();
         return redirect(integrationService.beginGitHub(principal, session));
     }
 

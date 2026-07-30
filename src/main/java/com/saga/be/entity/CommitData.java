@@ -6,11 +6,13 @@ import jakarta.persistence.FetchType;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import java.sql.Types;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.JdbcTypeCode;
 import java.time.LocalDateTime;
 
 @Entity
@@ -51,7 +53,8 @@ public class CommitData extends BaseEntity {
     @Column(name = "author_external_id")
     private String authorExternalId;
 
-    @Column(name = "message")
+    @JdbcTypeCode(Types.LONGVARCHAR)
+    @Column(name = "message", columnDefinition = "MEDIUMTEXT")
     private String message;
 
     @Column(name = "timestamp")

@@ -1,6 +1,7 @@
 package com.saga.be.controller;
 
 import com.saga.be.dto.response.GitHubInstallationResponse;
+import com.saga.be.config.IntegrationAvailability;
 import com.saga.be.integration.project.ProjectIntegrationService;
 import com.saga.be.security.SagaPrincipal;
 import jakarta.servlet.http.HttpSession;
@@ -16,11 +17,14 @@ import org.springframework.web.bind.annotation.RestController;
 public class ProjectIntegrationCallbackController {
 
     private final ProjectIntegrationService integrationService;
+    private final IntegrationAvailability availability;
 
     public ProjectIntegrationCallbackController(
-            ProjectIntegrationService integrationService
+            ProjectIntegrationService integrationService,
+            IntegrationAvailability availability
     ) {
         this.integrationService = integrationService;
+        this.availability = availability;
     }
 
     @GetMapping("/api/integrations/github/setup")
@@ -33,6 +37,7 @@ public class ProjectIntegrationCallbackController {
             @RequestParam(required = false, name = "setup_action")
             String setupAction
     ) {
+        availability.requireGitHub();
         URI uri = integrationService
                 .beginGitHubInstallationVerificationFromProvider(
                         principal,
@@ -52,6 +57,7 @@ public class ProjectIntegrationCallbackController {
             @RequestParam(required = false) String code,
             @RequestParam(required = false, name = "error") String oauthError
     ) {
+        availability.requireGitHub();
         return integrationService.finishGitHubInstallationFromProvider(
                 principal,
                 session,

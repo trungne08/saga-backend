@@ -1,6 +1,8 @@
 package com.saga.be.integration.project;
 
 import com.saga.be.config.GitHubIntegrationProperties;
+import com.saga.be.config.IntegrationAvailability;
+import com.saga.be.config.IntegrationUrlResolver;
 import com.saga.be.config.JiraIntegrationProperties;
 import com.saga.be.dto.request.GitHubRepositoriesLinkRequest;
 import com.saga.be.dto.request.JiraProjectLinkRequest;
@@ -55,7 +57,9 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.util.UriComponentsBuilder;
@@ -68,8 +72,10 @@ public class ProjectIntegrationService {
     private final ProjectIntegrationSessionStore sessionStore;
     private final JiraProviderClient jiraClient;
     private final GitHubProviderClient gitHubClient;
+    private final IntegrationAvailability availability;
     private final JiraIntegrationProperties jiraProperties;
     private final GitHubIntegrationProperties gitHubProperties;
+    private final IntegrationUrlResolver urlResolver;
     private final IntegrationSecretCipher cipher;
     private final JiraCredentialService jiraCredentialService;
     private final JiraBoardRepository jiraBoardRepository;
@@ -78,6 +84,7 @@ public class ProjectIntegrationService {
     private final SyncJobLogRepository syncJobLogRepository;
     private final StudentRepository studentRepository;
     private final AutomaticSyncDispatcher syncDispatcher;
+    private final ApplicationEventPublisher eventPublisher;
     private final IntegrationAttemptLimiter attemptLimiter;
     private final AuthenticationAuditService auditService;
     private final SecureRandom secureRandom = new SecureRandom();
@@ -88,8 +95,10 @@ public class ProjectIntegrationService {
             ProjectIntegrationSessionStore sessionStore,
             JiraProviderClient jiraClient,
             GitHubProviderClient gitHubClient,
+            IntegrationAvailability availability,
             JiraIntegrationProperties jiraProperties,
             GitHubIntegrationProperties gitHubProperties,
+            IntegrationUrlResolver urlResolver,
             IntegrationSecretCipher cipher,
             JiraCredentialService jiraCredentialService,
             JiraBoardRepository jiraBoardRepository,
@@ -98,6 +107,7 @@ public class ProjectIntegrationService {
             SyncJobLogRepository syncJobLogRepository,
             StudentRepository studentRepository,
             AutomaticSyncDispatcher syncDispatcher,
+            ApplicationEventPublisher eventPublisher,
             IntegrationAttemptLimiter attemptLimiter,
             AuthenticationAuditService auditService
     ) {
@@ -106,8 +116,10 @@ public class ProjectIntegrationService {
         this.sessionStore = sessionStore;
         this.jiraClient = jiraClient;
         this.gitHubClient = gitHubClient;
+        this.availability = availability;
         this.jiraProperties = jiraProperties;
         this.gitHubProperties = gitHubProperties;
+        this.urlResolver = urlResolver;
         this.cipher = cipher;
         this.jiraCredentialService = jiraCredentialService;
         this.jiraBoardRepository = jiraBoardRepository;
@@ -116,6 +128,7 @@ public class ProjectIntegrationService {
         this.syncJobLogRepository = syncJobLogRepository;
         this.studentRepository = studentRepository;
         this.syncDispatcher = syncDispatcher;
+        this.eventPublisher = eventPublisher;
         this.attemptLimiter = attemptLimiter;
         this.auditService = auditService;
     }
@@ -560,12 +573,14 @@ public class ProjectIntegrationService {
         return GitHubInstallationResponse.from(projectId, info, repositories);
     }
 
+    @Transactional
     public ProjectIntegrationsResponse linkGitHubRepositories(
             SagaPrincipal principal,
             UUID projectId,
             GitHubRepositoriesLinkRequest request,
             String remoteAddress
     ) {
+        availability.requireGitHub();
         Project project = authorization.requireProjectManager(principal, projectId);
         limit(principal, "project-github-link");
         GitHubInstallation installation = installationRepository
@@ -629,12 +644,21 @@ public class ProjectIntegrationService {
             repository.setFullName(info.fullName());
             repository.setUrl(info.htmlUrl());
             repository.setDefaultBranch(info.defaultBranch());
-            repository.setConnectionStatus(IntegrationStatus.BACKFILLING);
-            repository.setConsecutiveFailures(0);
+            boolean alreadySynced = repository.getConnectionStatus()
+                    == IntegrationStatus.ACTIVE
+                    && repository.getLastSyncedAt() != null;
+            if (!alreadySynced) {
+                repository.setConnectionStatus(IntegrationStatus.BACKFILLING);
+                if (repository.getId() == null) {
+                    repository.setConsecutiveFailures(0);
+                }
+            }
             GitRepo saved = gitRepoRepository.saveAndFlush(repository);
-            dispatchAfterCommit(
-                    () -> syncDispatcher.initialGitHubBackfill(saved.getId())
-            );
+            if (!alreadySynced) {
+                eventPublisher.publishEvent(
+                        new GitHubInitialBackfillRequested(saved.getId())
+                );
+            }
         }
 
         auditService.recordIntegrationEvent(
@@ -678,10 +702,20 @@ public class ProjectIntegrationService {
             UUID projectId
     ) {
         authorization.requireProjectManager(principal, projectId);
+        Set<UUID> targetIds = gitRepoRepository
+                .findByProjectIdOrderByFullName(projectId)
+                .stream()
+                .map(GitRepo::getId)
+                .collect(Collectors.toSet());
+        targetIds.add(projectId);
+        jiraBoardRepository.findByProjectId(projectId)
+                .map(JiraBoard::getId)
+                .ifPresent(targetIds::add);
         return new SyncStatusResponse(
                 projectId,
-                syncJobLogRepository.findTop20ByTargetIdOrderByStartedAtDesc(
-                                projectId
+                syncJobLogRepository
+                        .findTop20ByTargetIdInOrderByStartedAtDesc(
+                                targetIds
                         )
                         .stream()
                         .map(SyncStatusResponse.Job::from)
@@ -717,7 +751,7 @@ public class ProjectIntegrationService {
     }
 
     private URI jiraWebhookCallback(String secret) {
-        String base = jiraProperties.webhookPublicUrl();
+        String base = urlResolver.jiraWebhookPublicUrl();
         if (base == null || base.isBlank()) {
             throw new IntegrationException(
                     org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,

@@ -6,10 +6,13 @@ import org.springframework.stereotype.Repository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import java.util.UUID;
+import java.util.Optional;
 
 @Repository
 public interface ClassRepository extends JpaRepository<Class, UUID> {
     boolean existsByClassCode(String classCode);
+
+    Optional<Class> findByClassCode(String classCode);
 
     Page<Class> findByNameContainingIgnoreCaseOrClassCodeContainingIgnoreCase(String name, String code, Pageable pageable);
 }

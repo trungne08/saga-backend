@@ -4,6 +4,7 @@ import com.saga.be.dto.response.WebhookAcceptedResponse;
 import com.saga.be.integration.webhook.WebhookIngestionService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -21,8 +22,7 @@ public class WebhookController {
     }
 
     @PostMapping("/api/webhooks/github")
-    @ResponseStatus(HttpStatus.ACCEPTED)
-    public WebhookAcceptedResponse github(
+    public ResponseEntity<WebhookAcceptedResponse> github(
             @RequestBody byte[] payload,
             @RequestHeader(
                     value = "X-Hub-Signature-256",
@@ -38,13 +38,17 @@ public class WebhookController {
             ) String event,
             HttpServletRequest request
     ) {
-        return ingestionService.receiveGitHub(
+        WebhookAcceptedResponse response = ingestionService.receiveGitHub(
                 payload,
                 signature,
                 delivery,
                 event,
                 request.getRemoteAddr()
         );
+        if ("PING".equals(response.status())) {
+            return ResponseEntity.ok(response);
+        }
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(response);
     }
 
     @PostMapping("/api/webhooks/jira")

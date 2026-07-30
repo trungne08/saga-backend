@@ -48,6 +48,7 @@ JIRA_WEBHOOK_PUBLIC_URL=${PUBLIC_BASE_URL}/api/webhooks/jira
 GITHUB_PERSONAL_CALLBACK_URL=${PUBLIC_BASE_URL}/api/me/integrations/github/callback
 GITHUB_PROJECT_CALLBACK_URL=${PUBLIC_BASE_URL}/api/integrations/github/project/callback
 GITHUB_SETUP_URL=${PUBLIC_BASE_URL}/api/integrations/github/setup
+GITHUB_WEBHOOK_PUBLIC_URL=${PUBLIC_BASE_URL}/api/webhooks/github
 GITHUB_WEBHOOK_URL=${PUBLIC_BASE_URL}/api/webhooks/github
 COGNITO_CALLBACK_URL=${PUBLIC_BASE_URL}/login/oauth2/code/cognito
 ```
@@ -95,6 +96,7 @@ GITHUB_APP_SLUG
 GITHUB_PERSONAL_CALLBACK_URL
 GITHUB_PROJECT_CALLBACK_URL
 GITHUB_SETUP_URL
+GITHUB_WEBHOOK_PUBLIC_URL
 ```
 
 Railway cung cấp `PORT`; không cần tạo giá trị cố định. Các biến có default an toàn

@@ -4,6 +4,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "app.integrations.github")
 public record GitHubIntegrationProperties(
+        boolean enabled,
         String appId,
         String clientId,
         String clientSecret,
@@ -14,6 +15,7 @@ public record GitHubIntegrationProperties(
         String apiBaseUrl,
         String webBaseUrl,
         String personalCallbackUrl,
-        String projectCallbackUrl
+        String projectCallbackUrl,
+        String webhookPublicUrl
 ) {
 }

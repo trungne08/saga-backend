@@ -128,4 +128,35 @@ class AuthenticationAuditServiceTest {
                 )
         );
     }
+
+    @Test
+    void integrationAuditPersistsOnlyWhitelistedMetadata() {
+        SystemAuditLogRepository repository = mock(SystemAuditLogRepository.class);
+        AuthenticationAuditService service = new AuthenticationAuditService(repository);
+        UUID targetId = UUID.randomUUID();
+
+        service.recordIntegrationEvent(
+                "student-sub",
+                "PERSONAL_IDENTITY_CONNECTED",
+                "GITHUB_IDENTITY",
+                targetId,
+                "SUCCESS",
+                "127.0.0.1"
+        );
+
+        ArgumentCaptor<SystemAuditLog> captor = ArgumentCaptor.forClass(
+                SystemAuditLog.class
+        );
+        verify(repository).save(captor.capture());
+        Map<?, ?> values = assertInstanceOf(
+                Map.class,
+                captor.getValue().getNewValues()
+        );
+        assertEquals("SUCCESS", values.get("outcome"));
+        assertEquals(targetId.toString(), values.get("localTargetId"));
+        assertEquals(2, values.size());
+        assertFalse(values.containsKey("token"));
+        assertFalse(values.containsKey("secret"));
+        assertFalse(values.containsKey("privateKey"));
+    }
 }

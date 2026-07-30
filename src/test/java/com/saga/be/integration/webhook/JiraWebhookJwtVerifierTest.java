@@ -119,6 +119,7 @@ class JiraWebhookJwtVerifierTest {
 
     private JiraIntegrationProperties properties(String clientSecret) {
         return new JiraIntegrationProperties(
+                true,
                 "client-id",
                 clientSecret,
                 null,

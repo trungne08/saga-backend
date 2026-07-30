@@ -55,6 +55,7 @@ class PersonalIntegrationServiceTest {
                 jiraClient,
                 gitHubClient,
                 new JiraIntegrationProperties(
+                        true,
                         null,
                         null,
                         null,
@@ -65,6 +66,7 @@ class PersonalIntegrationServiceTest {
                         null
                 ),
                 new GitHubIntegrationProperties(
+                        true,
                         null,
                         null,
                         null,
@@ -75,7 +77,8 @@ class PersonalIntegrationServiceTest {
                         "https://api.github.com",
                         "https://github.com",
                         "https://saga.example/api/me/integrations/github/callback",
-                        "https://saga.example/api/integrations/github/project/callback"
+                        "https://saga.example/api/integrations/github/project/callback",
+                        "https://saga.example/api/webhooks/github"
                 ),
                 mock(IntegrationAttemptLimiter.class),
                 mock(AuthenticationAuditService.class)

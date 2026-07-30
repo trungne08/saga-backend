@@ -1,6 +1,7 @@
 package com.saga.be.integration.sync;
 
 import com.saga.be.config.IntegrationProperties;
+import com.saga.be.config.IntegrationAvailability;
 import com.saga.be.entity.GitRepo;
 import com.saga.be.entity.JiraBoard;
 import com.saga.be.entity.SyncJobLog;
@@ -42,6 +43,8 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
     private final GitHubProviderClient gitHubClient;
     private final JiraIssueUpsertService jiraUpsertService;
     private final GitHubDataUpsertService gitHubUpsertService;
+    private final GitHubInitialBackfillJobService initialBackfillJobService;
+    private final IntegrationAvailability availability;
     private final Duration overlapWindow;
 
     public AutomaticSyncDispatcherImpl(
@@ -53,6 +56,8 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
             GitHubProviderClient gitHubClient,
             JiraIssueUpsertService jiraUpsertService,
             GitHubDataUpsertService gitHubUpsertService,
+            GitHubInitialBackfillJobService initialBackfillJobService,
+            IntegrationAvailability availability,
             IntegrationProperties properties
     ) {
         this.jiraBoardRepository = jiraBoardRepository;
@@ -63,6 +68,8 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
         this.gitHubClient = gitHubClient;
         this.jiraUpsertService = jiraUpsertService;
         this.gitHubUpsertService = gitHubUpsertService;
+        this.initialBackfillJobService = initialBackfillJobService;
+        this.availability = availability;
         this.overlapWindow = properties.overlapWindow() == null
                 ? Duration.ofMinutes(5)
                 : properties.overlapWindow();
@@ -93,6 +100,9 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
     }
 
     void syncJira(UUID boardId, SyncJobType jobType) {
+        if (!availability.jiraEnabled()) {
+            return;
+        }
         JiraBoard board = jiraBoardRepository.findById(boardId).orElse(null);
         if (board == null || board.getConnectionStatus()
                 == IntegrationStatus.DISCONNECTED) {
@@ -101,7 +111,7 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
         LocalDateTime cursorBefore = board.getSyncCursor();
         SyncJobLog job = startJob(
                 "JIRA",
-                board.getProject().getId(),
+                boardId,
                 jobType,
                 cursorBefore
         );
@@ -191,21 +201,45 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
     }
 
     void syncGitHub(UUID repositoryLocalId, SyncJobType jobType) {
-        GitRepo repository = gitRepoRepository.findById(repositoryLocalId)
+        if (!availability.gitHubEnabled()) {
+            return;
+        }
+        SyncJobLog claimedJob = null;
+        if (jobType == SyncJobType.INITIAL_BACKFILL) {
+            claimedJob = initialBackfillJobService.claim(repositoryLocalId)
+                    .orElse(null);
+            if (claimedJob == null) {
+                return;
+            }
+        }
+        GitRepo repository = gitRepoRepository
+                .findForSyncById(repositoryLocalId)
                 .orElse(null);
         if (
             repository == null
             || repository.getConnectionStatus() == IntegrationStatus.DISCONNECTED
         ) {
+            if (claimedJob != null) {
+                completeJob(
+                        claimedJob,
+                        SyncJobStatus.FAILED,
+                        0,
+                        0,
+                        null,
+                        "GITHUB_REPOSITORY_UNAVAILABLE"
+                );
+            }
             return;
         }
         LocalDateTime cursorBefore = repository.getSyncCursor();
-        SyncJobLog job = startJob(
-                "GITHUB",
-                repository.getProject().getId(),
-                jobType,
-                cursorBefore
-        );
+        SyncJobLog job = claimedJob == null
+                ? startJob(
+                        "GITHUB",
+                        repositoryLocalId,
+                        jobType,
+                        cursorBefore
+                )
+                : claimedJob;
         int processed = 0;
         int failed = 0;
         LocalDateTime maxUpdated = cursorBefore;
@@ -374,13 +408,13 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
 
     private SyncJobLog startJob(
             String targetSystem,
-            UUID projectId,
+            UUID targetId,
             SyncJobType type,
             LocalDateTime cursorBefore
     ) {
         return jobRepository.saveAndFlush(SyncJobLog.builder()
                 .targetSystem(targetSystem)
-                .targetId(projectId)
+                .targetId(targetId)
                 .jobType(type)
                 .status(SyncJobStatus.IN_PROGRESS)
                 .startedAt(LocalDateTime.now())

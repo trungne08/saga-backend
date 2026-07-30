@@ -12,7 +12,10 @@ import java.security.GeneralSecurityException;
 import java.security.KeyFactory;
 import java.security.PrivateKey;
 import java.security.Signature;
+import java.security.spec.InvalidKeySpecException;
 import java.security.spec.PKCS8EncodedKeySpec;
+import java.security.spec.RSAPrivateCrtKeySpec;
+import java.math.BigInteger;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -28,6 +31,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.util.LinkedMultiValueMap;
@@ -37,6 +41,12 @@ import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.util.UriComponentsBuilder;
 
 @Component
+@ConditionalOnProperty(
+        prefix = "app.integrations.github",
+        name = "enabled",
+        havingValue = "true",
+        matchIfMissing = true
+)
 public class GitHubProviderClientImpl implements GitHubProviderClient {
 
     private static final int MAX_GET_ATTEMPTS = 3;
@@ -489,8 +499,7 @@ public class GitHubProviderClientImpl implements GitHubProviderClient {
             throw new IntegrationException(
                     HttpStatus.SERVICE_UNAVAILABLE,
                     "GITHUB_APP_KEY_INVALID",
-                    "GitHub App authentication is not configured correctly",
-                    exception
+                    "GitHub App authentication is not configured correctly"
             );
         }
     }
@@ -686,10 +695,17 @@ public class GitHubProviderClientImpl implements GitHubProviderClient {
         String pem = requireConfigured(
                 properties.privateKey(),
                 "GITHUB_PRIVATE_KEY"
-        ).replace("\\n", "\n");
+        ).replace("\\n", "\n").trim();
+        boolean pkcs8 = pem.startsWith("-----BEGIN PRIVATE KEY-----")
+                && pem.endsWith("-----END PRIVATE KEY-----");
+        boolean pkcs1 = pem.startsWith("-----BEGIN RSA PRIVATE KEY-----")
+                && pem.endsWith("-----END RSA PRIVATE KEY-----");
+        if (!pkcs8 && !pkcs1) {
+            throw new InvalidKeySpecException("Unsupported private key type");
+        }
         String encoded = pem
-                .replace("-----BEGIN PRIVATE KEY-----", "")
-                .replace("-----END PRIVATE KEY-----", "")
+                .replace(pkcs8 ? "-----BEGIN PRIVATE KEY-----" : "-----BEGIN RSA PRIVATE KEY-----", "")
+                .replace(pkcs8 ? "-----END PRIVATE KEY-----" : "-----END RSA PRIVATE KEY-----", "")
                 .replaceAll("\\s", "");
         byte[] bytes;
         try {
@@ -697,8 +713,35 @@ public class GitHubProviderClientImpl implements GitHubProviderClient {
         } catch (IllegalArgumentException exception) {
             throw new GeneralSecurityException("Invalid private key", exception);
         }
-        return KeyFactory.getInstance("RSA")
-                .generatePrivate(new PKCS8EncodedKeySpec(bytes));
+        KeyFactory keyFactory = KeyFactory.getInstance("RSA");
+        return pkcs8
+                ? keyFactory.generatePrivate(new PKCS8EncodedKeySpec(bytes))
+                : keyFactory.generatePrivate(pkcs1Spec(bytes));
+    }
+
+    private RSAPrivateCrtKeySpec pkcs1Spec(byte[] der) throws GeneralSecurityException {
+        try {
+            DerReader sequence = new DerReader(der).readSequence();
+            if (!BigInteger.ZERO.equals(sequence.readInteger())) {
+                throw new InvalidKeySpecException("Unsupported RSA private key version");
+            }
+            RSAPrivateCrtKeySpec spec = new RSAPrivateCrtKeySpec(
+                    sequence.readInteger(),
+                    sequence.readInteger(),
+                    sequence.readInteger(),
+                    sequence.readInteger(),
+                    sequence.readInteger(),
+                    sequence.readInteger(),
+                    sequence.readInteger(),
+                    sequence.readInteger()
+            );
+            if (sequence.hasRemaining()) {
+                throw new InvalidKeySpecException("Invalid RSA private key");
+            }
+            return spec;
+        } catch (IllegalArgumentException exception) {
+            throw new InvalidKeySpecException("Invalid RSA private key", exception);
+        }
     }
 
     private void bearer(HttpHeaders headers, String token) {
@@ -831,6 +874,87 @@ public class GitHubProviderClientImpl implements GitHubProviderClient {
     }
 
     private record CachedInstallationToken(String token, Instant expiresAt) {
+    }
+
+    /** Minimal DER reader for the PKCS#1 RSAPrivateKey sequence. */
+    private static final class DerReader {
+        private final byte[] value;
+        private int position;
+        private final int limit;
+
+        private DerReader(byte[] value) {
+            this(value, 0, value.length);
+        }
+
+        private DerReader(byte[] value, int position, int limit) {
+            this.value = value;
+            this.position = position;
+            this.limit = limit;
+        }
+
+        private DerReader readSequence() {
+            requireTag(0x30);
+            int length = readLength();
+            int end = checkedEnd(length);
+            DerReader result = new DerReader(value, position, end);
+            position = end;
+            if (hasRemaining()) {
+                throw new IllegalArgumentException("Trailing DER data");
+            }
+            return result;
+        }
+
+        private BigInteger readInteger() {
+            requireTag(0x02);
+            int length = readLength();
+            if (length == 0) {
+                throw new IllegalArgumentException("Empty DER integer");
+            }
+            int end = checkedEnd(length);
+            byte[] integer = java.util.Arrays.copyOfRange(value, position, end);
+            position = end;
+            BigInteger result = new BigInteger(integer);
+            if (result.signum() < 0) {
+                throw new IllegalArgumentException("Negative DER integer");
+            }
+            return result;
+        }
+
+        private void requireTag(int expected) {
+            if (!hasRemaining() || (value[position++] & 0xff) != expected) {
+                throw new IllegalArgumentException("Unexpected DER tag");
+            }
+        }
+
+        private int readLength() {
+            if (!hasRemaining()) {
+                throw new IllegalArgumentException("Missing DER length");
+            }
+            int first = value[position++] & 0xff;
+            if ((first & 0x80) == 0) {
+                return first;
+            }
+            int bytes = first & 0x7f;
+            if (bytes == 0 || bytes > 4 || bytes > limit - position) {
+                throw new IllegalArgumentException("Invalid DER length");
+            }
+            int length = 0;
+            for (int index = 0; index < bytes; index++) {
+                length = (length << 8) | (value[position++] & 0xff);
+            }
+            return length;
+        }
+
+        private int checkedEnd(int length) {
+            if (length < 0 || length > limit - position) {
+                throw new IllegalArgumentException("Invalid DER length");
+            }
+            return position + length;
+        }
+
+        private boolean hasRemaining() {
+            return position < limit;
+        }
     }
 
     private static JdkClientHttpRequestFactory requestFactory(

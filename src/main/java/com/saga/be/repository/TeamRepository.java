@@ -9,4 +9,6 @@ import org.springframework.stereotype.Repository;
 @Repository
 public interface TeamRepository extends JpaRepository<Team, UUID> {
     Optional<Team> findByProjectId(UUID projectId);
+
+    Optional<Team> findByCourseIdAndName(UUID courseId, String name);
 }

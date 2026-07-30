@@ -1,6 +1,7 @@
 package com.saga.be.controller;
 
 import com.saga.be.dto.request.GitHubRepositoriesLinkRequest;
+import com.saga.be.config.IntegrationAvailability;
 import com.saga.be.dto.request.JiraProjectLinkRequest;
 import com.saga.be.dto.response.GitHubInstallationResponse;
 import com.saga.be.dto.response.JiraAuthorizationResponse;
@@ -31,11 +32,14 @@ import org.springframework.web.bind.annotation.RestController;
 public class ProjectIntegrationController {
 
     private final ProjectIntegrationService integrationService;
+    private final IntegrationAvailability availability;
 
     public ProjectIntegrationController(
-            ProjectIntegrationService integrationService
+            ProjectIntegrationService integrationService,
+            IntegrationAvailability availability
     ) {
         this.integrationService = integrationService;
+        this.availability = availability;
     }
 
     @GetMapping("/integrations")
@@ -52,6 +56,7 @@ public class ProjectIntegrationController {
             @PathVariable UUID projectId,
             HttpSession session
     ) {
+        availability.requireJira();
         return redirect(integrationService.beginJira(
                 principal,
                 projectId,
@@ -96,6 +101,7 @@ public class ProjectIntegrationController {
             @PathVariable UUID projectId,
             HttpSession session
     ) {
+        availability.requireGitHub();
         return redirect(integrationService.beginGitHubInstallation(
                 principal,
                 projectId,

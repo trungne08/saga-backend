@@ -8,6 +8,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.saga.be.config.GitHubIntegrationProperties;
+import com.saga.be.config.IntegrationAvailability;
+import com.saga.be.config.IntegrationUrlResolver;
 import com.saga.be.config.JiraIntegrationProperties;
 import com.saga.be.entity.GitHubInstallation;
 import com.saga.be.entity.enums.AccountStatus;
@@ -46,7 +48,9 @@ class ProjectIntegrationServiceSecurityTest {
                 sessionStore,
                 mock(JiraProviderClient.class),
                 gitHubClient,
+                mock(IntegrationAvailability.class),
                 new JiraIntegrationProperties(
+                        true,
                         null,
                         null,
                         null,
@@ -57,6 +61,7 @@ class ProjectIntegrationServiceSecurityTest {
                         null
                 ),
                 new GitHubIntegrationProperties(
+                        true,
                         null,
                         null,
                         null,
@@ -67,8 +72,10 @@ class ProjectIntegrationServiceSecurityTest {
                         "https://api.github.com",
                         "https://github.com",
                         "https://saga.example/api/me/integrations/github/callback",
-                        "https://saga.example/api/integrations/github/project/callback"
+                        "https://saga.example/api/integrations/github/project/callback",
+                        "https://saga.example/api/webhooks/github"
                 ),
+                mock(IntegrationUrlResolver.class),
                 mock(IntegrationSecretCipher.class),
                 mock(JiraCredentialService.class),
                 mock(JiraBoardRepository.class),
@@ -77,6 +84,7 @@ class ProjectIntegrationServiceSecurityTest {
                 mock(SyncJobLogRepository.class),
                 mock(StudentRepository.class),
                 mock(AutomaticSyncDispatcher.class),
+                event -> { },
                 mock(IntegrationAttemptLimiter.class),
                 mock(AuthenticationAuditService.class)
         );
