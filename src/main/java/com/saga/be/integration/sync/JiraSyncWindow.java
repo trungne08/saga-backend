@@ -1,5 +1,8 @@
 package com.saga.be.integration.sync;
 
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneId;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 
@@ -7,29 +10,51 @@ import java.time.temporal.ChronoUnit;
  * Keeps the Jira JQL minute-granularity window separate from the exact local
  * timestamp used as the committed sync cursor.
  */
-final class JiraSyncWindow {
+public final class JiraSyncWindow {
 
     private JiraSyncWindow() {
     }
 
-    static LocalDateTime lowerBoundForJql(LocalDateTime effectiveLowerBound) {
-        return effectiveLowerBound == null
-                ? null
-                : effectiveLowerBound.truncatedTo(ChronoUnit.MINUTES);
+    public static Instant effectiveLowerBound(
+            Instant cursorBeforeUtc,
+            Instant capturedUpperBoundUtc,
+            Duration overlapWindow
+    ) {
+        if (cursorBeforeUtc == null) {
+            return null;
+        }
+        Instant lowerBound = cursorBeforeUtc.minus(overlapWindow);
+        return !lowerBound.isBefore(capturedUpperBoundUtc)
+                ? capturedUpperBoundUtc.minus(overlapWindow)
+                : lowerBound;
     }
 
-    static LocalDateTime upperBoundExclusiveForJql(
-            LocalDateTime capturedUpperBound
+    public static LocalDateTime lowerBoundForJql(
+            Instant effectiveLowerBoundUtc,
+            ZoneId jiraZoneId
     ) {
-        return capturedUpperBound.truncatedTo(ChronoUnit.MINUTES)
+        return effectiveLowerBoundUtc == null
+                ? null
+                : effectiveLowerBoundUtc.atZone(jiraZoneId)
+                        .toLocalDateTime()
+                        .truncatedTo(ChronoUnit.MINUTES);
+    }
+
+    public static LocalDateTime upperBoundExclusiveForJql(
+            Instant capturedUpperBoundUtc,
+            ZoneId jiraZoneId
+    ) {
+        return capturedUpperBoundUtc.atZone(jiraZoneId)
+                .toLocalDateTime()
+                .truncatedTo(ChronoUnit.MINUTES)
                 .plusMinutes(1);
     }
 
-    static boolean isWithinCapturedUpperBound(
-            LocalDateTime issueUpdatedAt,
-            LocalDateTime capturedUpperBound
+    public static boolean isWithinCapturedUpperBound(
+            Instant issueUpdatedAtUtc,
+            Instant capturedUpperBoundUtc
     ) {
-        return issueUpdatedAt != null
-                && !issueUpdatedAt.isAfter(capturedUpperBound);
+        return issueUpdatedAtUtc != null
+                && !issueUpdatedAtUtc.isAfter(capturedUpperBoundUtc);
     }
 }

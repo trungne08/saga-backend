@@ -21,6 +21,7 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.saga.be.config.IntegrationProperties;
 import com.saga.be.config.IntegrationAvailability;
+import com.saga.be.config.JiraTimeZoneProperties;
 import com.saga.be.entity.GitHubInstallation;
 import com.saga.be.entity.GitRepo;
 import com.saga.be.entity.JiraBoard;
@@ -40,7 +41,9 @@ import com.saga.be.repository.GitRepoRepository;
 import com.saga.be.repository.JiraBoardRepository;
 import com.saga.be.repository.SyncJobLogRepository;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -109,7 +112,8 @@ class AutomaticSyncDispatcherImplTest {
                         Duration.ofSeconds(10),
                         true,
                         Duration.ofMinutes(5)
-                )
+                ),
+                new JiraTimeZoneProperties("UTC")
         );
         boardId = UUID.randomUUID();
         Project project = Project.builder().name("Project").build();
@@ -245,7 +249,10 @@ class AutomaticSyncDispatcherImplTest {
 
     @Test
     void reconciliationReadsOverlapWindowAndCountsIssueUpdatedBeforeJobStart() {
-        LocalDateTime issueUpdated = LocalDateTime.now().minusSeconds(4);
+        LocalDateTime issueUpdated = LocalDateTime.ofInstant(
+                Instant.now().minusSeconds(4),
+                ZoneOffset.UTC
+        );
         LocalDateTime committedCursor = issueUpdated.plusSeconds(1);
         board.setSyncCursor(committedCursor);
         JiraIssueSnapshot sdpOne = new JiraIssueSnapshot(
@@ -259,21 +266,21 @@ class AutomaticSyncDispatcherImplTest {
 
         dispatcher.syncJira(boardId, SyncJobType.RECONCILIATION);
 
-        ArgumentCaptor<LocalDateTime> lowerBound = ArgumentCaptor.forClass(
-                LocalDateTime.class
+        ArgumentCaptor<Instant> lowerBound = ArgumentCaptor.forClass(
+                Instant.class
         );
-        ArgumentCaptor<LocalDateTime> upperBound = ArgumentCaptor.forClass(
-                LocalDateTime.class
+        ArgumentCaptor<Instant> upperBound = ArgumentCaptor.forClass(
+                Instant.class
         );
         verify(jiraClient).searchIssues(
                 eq("token"), eq("cloud-id"), eq("SAGA"),
                 lowerBound.capture(), upperBound.capture(), eq(null)
         );
-        assertEquals(
-                committedCursor.minusMinutes(5).withSecond(0).withNano(0),
-                lowerBound.getValue()
+        assertEquals(committedCursor.minusMinutes(5).toInstant(ZoneOffset.UTC),
+                lowerBound.getValue());
+        assertThat(upperBound.getValue()).isAfter(
+                issueUpdated.toInstant(ZoneOffset.UTC)
         );
-        assertThat(upperBound.getValue()).isAfter(issueUpdated);
         verify(jiraUpsertService).upsert(boardId, sdpOne);
         ArgumentCaptor<LocalDateTime> committedUpperBound =
                 ArgumentCaptor.forClass(LocalDateTime.class);
@@ -281,7 +288,8 @@ class AutomaticSyncDispatcherImplTest {
                 eq(boardId), committedUpperBound.capture()
         );
         assertEquals(
-                upperBound.getValue().minusMinutes(1),
+                LocalDateTime.ofInstant(upperBound.getValue(), ZoneOffset.UTC)
+                        .withSecond(0).withNano(0),
                 committedUpperBound.getValue().withSecond(0).withNano(0)
         );
         verify(syncJobFinalizationService).finalizeJob(
@@ -299,7 +307,10 @@ class AutomaticSyncDispatcherImplTest {
     void reconciliationDoesNotProcessIssueNewerThanCapturedUpperBound() {
         JiraIssueSnapshot futureIssue = issue(
                 "future",
-                LocalDateTime.now().plusMinutes(1)
+                LocalDateTime.ofInstant(
+                        Instant.now().plus(Duration.ofMinutes(1)),
+                        ZoneOffset.UTC
+                )
         );
         when(jiraClient.searchIssues(
                 eq("token"), eq("cloud-id"), eq("SAGA"), any(), any(), eq(null)

@@ -4,13 +4,16 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import com.saga.be.config.IntegrationProperties;
 import com.saga.be.config.JiraIntegrationProperties;
+import com.saga.be.config.JiraTimeZoneProperties;
 import com.saga.be.exception.IntegrationException;
+import com.saga.be.integration.sync.JiraSyncWindow;
 import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeFormatterBuilder;
@@ -71,17 +74,20 @@ public class JiraProviderClientImpl implements JiraProviderClient {
     );
 
     private final JiraIntegrationProperties properties;
+    private final JiraTimeZoneProperties timeZoneProperties;
     private final ObjectMapper objectMapper;
     private final RestClient restClient;
 
     @Autowired
     public JiraProviderClientImpl(
             JiraIntegrationProperties properties,
+            JiraTimeZoneProperties timeZoneProperties,
             IntegrationProperties integrationProperties,
             ObjectMapper objectMapper
     ) {
         this(
                 properties,
+                timeZoneProperties,
                 objectMapper,
                 RestClient.builder()
                         .requestFactory(requestFactory(integrationProperties))
@@ -95,12 +101,22 @@ public class JiraProviderClientImpl implements JiraProviderClient {
 
     JiraProviderClientImpl(
             JiraIntegrationProperties properties,
+            JiraTimeZoneProperties timeZoneProperties,
             ObjectMapper objectMapper,
             RestClient restClient
     ) {
         this.properties = properties;
+        this.timeZoneProperties = timeZoneProperties;
         this.objectMapper = objectMapper;
         this.restClient = restClient;
+    }
+
+    JiraProviderClientImpl(
+            JiraIntegrationProperties properties,
+            ObjectMapper objectMapper,
+            RestClient restClient
+    ) {
+        this(properties, new JiraTimeZoneProperties("UTC"), objectMapper, restClient);
     }
 
     @Override
@@ -402,10 +418,20 @@ public class JiraProviderClientImpl implements JiraProviderClient {
             String accessToken,
             String cloudId,
             String projectKey,
-            LocalDateTime lowerBoundForJql,
-            LocalDateTime upperBoundExclusiveForJql,
+            Instant lowerBoundUtc,
+            Instant capturedUpperBoundUtc,
             String nextPageToken
     ) {
+        ZoneId jiraZoneId = jiraZoneId();
+        LocalDateTime lowerBoundForJql = JiraSyncWindow.lowerBoundForJql(
+                lowerBoundUtc,
+                jiraZoneId
+        );
+        LocalDateTime upperBoundExclusiveForJql =
+                JiraSyncWindow.upperBoundExclusiveForJql(
+                        capturedUpperBoundUtc,
+                        jiraZoneId
+                );
         StringBuilder jql = new StringBuilder(
                 "project = " + safeJqlKey(projectKey)
         );
@@ -414,11 +440,9 @@ public class JiraProviderClientImpl implements JiraProviderClient {
                     .append(JQL_DATE_TIME.format(lowerBoundForJql))
                     .append("\"");
         }
-        if (upperBoundExclusiveForJql != null) {
-            jql.append(" AND updated < \"")
-                    .append(JQL_DATE_TIME.format(upperBoundExclusiveForJql))
-                    .append("\"");
-        }
+        jql.append(" AND updated < \"")
+                .append(JQL_DATE_TIME.format(upperBoundExclusiveForJql))
+                .append("\"");
         jql.append(" ORDER BY updated ASC, id ASC");
 
         UriComponentsBuilder builder = UriComponentsBuilder.fromUri(
@@ -907,7 +931,9 @@ public class JiraProviderClientImpl implements JiraProviderClient {
     private JiraIssueSnapshot toIssue(JsonNode issue) {
         JsonNode fields = issue.path("fields");
         JsonNode sprint = first(fields.path("customfield_10020"));
-        LocalDateTime updatedAt = parseDateOrDateTime(text(fields, "updated"));
+        String updatedText = text(fields, "updated");
+        LocalDateTime updatedAt = parseDateOrDateTime(updatedText);
+        Instant updatedAtUtc = parseInstant(updatedText);
         if (updatedAt == null) {
             throw providerResponseInvalid();
         }
@@ -927,7 +953,8 @@ public class JiraProviderClientImpl implements JiraProviderClient {
                 parseDateOrDateTime(text(fields, "resolutiondate")),
                 nestedText(fields, "resolution", "name"),
                 sprint == null ? null : text(sprint, "id"),
-                sprint == null ? null : text(sprint, "name")
+                sprint == null ? null : text(sprint, "name"),
+                updatedAtUtc
         );
     }
 
@@ -958,6 +985,33 @@ public class JiraProviderClientImpl implements JiraProviderClient {
                     throw providerResponseInvalid();
                 }
             }
+        }
+    }
+
+    private Instant parseInstant(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return OffsetDateTime.parse(value).toInstant();
+        } catch (RuntimeException isoException) {
+            try {
+                return OffsetDateTime.parse(value, JIRA_OFFSET_DATE_TIME)
+                        .toInstant();
+            } catch (RuntimeException jiraOffsetException) {
+                throw providerResponseInvalid();
+            }
+        }
+    }
+
+    private ZoneId jiraZoneId() {
+        try {
+            return ZoneId.of(timeZoneProperties.timeZone());
+        } catch (RuntimeException exception) {
+            throw IntegrationException.invalid(
+                    "JIRA_TIME_ZONE_INVALID",
+                    "The Jira time zone is invalid"
+            );
         }
     }
 

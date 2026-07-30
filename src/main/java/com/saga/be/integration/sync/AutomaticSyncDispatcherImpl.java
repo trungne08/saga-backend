@@ -2,6 +2,7 @@ package com.saga.be.integration.sync;
 
 import com.saga.be.config.IntegrationProperties;
 import com.saga.be.config.IntegrationAvailability;
+import com.saga.be.config.JiraTimeZoneProperties;
 import com.saga.be.entity.GitRepo;
 import com.saga.be.entity.JiraBoard;
 import com.saga.be.entity.SyncJobLog;
@@ -24,7 +25,10 @@ import com.saga.be.repository.GitRepoRepository;
 import com.saga.be.repository.JiraBoardRepository;
 import com.saga.be.repository.SyncJobLogRepository;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -56,6 +60,7 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
     private final JiraBoardStateService jiraBoardStateService;
     private final IntegrationAvailability availability;
     private final Duration overlapWindow;
+    private final ZoneId jiraZoneId;
 
     public AutomaticSyncDispatcherImpl(
             JiraBoardRepository jiraBoardRepository,
@@ -71,7 +76,8 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
             SyncJobFinalizationService syncJobFinalizationService,
             JiraBoardStateService jiraBoardStateService,
             IntegrationAvailability availability,
-            IntegrationProperties properties
+            IntegrationProperties properties,
+            JiraTimeZoneProperties jiraTimeZoneProperties
     ) {
         this.jiraBoardRepository = jiraBoardRepository;
         this.gitRepoRepository = gitRepoRepository;
@@ -89,6 +95,7 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
         this.overlapWindow = properties.overlapWindow() == null
                 ? Duration.ofMinutes(5)
                 : properties.overlapWindow();
+        this.jiraZoneId = ZoneId.of(jiraTimeZoneProperties.timeZone());
     }
 
     @Override
@@ -144,16 +151,24 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
                 );
                 return;
             }
-            LocalDateTime cursorBefore = board.getSyncCursor();
-            LocalDateTime capturedUpperBound = LocalDateTime.now();
-            LocalDateTime effectiveLowerBound = cursorBefore == null
+            Instant cursorBefore = board.getSyncCursor() == null
                     ? null
-                    : cursorBefore.minus(overlapWindow);
+                    : board.getSyncCursor().toInstant(ZoneOffset.UTC);
+            Instant capturedUpperBound = Instant.now();
+            Instant effectiveLowerBound = JiraSyncWindow.effectiveLowerBound(
+                    cursorBefore,
+                    capturedUpperBound,
+                    overlapWindow
+            );
             LocalDateTime lowerBoundForJql =
-                    JiraSyncWindow.lowerBoundForJql(effectiveLowerBound);
+                    JiraSyncWindow.lowerBoundForJql(
+                            effectiveLowerBound,
+                            jiraZoneId
+                    );
             LocalDateTime upperBoundExclusiveForJql =
                     JiraSyncWindow.upperBoundExclusiveForJql(
-                            capturedUpperBound
+                            capturedUpperBound,
+                            jiraZoneId
                     );
             stage = board.getTokenExpiresAt() != null
                     && !board.getTokenExpiresAt().isAfter(
@@ -173,14 +188,14 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
                         token,
                         board.getCloudId(),
                         board.getProjectKey(),
-                        lowerBoundForJql,
-                        upperBoundExclusiveForJql,
+                        effectiveLowerBound,
+                        capturedUpperBound,
                         nextPageToken
                 );
                 issuesFetchedFromProvider += page.issues().size();
                 for (JiraIssueSnapshot issue : page.issues()) {
                     if (!JiraSyncWindow.isWithinCapturedUpperBound(
-                            issue.updatedAt(),
+                            issue.updatedAtUtc(),
                             capturedUpperBound
                     )) {
                         continue;
@@ -205,9 +220,9 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
                 }
                 nextPageToken = page.nextPageToken();
                 lastPage = page.last();
-                log.info("Jira search completed: boardId={}, jobId={}, jobType={}, endpoint=/rest/api/3/search/jql, projectKey={}, cursorBefore={}, effectiveLowerBound={}, lowerBoundForJql={}, capturedUpperBound={}, upperBoundExclusiveForJql={}, sanitizedJql={}, httpStatus=200, issuesFetchedFromProvider={}, issuesAfterUpperBoundFilter={}, itemsProcessed={}, itemsFailed={}, isLast={}, hasNextPageToken={}",
+                log.info("Jira search completed: boardId={}, jobId={}, jobType={}, endpoint=/rest/api/3/search/jql, projectKey={}, jiraZoneId={}, cursorBeforeUtc={}, lowerBoundUtc={}, lowerBoundForJql={}, upperBoundUtc={}, upperBoundExclusiveForJql={}, sanitizedJql={}, httpStatus=200, issuesFetchedFromProvider={}, issuesAfterUpperBoundFilter={}, itemsProcessed={}, itemsFailed={}, isLast={}, hasNextPageToken={}",
                         boardId, job.getId(), jobType, board.getProjectKey(),
-                        cursorBefore, effectiveLowerBound, lowerBoundForJql,
+                        jiraZoneId, cursorBefore, effectiveLowerBound, lowerBoundForJql,
                         capturedUpperBound, upperBoundExclusiveForJql,
                         jiraSearchJql(
                                 board.getProjectKey(),
@@ -231,7 +246,10 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
             } while (!lastPage && nextPageToken != null && !nextPageToken.isBlank());
 
             if (failed == 0) {
-                LocalDateTime cursorAfter = capturedUpperBound;
+                LocalDateTime cursorAfter = LocalDateTime.ofInstant(
+                        capturedUpperBound,
+                        ZoneOffset.UTC
+                );
                 stage = JiraSyncStage.COMPLETE_BOARD;
                 completeJira(boardId, cursorAfter);
                 stage = JiraSyncStage.FINALIZE_JOB;

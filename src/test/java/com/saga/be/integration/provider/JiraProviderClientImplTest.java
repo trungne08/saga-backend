@@ -11,11 +11,13 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.saga.be.config.JiraIntegrationProperties;
+import com.saga.be.config.JiraTimeZoneProperties;
 import com.saga.be.exception.IntegrationException;
 import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
@@ -283,8 +285,8 @@ class JiraProviderClientImplTest {
                 "ACCESS_TOKEN_SECRET",
                 CLOUD_ID,
                 "SDP",
-                LocalDateTime.parse("2026-07-31T00:25:57"),
-                LocalDateTime.parse("2026-07-31T00:32:00"),
+                Instant.parse("2026-07-31T00:25:57Z"),
+                Instant.parse("2026-07-31T00:31:02Z"),
                 null
         );
 
@@ -294,8 +296,41 @@ class JiraProviderClientImplTest {
                 LocalDateTime.parse("2026-07-31T00:30:57.360"),
                 page.issues().get(0).updatedAt()
         );
+        assertEquals(
+                Instant.parse("2026-07-30T17:30:57.360Z"),
+                page.issues().get(0).updatedAtUtc()
+        );
         assertThat(page.last()).isTrue();
         assertThat(page.nextPageToken()).isNull();
+        fixture.server.verify();
+    }
+
+    @Test
+    void formatsUtcSearchBoundsInConfiguredJiraZoneAcrossMidnight() {
+        Fixture fixture = fixture("Asia/Ho_Chi_Minh");
+        fixture.server.expect(request -> {
+            String query = URLDecoder.decode(
+                    request.getURI().getRawQuery(), StandardCharsets.UTF_8
+            );
+            assertThat(query)
+                    .contains("updated >= \"2026-07-31 04:22\"")
+                    .contains("updated < \"2026-07-31 04:23\"")
+                    .doesNotContainPattern(
+                            "updated [<>]=? \\\"\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}"
+                    );
+        }).andExpect(method(HttpMethod.GET)).andRespond(json(
+                "{\"isLast\":true,\"issues\":[]}"
+        ));
+
+        fixture.client.searchIssues(
+                "ACCESS_TOKEN_SECRET",
+                CLOUD_ID,
+                "SDP",
+                Instant.parse("2026-07-30T21:22:18Z"),
+                Instant.parse("2026-07-30T21:22:30Z"),
+                null
+        );
+
         fixture.server.verify();
     }
 
@@ -343,6 +378,10 @@ class JiraProviderClientImplTest {
     }
 
     private Fixture fixture() {
+        return fixture("UTC");
+    }
+
+    private Fixture fixture(String jiraTimeZone) {
         RestClient.Builder builder = RestClient.builder();
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder)
                 .build();
@@ -353,6 +392,7 @@ class JiraProviderClientImplTest {
                                 true, "id", "secret", "", "", BASE,
                                 "", "", "read:jira-work manage:jira-webhook"
                         ),
+                        new JiraTimeZoneProperties(jiraTimeZone),
                         JsonMapper.builder().build(),
                         restClient
                 ),

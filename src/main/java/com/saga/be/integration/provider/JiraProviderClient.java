@@ -1,7 +1,7 @@
 package com.saga.be.integration.provider;
 
 import java.net.URI;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -47,8 +47,8 @@ public interface JiraProviderClient {
             String accessToken,
             String cloudId,
             String projectKey,
-            LocalDateTime lowerBoundForJql,
-            LocalDateTime upperBoundExclusiveForJql,
+            Instant lowerBoundUtc,
+            Instant capturedUpperBoundUtc,
             String nextPageToken
     );
 }
