@@ -38,3 +38,15 @@ build/
 ### Node.js Lambda workspaces ###
 node_modules/
 *.zip
+
+.local-secrets/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+.local-secrets/
+
+# Local Jira debugging artifacts
+jira-*.log
+jira-thread-dump.txt

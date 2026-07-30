@@ -44,6 +44,12 @@ public class SyncJobLog extends BaseEntity {
     @Column(name = "error_message", columnDefinition = "TEXT")
     private String errorMessage;
 
+    @Column(name = "error_category", length = 128)
+    private String errorCategory;
+
+    @Column(name = "failure_stage", length = 64)
+    private String failureStage;
+
     @Column(name = "started_at")
     private LocalDateTime startedAt;
 

@@ -27,6 +27,7 @@ import com.saga.be.integration.provider.JiraAccessibleResource;
 import com.saga.be.integration.provider.JiraOAuthToken;
 import com.saga.be.integration.provider.JiraProjectInfo;
 import com.saga.be.integration.provider.JiraProviderClient;
+import com.saga.be.integration.provider.JiraWebhookRegistration;
 import com.saga.be.integration.security.IntegrationAttemptLimiter;
 import com.saga.be.integration.security.IntegrationSecretCipher;
 import com.saga.be.integration.security.OAuthFlow;
@@ -63,9 +64,23 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.util.UriComponentsBuilder;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @Service
 public class ProjectIntegrationService {
+
+    private static final Logger log = LoggerFactory.getLogger(
+            ProjectIntegrationService.class
+    );
+    private static final Set<String> CLASSIC_WEBHOOK_SCOPES = Set.of(
+            "read:jira-work",
+            "manage:jira-webhook"
+    );
+    private static final Set<String> GRANULAR_WEBHOOK_SCOPES = Set.of(
+            "read:webhook:jira",
+            "write:webhook:jira"
+    );
 
     private final ProjectIntegrationAuthorizationService authorization;
     private final OAuthStateService stateService;
@@ -217,6 +232,7 @@ public class ProjectIntegrationService {
         );
     }
 
+    @Transactional
     public ProjectIntegrationsResponse linkJira(
             SagaPrincipal principal,
             UUID projectId,
@@ -228,6 +244,7 @@ public class ProjectIntegrationService {
         limit(principal, "project-jira-link");
         ProjectIntegrationSessionStore.ResolvedJiraGrant grant =
                 sessionStore.requireJiraGrant(session, projectId);
+        requireJiraWebhookScopes(grant.scopes());
         JiraAccessibleResource resource = grant.resources().stream()
                 .filter(value -> value.cloudId().equals(request.cloudId()))
                 .findFirst()
@@ -295,30 +312,46 @@ public class ProjectIntegrationService {
 
         String webhookSecret = randomSecret();
         URI callback = jiraWebhookCallback(webhookSecret);
-        String webhookId = jiraClient.registerWebhook(
-                grant.accessToken(),
-                resource.cloudId(),
-                jiraProject.key(),
-                callback
-        );
-        board.setWebhookId(webhookId);
-        board.setWebhookSecretHash(sha256(webhookSecret));
-        board.setWebhookExpiresAt(LocalDateTime.now().plusDays(29));
-        board.setConnectionStatus(IntegrationStatus.BACKFILLING);
-        board.setConsecutiveFailures(0);
-        JiraBoard saved = jiraBoardRepository.saveAndFlush(board);
-        sessionStore.removeJiraGrant(session, projectId);
+        JiraWebhookRegistration registration = null;
+        try {
+            registration = jiraClient.ensureWebhook(
+                    grant.accessToken(),
+                    resource.cloudId(),
+                    jiraProject.key(),
+                    callback,
+                    board.getWebhookId()
+            );
+            board.setWebhookId(registration.webhookId());
+            // A reused webhook retains its original token, whose hash is
+            // already stored on the board. Replacing it gets a new secret.
+            if (registration.created()) {
+                board.setWebhookSecretHash(sha256(webhookSecret));
+            }
+            board.setWebhookExpiresAt(LocalDateTime.now().plusDays(29));
+            board.setConnectionStatus(IntegrationStatus.BACKFILLING);
+            board.setConsecutiveFailures(0);
+            JiraBoard saved = jiraBoardRepository.saveAndFlush(board);
+            sessionStore.removeJiraGrant(session, projectId);
 
-        dispatchAfterCommit(() -> syncDispatcher.initialJiraBackfill(saved.getId()));
-        auditService.recordIntegrationEvent(
-                principal.cognitoSub(),
-                "PROJECT_JIRA_LINKED",
-                "PROJECT",
-                projectId,
-                "BACKFILLING",
-                remoteAddress
-        );
-        return integrations(principal, projectId);
+            dispatchAfterCommit(() -> syncDispatcher.initialJiraBackfill(saved.getId()));
+            auditService.recordIntegrationEvent(
+                    principal.cognitoSub(),
+                    "PROJECT_JIRA_LINKED",
+                    "PROJECT",
+                    projectId,
+                    "BACKFILLING",
+                    remoteAddress
+            );
+            return integrations(principal, projectId);
+        } catch (RuntimeException exception) {
+            compensateCreatedWebhook(
+                    registration,
+                    grant.accessToken(),
+                    resource.cloudId(),
+                    projectId
+            );
+            throw exception;
+        }
     }
 
     public void disconnectJira(
@@ -764,6 +797,61 @@ public class ProjectIntegrationService {
                 .build()
                 .encode()
                 .toUri();
+    }
+
+    private void requireJiraWebhookScopes(Set<String> grantedScopes) {
+        Set<String> configuredScopes = java.util.Arrays.stream(
+                        jiraProperties.scopes() == null
+                                ? new String[0]
+                                : jiraProperties.scopes().trim().split("\\s+")
+                )
+                .filter(scope -> !scope.isBlank())
+                .collect(Collectors.toSet());
+        requireJiraWebhookScopeSet(configuredScopes);
+        Set<String> scopes = grantedScopes == null ? Set.of() : grantedScopes;
+        // OAuth may omit `scope` from the token response when it is unchanged
+        // from the requested scope. In that case the provider's explicit 403
+        // mapping remains the authoritative signal rather than blocking a
+        // valid grant locally.
+        if (!scopes.isEmpty()) {
+            requireJiraWebhookScopeSet(scopes);
+        }
+    }
+
+    private void requireJiraWebhookScopeSet(Set<String> scopes) {
+        boolean classicGranted = scopes.containsAll(CLASSIC_WEBHOOK_SCOPES);
+        boolean granularGranted = scopes.containsAll(GRANULAR_WEBHOOK_SCOPES);
+        if (!classicGranted && !granularGranted) {
+            throw new IntegrationException(
+                    org.springframework.http.HttpStatus.FORBIDDEN,
+                    "JIRA_WEBHOOK_SCOPE_MISSING",
+                    "Reconnect Jira with read:jira-work and manage:jira-webhook"
+            );
+        }
+    }
+
+    private void compensateCreatedWebhook(
+            JiraWebhookRegistration registration,
+            String accessToken,
+            String cloudId,
+            UUID projectId
+    ) {
+        if (registration == null || !registration.created()) {
+            return;
+        }
+        try {
+            jiraClient.deleteWebhook(accessToken, cloudId, registration.webhookId());
+        } catch (RuntimeException cleanupFailure) {
+            // Never expose OAuth material. The periodic webhook maintenance
+            // flow can reconcile a later link attempt; retain only identifiers.
+            log.error(
+                    "Could not compensate Jira webhook after database failure: "
+                            + "projectId={}, cloudId={}, webhookId={}",
+                    projectId,
+                    cloudId,
+                    registration.webhookId()
+            );
+        }
     }
 
     private String jiraCallbackUrl() {

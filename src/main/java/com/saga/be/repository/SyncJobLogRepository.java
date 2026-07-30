@@ -7,6 +7,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 @Repository
@@ -18,5 +20,20 @@ public interface SyncJobLogRepository extends JpaRepository<SyncJobLog, UUID> {
     Optional<SyncJobLog> findTopByTargetIdAndJobTypeOrderByStartedAtDesc(
             UUID targetId,
             SyncJobType jobType
+    );
+
+    List<SyncJobLog> findByStatusIn(Collection<
+            com.saga.be.entity.enums.SyncJobStatus> statuses);
+
+    @Query("""
+            select job from SyncJobLog job
+            where job.targetId = :targetId
+              and job.status in :statuses
+            order by job.startedAt desc
+            """)
+    List<SyncJobLog> findActiveByTargetIdOrderByStartedAtDesc(
+            @Param("targetId") UUID targetId,
+            @Param("statuses") Collection<
+                    com.saga.be.entity.enums.SyncJobStatus> statuses
     );
 }

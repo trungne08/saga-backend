@@ -12,6 +12,8 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeFormatterBuilder;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -19,12 +21,15 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
@@ -40,22 +45,62 @@ import org.springframework.web.util.UriComponentsBuilder;
 public class JiraProviderClientImpl implements JiraProviderClient {
 
     private static final int MAX_GET_ATTEMPTS = 3;
+    private static final DateTimeFormatter JQL_DATE_TIME =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
+    // Jira Cloud commonly returns offsets as +0700 rather than ISO's +07:00.
+    private static final DateTimeFormatter JIRA_OFFSET_DATE_TIME =
+            new DateTimeFormatterBuilder()
+                    .append(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+                    .appendOffset("+HHMM", "Z")
+                    .toFormatter();
+    private static final Logger log = LoggerFactory.getLogger(
+            JiraProviderClientImpl.class
+    );
+    private static final List<String> WEBHOOK_EVENTS = List.of(
+            "jira:issue_created",
+            "jira:issue_updated",
+            "jira:issue_deleted",
+            "comment_created",
+            "comment_updated",
+            "comment_deleted",
+            "sprint_created",
+            "sprint_updated",
+            "sprint_deleted",
+            "sprint_started",
+            "sprint_closed"
+    );
 
     private final JiraIntegrationProperties properties;
     private final ObjectMapper objectMapper;
     private final RestClient restClient;
 
+    @Autowired
     public JiraProviderClientImpl(
             JiraIntegrationProperties properties,
             IntegrationProperties integrationProperties,
             ObjectMapper objectMapper
     ) {
+        this(
+                properties,
+                objectMapper,
+                RestClient.builder()
+                        .requestFactory(requestFactory(integrationProperties))
+                        .defaultHeader(
+                                HttpHeaders.ACCEPT,
+                                MediaType.APPLICATION_JSON_VALUE
+                        )
+                        .build()
+        );
+    }
+
+    JiraProviderClientImpl(
+            JiraIntegrationProperties properties,
+            ObjectMapper objectMapper,
+            RestClient restClient
+    ) {
         this.properties = properties;
         this.objectMapper = objectMapper;
-        this.restClient = RestClient.builder()
-                .requestFactory(requestFactory(integrationProperties))
-                .defaultHeader(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE)
-                .build();
+        this.restClient = restClient;
     }
 
     @Override
@@ -179,24 +224,133 @@ public class JiraProviderClientImpl implements JiraProviderClient {
             String projectKey,
             URI callbackUri
     ) {
+        return createWebhook(accessToken, cloudId, projectKey, callbackUri);
+    }
+
+    @Override
+    public JiraWebhookRegistration ensureWebhook(
+            String accessToken,
+            String cloudId,
+            String projectKey,
+            URI callbackUri,
+            String existingWebhookId
+    ) {
+        List<JiraWebhook> webhooks = listWebhooks(
+                accessToken,
+                cloudId,
+                projectKey,
+                callbackUri
+        );
+        JiraWebhook exactMatch = webhooks.stream()
+                .filter(webhook -> matchesWebhook(
+                        webhook,
+                        projectKey,
+                        callbackUri,
+                        true
+                ))
+                .findFirst()
+                .orElse(null);
+        if (exactMatch != null) {
+            return new JiraWebhookRegistration(exactMatch.id(), false);
+        }
+
+        JiraWebhook existing = webhooks.stream()
+                .filter(webhook -> webhook.id().equals(existingWebhookId))
+                .findFirst()
+                .orElse(null);
+        if (existing != null && matchesWebhook(
+                existing,
+                projectKey,
+                callbackUri,
+                false
+        )) {
+            return new JiraWebhookRegistration(existing.id(), false);
+        }
+        if (existing != null) {
+            // This is the only deletion path: the ID is stored on this board
+            // and was returned by Jira for this OAuth application.
+            deleteWebhook(accessToken, cloudId, existing.id());
+        }
+        return new JiraWebhookRegistration(
+                createWebhook(accessToken, cloudId, projectKey, callbackUri),
+                true
+        );
+    }
+
+    @Override
+    public List<JiraWebhook> listWebhooks(String accessToken, String cloudId) {
+        return listWebhooks(accessToken, cloudId, null, null);
+    }
+
+    private List<JiraWebhook> listWebhooks(
+            String accessToken,
+            String cloudId,
+            String projectKey,
+            URI callbackUri
+    ) {
+        List<JiraWebhook> webhooks = new ArrayList<>();
+        int requestedStartAt = 0;
+        boolean isLast = false;
+        while (!isLast) {
+            URI uri = UriComponentsBuilder.fromUri(
+                            jiraUri(cloudId, "/rest/api/3/webhook")
+                    )
+                    .queryParam("startAt", requestedStartAt)
+                    .queryParam("maxResults", 100)
+                    .build()
+                    .encode()
+                    .toUri();
+            JiraWebhookPage page = parseWebhookPage(
+                    getWebhookJson(
+                            uri,
+                            accessToken,
+                            cloudId,
+                            projectKey,
+                            callbackUri
+                    ),
+                    cloudId,
+                    projectKey,
+                    callbackUri
+            );
+            webhooks.addAll(page.values());
+            isLast = Boolean.TRUE.equals(page.isLast());
+            if (!isLast) {
+                int pageStartAt = page.startAt() == null
+                        ? requestedStartAt
+                        : page.startAt();
+                int maxResults = page.maxResults() == null
+                        ? 100
+                        : page.maxResults();
+                if (maxResults <= 0 || pageStartAt + maxResults <= requestedStartAt) {
+                    throw invalidWebhookResponse(
+                            "GET",
+                            cloudId,
+                            projectKey,
+                            callbackUri,
+                            "pagination did not advance"
+                    );
+                }
+                requestedStartAt = pageStartAt + maxResults;
+            }
+        }
+        return List.copyOf(webhooks);
+    }
+
+    private String createWebhook(
+            String accessToken,
+            String cloudId,
+            String projectKey,
+            URI callbackUri
+    ) {
         Map<String, Object> webhook = new LinkedHashMap<>();
-        webhook.put("jqlFilter", "project = \"" + safeJqlKey(projectKey) + "\"");
-        webhook.put("events", List.of(
-                "jira:issue_created",
-                "jira:issue_updated",
-                "jira:issue_deleted",
-                "comment_created",
-                "comment_updated",
-                "comment_deleted",
-                "sprint_created",
-                "sprint_updated",
-                "sprint_deleted",
-                "sprint_started",
-                "sprint_closed"
-        ));
-        JsonNode response = postJson(
+        webhook.put("jqlFilter", webhookJql(projectKey));
+        webhook.put("events", WEBHOOK_EVENTS);
+        JsonNode response = postWebhookJson(
                 jiraUri(cloudId, "/rest/api/3/webhook"),
                 accessToken,
+                cloudId,
+                projectKey,
+                callbackUri,
                 Map.of(
                         "url", callbackUri.toString(),
                         "webhooks", List.of(webhook)
@@ -208,12 +362,19 @@ public class JiraProviderClientImpl implements JiraProviderClient {
         }
         JsonNode first = results.get(0);
         if (first.hasNonNull("errors") && !first.path("errors").isEmpty()) {
-            throw IntegrationException.conflict(
-                    "JIRA_WEBHOOK_REGISTRATION_FAILED",
-                    "Jira rejected the webhook registration"
+            throw webhookRegistrationRejected(
+                    200,
+                    first,
+                    cloudId,
+                    projectKey,
+                    callbackUri
             );
         }
-        return first.path("createdWebhookId").asText();
+        String webhookId = text(first, "createdWebhookId");
+        if (webhookId == null || webhookId.isBlank()) {
+            throw providerResponseInvalid();
+        }
+        return webhookId;
     }
 
     @Override
@@ -241,15 +402,21 @@ public class JiraProviderClientImpl implements JiraProviderClient {
             String accessToken,
             String cloudId,
             String projectKey,
-            LocalDateTime updatedAfter,
+            LocalDateTime lowerBoundForJql,
+            LocalDateTime upperBoundExclusiveForJql,
             String nextPageToken
     ) {
         StringBuilder jql = new StringBuilder(
-                "project = \"" + safeJqlKey(projectKey) + "\""
+                "project = " + safeJqlKey(projectKey)
         );
-        if (updatedAfter != null) {
+        if (lowerBoundForJql != null) {
             jql.append(" AND updated >= \"")
-                    .append(updatedAfter.toString().replace('T', ' '))
+                    .append(JQL_DATE_TIME.format(lowerBoundForJql))
+                    .append("\"");
+        }
+        if (upperBoundExclusiveForJql != null) {
+            jql.append(" AND updated < \"")
+                    .append(JQL_DATE_TIME.format(upperBoundExclusiveForJql))
                     .append("\"");
         }
         jql.append(" ORDER BY updated ASC, id ASC");
@@ -280,7 +447,7 @@ public class JiraProviderClientImpl implements JiraProviderClient {
         return new JiraIssuePage(
                 snapshots,
                 next,
-                next == null || next.isBlank()
+                response.path("isLast").asBoolean(next == null || next.isBlank())
         );
     }
 
@@ -353,6 +520,376 @@ public class JiraProviderClientImpl implements JiraProviderClient {
         }
     }
 
+    private String getWebhookJson(
+            URI uri,
+            String token,
+            String cloudId,
+            String projectKey,
+            URI callbackUri
+    ) {
+        try {
+            String response = restClient.get()
+                    .uri(uri)
+                    .headers(headers -> bearer(headers, token))
+                    .retrieve()
+                    .body(String.class);
+            if (response == null || response.isBlank()) {
+                throw invalidWebhookResponse(
+                        "GET",
+                        cloudId,
+                        projectKey,
+                        callbackUri,
+                        "empty response body"
+                );
+            }
+            return response;
+        } catch (RestClientResponseException exception) {
+            throw webhookHttpFailure(
+                    exception,
+                    cloudId,
+                    projectKey,
+                    callbackUri
+            );
+        }
+    }
+
+    private JsonNode postWebhookJson(
+            URI uri,
+            String token,
+            String cloudId,
+            String projectKey,
+            URI callbackUri,
+            Object body
+    ) {
+        try {
+            String response = restClient.post()
+                    .uri(uri)
+                    .headers(headers -> bearer(headers, token))
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(body)
+                    .retrieve()
+                    .body(String.class);
+            return parseWebhookJson(
+                    response,
+                    "POST",
+                    cloudId,
+                    projectKey,
+                    callbackUri
+            );
+        } catch (RestClientResponseException exception) {
+            throw webhookHttpFailure(
+                    exception,
+                    cloudId,
+                    projectKey,
+                    callbackUri
+            );
+        }
+    }
+
+    private JiraWebhookPage parseWebhookPage(
+            String body,
+            String cloudId,
+            String projectKey,
+            URI callbackUri
+    ) {
+        try {
+            JiraWebhookPage page = objectMapper.readValue(
+                    body,
+                    JiraWebhookPage.class
+            );
+            if (page == null || page.values() == null) {
+                throw invalidWebhookResponse(
+                        "GET",
+                        cloudId,
+                        projectKey,
+                        callbackUri,
+                        "values is missing",
+                        body
+                );
+            }
+            return page;
+        } catch (IntegrationException exception) {
+            throw exception;
+        } catch (RuntimeException exception) {
+            throw invalidWebhookResponse(
+                    "GET",
+                    cloudId,
+                    projectKey,
+                    callbackUri,
+                    "malformed PageBeanWebhook response",
+                    body
+            );
+        }
+    }
+
+    private JsonNode parseWebhookJson(
+            String body,
+            String operation,
+            String cloudId,
+            String projectKey,
+            URI callbackUri
+    ) {
+        if (body == null || body.isBlank()) {
+            throw invalidWebhookResponse(
+                    operation,
+                    cloudId,
+                    projectKey,
+                    callbackUri,
+                    "empty response body"
+            );
+        }
+        try {
+            return objectMapper.readTree(body);
+        } catch (RuntimeException exception) {
+            throw invalidWebhookResponse(
+                    operation,
+                    cloudId,
+                    projectKey,
+                    callbackUri,
+                    "malformed JSON response",
+                    body
+            );
+        }
+    }
+
+    private IntegrationException invalidWebhookResponse(
+            String operation,
+            String cloudId,
+            String projectKey,
+            URI callbackUri,
+            String reason
+    ) {
+        return invalidWebhookResponse(
+                operation,
+                cloudId,
+                projectKey,
+                callbackUri,
+                reason,
+                null
+        );
+    }
+
+    private IntegrationException invalidWebhookResponse(
+            String operation,
+            String cloudId,
+            String projectKey,
+            URI callbackUri,
+            String reason,
+            String body
+    ) {
+        log.warn(
+                "Jira dynamic webhook response invalid: operation={}, "
+                        + "providerStatus=2xx, cloudId={}, projectKey={}, "
+                        + "callbackHost={}, reason={}, body={}",
+                operation,
+                cloudId,
+                projectKey,
+                callbackUri == null ? "" : callbackUri.getHost(),
+                reason,
+                redactAndTruncate(body)
+        );
+        return providerResponseInvalid();
+    }
+
+    private String redactAndTruncate(String body) {
+        if (body == null || body.isBlank()) {
+            return "<empty>";
+        }
+        String redacted = body
+                .replaceAll(
+                        "(?i)\\\"(access_token|refresh_token|token|authorization|client_secret)\\\"\\s*:\\s*\\\"[^\\\"]*\\\"",
+                        "\\\"$1\\\":\\\"<redacted>\\\""
+                )
+                .replaceAll(
+                        "(?i)([?&](?:access_token|refresh_token|token|authorization|client_secret)=)[^&\\\"\\s]*",
+                        "$1<redacted>"
+                )
+                .replaceAll("(?i)Bearer\\s+[^\\s\\\"]+", "Bearer <redacted>")
+                .replaceAll("[\\r\\n]", " ");
+        return redacted.length() <= 1024
+                ? redacted
+                : redacted.substring(0, 1024) + "…";
+    }
+
+    private IntegrationException webhookHttpFailure(
+            RestClientResponseException exception,
+            String cloudId,
+            String projectKey,
+            URI callbackUri
+    ) {
+        JsonNode body = responseBody(exception);
+        int status = exception.getStatusCode().value();
+        logWebhookFailure(
+                status,
+                body,
+                cloudId,
+                projectKey,
+                callbackUri
+        );
+        if (status == 401 || status == 403) {
+            return new IntegrationException(
+                    HttpStatus.FORBIDDEN,
+                    "JIRA_WEBHOOK_PERMISSION_DENIED",
+                    "Jira denied webhook access; reconnect Jira with webhook scope"
+            );
+        }
+        if (status == 400) {
+            return IntegrationException.invalid(
+                    "JIRA_WEBHOOK_REGISTRATION_INVALID",
+                    "Jira rejected the webhook registration request"
+            );
+        }
+        if (status == 429 || isWebhookLimit(providerErrors(body))) {
+            return new IntegrationException(
+                    HttpStatus.TOO_MANY_REQUESTS,
+                    "JIRA_WEBHOOK_LIMIT_REACHED",
+                    "Jira dynamic webhook limit was reached"
+            );
+        }
+        return IntegrationException.unavailable("JIRA_WEBHOOK_PROVIDER_UNAVAILABLE");
+    }
+
+    private IntegrationException webhookRegistrationRejected(
+            int providerStatus,
+            JsonNode body,
+            String cloudId,
+            String projectKey,
+            URI callbackUri
+    ) {
+        List<String> errors = providerErrors(body);
+        logWebhookFailure(
+                providerStatus,
+                body,
+                cloudId,
+                projectKey,
+                callbackUri
+        );
+        if (isWebhookLimit(errors)) {
+            return new IntegrationException(
+                    HttpStatus.TOO_MANY_REQUESTS,
+                    "JIRA_WEBHOOK_LIMIT_REACHED",
+                    "Jira dynamic webhook limit was reached"
+            );
+        }
+        return IntegrationException.conflict(
+                "JIRA_WEBHOOK_REGISTRATION_REJECTED",
+                "Jira rejected the webhook registration: " + errorSummary(errors)
+        );
+    }
+
+    private void logWebhookFailure(
+            int providerStatus,
+            JsonNode body,
+            String cloudId,
+            String projectKey,
+            URI callbackUri
+    ) {
+        log.warn(
+                "Jira dynamic webhook registration rejected: providerStatus={}, "
+                        + "cloudId={}, projectKey={}, callbackHost={}, errors={}",
+                providerStatus,
+                cloudId,
+                projectKey,
+                callbackUri == null ? "" : callbackUri.getHost(),
+                errorSummary(providerErrors(body))
+        );
+    }
+
+    private JsonNode responseBody(RestClientResponseException exception) {
+        try {
+            String body = exception.getResponseBodyAsString();
+            return body == null || body.isBlank()
+                    ? objectMapper.createObjectNode()
+                    : objectMapper.readTree(body);
+        } catch (RuntimeException ignored) {
+            return objectMapper.createObjectNode();
+        }
+    }
+
+    private List<String> providerErrors(JsonNode response) {
+        List<String> values = new ArrayList<>();
+        collectErrors(response == null ? null : response.path("errors"), values);
+        collectErrors(response == null ? null : response.path("errorMessages"), values);
+        if (values.isEmpty() && response != null) {
+            collectErrors(response.path("message"), values);
+        }
+        return List.copyOf(values);
+    }
+
+    private void collectErrors(JsonNode node, List<String> values) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return;
+        }
+        if (node.isValueNode()) {
+            String value = node.asText();
+            if (value != null && !value.isBlank()) {
+                values.add(value);
+            }
+            return;
+        }
+        if (node.isArray()) {
+            node.forEach(value -> collectErrors(value, values));
+            return;
+        }
+        if (node.isObject()) {
+            node.properties().forEach(entry -> collectErrors(
+                    entry.getValue(),
+                    values
+            ));
+        }
+    }
+
+    private String errorSummary(List<String> errors) {
+        if (errors.isEmpty()) {
+            return "no provider error detail";
+        }
+        String summary = String.join("; ", errors)
+                .replaceAll("[\\r\\n]", " ");
+        return summary.length() <= 512 ? summary : summary.substring(0, 512);
+    }
+
+    private boolean isWebhookLimit(List<String> errors) {
+        String detail = String.join(" ", errors).toLowerCase(java.util.Locale.ROOT);
+        return detail.contains("webhook")
+                && (detail.contains("limit")
+                        || detail.contains("maximum")
+                        || detail.contains("too many"));
+    }
+
+    private boolean matchesWebhook(
+            JiraWebhook webhook,
+            String projectKey,
+            URI callbackUri,
+            boolean exactUrl
+    ) {
+        if (!webhookJql(projectKey).equals(webhook.jqlFilter())
+                || !new LinkedHashSet<>(WEBHOOK_EVENTS).equals(
+                        new LinkedHashSet<>(webhook.events())
+                )) {
+            return false;
+        }
+        if (exactUrl) {
+            return callbackUri.toString().equals(webhook.url());
+        }
+        try {
+            URI existing = URI.create(webhook.url());
+            return sameCallbackEndpoint(existing, callbackUri);
+        } catch (IllegalArgumentException exception) {
+            return false;
+        }
+    }
+
+    private boolean sameCallbackEndpoint(URI existing, URI expected) {
+        return java.util.Objects.equals(existing.getScheme(), expected.getScheme())
+                && java.util.Objects.equals(existing.getHost(), expected.getHost())
+                && existing.getPort() == expected.getPort()
+                && java.util.Objects.equals(existing.getPath(), expected.getPath());
+    }
+
+    private String webhookJql(String projectKey) {
+        return "project = " + safeJqlKey(projectKey);
+    }
+
     private void bearer(HttpHeaders headers, String token) {
         headers.setBearerAuth(token);
         headers.setAccept(List.of(MediaType.APPLICATION_JSON));
@@ -370,6 +907,10 @@ public class JiraProviderClientImpl implements JiraProviderClient {
     private JiraIssueSnapshot toIssue(JsonNode issue) {
         JsonNode fields = issue.path("fields");
         JsonNode sprint = first(fields.path("customfield_10020"));
+        LocalDateTime updatedAt = parseDateOrDateTime(text(fields, "updated"));
+        if (updatedAt == null) {
+            throw providerResponseInvalid();
+        }
         return new JiraIssueSnapshot(
                 requiredText(issue, "id"),
                 requiredText(issue, "key"),
@@ -382,7 +923,7 @@ public class JiraProviderClientImpl implements JiraProviderClient {
                 nestedText(fields, "reporter", "accountId"),
                 parseDateOrDateTime(text(fields, "duedate")),
                 parseDateOrDateTime(text(fields, "created")),
-                parseDateOrDateTime(text(fields, "updated")),
+                updatedAt,
                 parseDateOrDateTime(text(fields, "resolutiondate")),
                 nestedText(fields, "resolution", "name"),
                 sprint == null ? null : text(sprint, "id"),
@@ -406,8 +947,17 @@ public class JiraProviderClientImpl implements JiraProviderClient {
         }
         try {
             return OffsetDateTime.parse(value).toLocalDateTime();
-        } catch (RuntimeException ignored) {
-            return LocalDate.parse(value).atStartOfDay();
+        } catch (RuntimeException isoException) {
+            try {
+                return OffsetDateTime.parse(value, JIRA_OFFSET_DATE_TIME)
+                        .toLocalDateTime();
+            } catch (RuntimeException jiraOffsetException) {
+                try {
+                    return LocalDate.parse(value).atStartOfDay();
+                } catch (RuntimeException dateException) {
+                    throw providerResponseInvalid();
+                }
+            }
         }
     }
 
@@ -485,7 +1035,7 @@ public class JiraProviderClientImpl implements JiraProviderClient {
         return value;
     }
 
-    private JdkClientHttpRequestFactory requestFactory(
+    private static JdkClientHttpRequestFactory requestFactory(
             IntegrationProperties integrationProperties
     ) {
         Duration connect = integrationProperties.httpConnectTimeout() == null

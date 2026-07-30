@@ -26,13 +26,29 @@ public interface JiraProviderClient {
             URI callbackUri
     );
 
+    /**
+     * Reuses a matching dynamic webhook where possible, and replaces only the
+     * webhook identified by {@code existingWebhookId} when its configuration
+     * no longer matches the current board.
+     */
+    JiraWebhookRegistration ensureWebhook(
+            String accessToken,
+            String cloudId,
+            String projectKey,
+            URI callbackUri,
+            String existingWebhookId
+    );
+
+    List<JiraWebhook> listWebhooks(String accessToken, String cloudId);
+
     void deleteWebhook(String accessToken, String cloudId, String webhookId);
 
     JiraIssuePage searchIssues(
             String accessToken,
             String cloudId,
             String projectKey,
-            LocalDateTime updatedAfter,
+            LocalDateTime lowerBoundForJql,
+            LocalDateTime upperBoundExclusiveForJql,
             String nextPageToken
     );
 }

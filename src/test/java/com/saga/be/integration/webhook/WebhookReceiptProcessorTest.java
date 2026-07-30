@@ -30,6 +30,8 @@ class WebhookReceiptProcessorTest {
     private IntegrationSecretCipher cipher;
     private AutomaticSyncDispatcher dispatcher;
     private IntegrationAvailability availability;
+    private WebhookReceiptClaimService claimService;
+    private WebhookReceiptStateService stateService;
     private WebhookReceiptProcessor processor;
 
     @BeforeEach
@@ -38,10 +40,14 @@ class WebhookReceiptProcessorTest {
         cipher = mock(IntegrationSecretCipher.class);
         dispatcher = mock(AutomaticSyncDispatcher.class);
         availability = mock(IntegrationAvailability.class);
+        claimService = mock(WebhookReceiptClaimService.class);
+        stateService = mock(WebhookReceiptStateService.class);
         when(availability.jiraEnabled()).thenReturn(true);
         when(availability.gitHubEnabled()).thenReturn(true);
         processor = new WebhookReceiptProcessor(
                 receiptRepository,
+                claimService,
+                stateService,
                 mock(GitHubInstallationRepository.class),
                 mock(GitRepoRepository.class),
                 cipher,
@@ -49,8 +55,6 @@ class WebhookReceiptProcessorTest {
                 dispatcher,
                 availability
         );
-        when(receiptRepository.saveAndFlush(any(WebhookReceipt.class)))
-                .thenAnswer(invocation -> invocation.getArgument(0));
     }
 
     @Test
@@ -61,18 +65,16 @@ class WebhookReceiptProcessorTest {
         receipt.setReceiptStatus(WebhookReceiptStatus.PROCESSING);
         receipt.setAttemptCount(1);
         receipt.setUpdatedAt(LocalDateTime.now().minusMinutes(6));
-        when(receiptRepository
-                .findTop100ByReceiptStatusInOrderByCreatedAtAsc(any()))
-                .thenReturn(List.of(receipt));
-        when(receiptRepository.findById(receiptId))
-                .thenReturn(Optional.of(receipt));
+        when(receiptRepository.findTop100IdsByReceiptStatusInOrderByCreatedAtAsc(any()))
+                .thenReturn(List.of(receiptId));
+        when(claimService.recoverStaleProcessing(any(), any())).thenReturn(true);
+        when(claimService.claim(receiptId)).thenReturn(Optional.of(new WebhookReceiptClaim(receiptId, IntegrationProvider.JIRA, boardId, "delivery", "jira:issue_updated", "ciphertext")));
         when(cipher.decrypt("ciphertext", "webhook:JIRA:delivery"))
                 .thenReturn("{}");
 
         processor.retryIncomplete();
 
-        assertEquals(WebhookReceiptStatus.COMPLETED, receipt.getReceiptStatus());
-        assertEquals(2, receipt.getAttemptCount());
+        verify(stateService).complete(receiptId);
         verify(dispatcher).reconcileJira(boardId);
     }
 
@@ -84,13 +86,13 @@ class WebhookReceiptProcessorTest {
         );
         receipt.setReceiptStatus(WebhookReceiptStatus.PROCESSING);
         receipt.setUpdatedAt(LocalDateTime.now());
-        when(receiptRepository
-                .findTop100ByReceiptStatusInOrderByCreatedAtAsc(any()))
-                .thenReturn(List.of(receipt));
+        when(receiptRepository.findTop100IdsByReceiptStatusInOrderByCreatedAtAsc(any()))
+                .thenReturn(List.of(receipt.getId()));
+        when(claimService.recoverStaleProcessing(any(), any())).thenReturn(false);
 
         processor.retryIncomplete();
 
-        verify(receiptRepository, never()).findById(any());
+        verify(claimService).claim(receipt.getId());
         assertEquals(
                 WebhookReceiptStatus.PROCESSING,
                 receipt.getReceiptStatus()

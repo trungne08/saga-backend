@@ -21,6 +21,8 @@ import java.util.UUID;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 
@@ -29,8 +31,11 @@ public class WebhookReceiptProcessor {
 
     private static final int MAX_ATTEMPTS = 5;
     private static final long PROCESSING_LEASE_MINUTES = 5;
+    private static final Logger log = LoggerFactory.getLogger(WebhookReceiptProcessor.class);
 
     private final WebhookReceiptRepository receiptRepository;
+    private final WebhookReceiptClaimService claimService;
+    private final WebhookReceiptStateService stateService;
     private final GitHubInstallationRepository installationRepository;
     private final GitRepoRepository gitRepoRepository;
     private final IntegrationSecretCipher cipher;
@@ -40,6 +45,8 @@ public class WebhookReceiptProcessor {
 
     public WebhookReceiptProcessor(
             WebhookReceiptRepository receiptRepository,
+            WebhookReceiptClaimService claimService,
+            WebhookReceiptStateService stateService,
             GitHubInstallationRepository installationRepository,
             GitRepoRepository gitRepoRepository,
             IntegrationSecretCipher cipher,
@@ -48,6 +55,8 @@ public class WebhookReceiptProcessor {
             IntegrationAvailability availability
     ) {
         this.receiptRepository = receiptRepository;
+        this.claimService = claimService;
+        this.stateService = stateService;
         this.installationRepository = installationRepository;
         this.gitRepoRepository = gitRepoRepository;
         this.cipher = cipher;
@@ -70,85 +79,61 @@ public class WebhookReceiptProcessor {
         if (!availability.jiraEnabled() && !availability.gitHubEnabled()) {
             return;
         }
-        for (WebhookReceipt receipt : receiptRepository
-                .findTop100ByReceiptStatusInOrderByCreatedAtAsc(List.of(
+        for (UUID receiptId : receiptRepository
+                .findTop100IdsByReceiptStatusInOrderByCreatedAtAsc(List.of(
                         WebhookReceiptStatus.RECEIVED,
                         WebhookReceiptStatus.FAILED,
                         WebhookReceiptStatus.PROCESSING
                 ))) {
             try {
-                if (receipt.getReceiptStatus()
-                        == WebhookReceiptStatus.PROCESSING) {
-                    if (!processingLeaseExpired(receipt)) {
-                        continue;
-                    }
-                    receipt.setReceiptStatus(WebhookReceiptStatus.FAILED);
-                    receipt.setErrorCategory("WORKER_INTERRUPTED");
-                    receiptRepository.saveAndFlush(receipt);
-                }
-                if (receipt.getAttemptCount() < MAX_ATTEMPTS) {
-                    process(receipt.getId());
-                }
-            } catch (RuntimeException ignored) {
-                // Another node may have claimed the optimistic-lock version.
-                // The durable row remains eligible for a later retry.
+                claimService.recoverStaleProcessing(receiptId, LocalDateTime.now().minusMinutes(PROCESSING_LEASE_MINUTES));
+                process(receiptId);
+            } catch (RuntimeException exception) {
+                logFailure(receiptId, null, null, "SCHEDULE_RETRY", exception);
             }
         }
     }
 
     public void process(UUID receiptId) {
-        WebhookReceipt receipt = receiptRepository.findById(receiptId)
-                .orElse(null);
-        if (
-            receipt == null
-            || receipt.getReceiptStatus() == WebhookReceiptStatus.COMPLETED
-            || receipt.getReceiptStatus() == WebhookReceiptStatus.PROCESSING
-            || (receipt.getProvider() == IntegrationProvider.JIRA
+        WebhookReceiptClaim receipt = claimService.claim(receiptId).orElse(null);
+        if (receipt == null || (receipt.provider() == IntegrationProvider.JIRA
                     && !availability.jiraEnabled())
-            || (receipt.getProvider() == IntegrationProvider.GITHUB
+            || (receipt.provider() == IntegrationProvider.GITHUB
                     && !availability.gitHubEnabled())
         ) {
             return;
         }
-        receipt.setReceiptStatus(WebhookReceiptStatus.PROCESSING);
-        receipt.setAttemptCount(receipt.getAttemptCount() + 1);
-        receiptRepository.saveAndFlush(receipt);
         try {
             String plaintext = cipher.decrypt(
-                    receipt.getPayloadCiphertext(),
+                    receipt.payloadCiphertext(),
                     "webhook:"
-                            + receipt.getProvider()
+                            + receipt.provider()
                             + ":"
-                            + receipt.getDeliveryId()
+                            + receipt.deliveryId()
             );
             JsonNode payload = objectMapper.readTree(plaintext);
-            if (receipt.getProvider() == IntegrationProvider.JIRA) {
-                if (receipt.getTargetId() != null) {
-                    dispatcher.reconcileJira(receipt.getTargetId());
+            if (receipt.provider() == IntegrationProvider.JIRA) {
+                if (receipt.targetId() != null) {
+                    dispatcher.reconcileJira(receipt.targetId());
                 }
             } else {
                 routeGitHub(receipt, payload);
             }
-            receipt.setPayloadCiphertext("");
-            receipt.setReceiptStatus(WebhookReceiptStatus.COMPLETED);
-            receipt.setProcessedAt(LocalDateTime.now());
-            receipt.setErrorCategory(null);
-            receiptRepository.saveAndFlush(receipt);
+            stateService.complete(receiptId);
         } catch (Exception exception) {
-            receipt.setReceiptStatus(WebhookReceiptStatus.FAILED);
-            receipt.setErrorCategory("WEBHOOK_PROCESSING_FAILED");
-            receiptRepository.saveAndFlush(receipt);
+            stateService.fail(receiptId, "WEBHOOK_PROCESSING_FAILED");
+            logFailure(receiptId, receipt.provider(), receipt.deliveryId(), "PROCESS", exception);
         }
     }
 
-    private void routeGitHub(WebhookReceipt receipt, JsonNode payload) {
-        if ("installation".equals(receipt.getEventType())) {
+    private void routeGitHub(WebhookReceiptClaim receipt, JsonNode payload) {
+        if ("installation".equals(receipt.eventType())) {
             updateInstallation(payload);
-        } else if ("installation_repositories".equals(receipt.getEventType())) {
+        } else if ("installation_repositories".equals(receipt.eventType())) {
             updateRepositoryAccess(payload);
         }
-        if (receipt.getTargetId() != null) {
-            dispatcher.reconcileGitHub(receipt.getTargetId());
+        if (receipt.targetId() != null) {
+            dispatcher.reconcileGitHub(receipt.targetId());
         }
     }
 
@@ -208,15 +193,12 @@ public class WebhookReceiptProcessor {
         }
     }
 
-    private boolean processingLeaseExpired(WebhookReceipt receipt) {
-        LocalDateTime lastActivity = receipt.getUpdatedAt() == null
-                ? receipt.getCreatedAt()
-                : receipt.getUpdatedAt();
-        return lastActivity == null
-                || lastActivity.isBefore(
-                        LocalDateTime.now().minusMinutes(
-                                PROCESSING_LEASE_MINUTES
-                        )
-                );
+    private void logFailure(UUID receiptId, IntegrationProvider provider, String deliveryId,
+            String stage, Exception exception) {
+        Throwable root = exception;
+        while (root.getCause() != null && root.getCause() != root) root = root.getCause();
+        log.error("Webhook receipt failed: receiptId={}, provider={}, deliveryId={}, stage={}, exceptionClass={}, rootCauseClass={}",
+                receiptId, provider, deliveryId == null ? null : Integer.toHexString(deliveryId.hashCode()), stage,
+                exception.getClass().getName(), root.getClass().getName(), exception);
     }
 }

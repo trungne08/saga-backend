@@ -19,7 +19,9 @@ public record SyncStatusResponse(
             LocalDateTime startedAt,
             LocalDateTime completedAt,
             Integer itemsProcessed,
-            Integer itemsFailed
+            Integer itemsFailed,
+            String errorCategory,
+            String failureStage
     ) {
         public static Job from(SyncJobLog log) {
             return new Job(
@@ -30,7 +32,11 @@ public record SyncStatusResponse(
                     log.getStartedAt(),
                     log.getCompletedAt(),
                     log.getItemsProcessed(),
-                    log.getItemsFailed()
+                    log.getItemsFailed(),
+                    log.getErrorCategory() == null
+                            ? log.getErrorMessage()
+                            : log.getErrorCategory(),
+                    log.getFailureStage()
             );
         }
     }

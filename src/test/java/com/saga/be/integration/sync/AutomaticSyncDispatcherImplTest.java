@@ -1,17 +1,24 @@
 package com.saga.be.integration.sync;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.saga.be.config.IntegrationProperties;
 import com.saga.be.config.IntegrationAvailability;
 import com.saga.be.entity.GitHubInstallation;
@@ -23,6 +30,7 @@ import com.saga.be.entity.enums.GitHubInstallationStatus;
 import com.saga.be.entity.enums.IntegrationStatus;
 import com.saga.be.entity.enums.SyncJobStatus;
 import com.saga.be.entity.enums.SyncJobType;
+import com.saga.be.exception.IntegrationException;
 import com.saga.be.integration.project.JiraCredentialService;
 import com.saga.be.integration.provider.GitHubProviderClient;
 import com.saga.be.integration.provider.JiraIssuePage;
@@ -39,6 +47,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.slf4j.LoggerFactory;
 
 class AutomaticSyncDispatcherImplTest {
 
@@ -50,10 +59,14 @@ class AutomaticSyncDispatcherImplTest {
     private GitRepoRepository gitRepoRepository;
     private GitHubProviderClient gitHubClient;
     private GitHubInitialBackfillJobService initialBackfillJobService;
+    private JiraSyncJobService jiraSyncJobService;
+    private SyncJobFinalizationService syncJobFinalizationService;
+    private JiraBoardStateService jiraBoardStateService;
     private IntegrationAvailability availability;
     private AutomaticSyncDispatcherImpl dispatcher;
     private UUID boardId;
     private JiraBoard board;
+    private SyncJobLog jiraJob;
 
     @BeforeEach
     void setUp() {
@@ -67,6 +80,9 @@ class AutomaticSyncDispatcherImplTest {
         initialBackfillJobService = mock(
                 GitHubInitialBackfillJobService.class
         );
+        jiraSyncJobService = mock(JiraSyncJobService.class);
+        syncJobFinalizationService = mock(SyncJobFinalizationService.class);
+        jiraBoardStateService = mock(JiraBoardStateService.class);
         availability = mock(IntegrationAvailability.class);
         when(availability.jiraEnabled()).thenReturn(true);
         when(availability.gitHubEnabled()).thenReturn(true);
@@ -80,6 +96,9 @@ class AutomaticSyncDispatcherImplTest {
                 jiraUpsertService,
                 mock(GitHubDataUpsertService.class),
                 initialBackfillJobService,
+                jiraSyncJobService,
+                syncJobFinalizationService,
+                jiraBoardStateService,
                 availability,
                 new IntegrationProperties(
                         null,
@@ -104,6 +123,16 @@ class AutomaticSyncDispatcherImplTest {
         board.setId(boardId);
         when(boardRepository.findById(boardId))
                 .thenReturn(Optional.of(board));
+        jiraJob = SyncJobLog.builder()
+                .targetSystem("JIRA")
+                .targetId(boardId)
+                .jobType(SyncJobType.INITIAL_BACKFILL)
+                .status(SyncJobStatus.IN_PROGRESS)
+                .startedAt(LocalDateTime.now())
+                .build();
+        jiraJob.setId(UUID.randomUUID());
+        when(jiraSyncJobService.claim(eq(boardId), any()))
+                .thenReturn(Optional.of(jiraJob));
         when(credentialService.validAccessToken(board)).thenReturn("token");
         when(jobRepository.saveAndFlush(any(SyncJobLog.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
@@ -124,14 +153,16 @@ class AutomaticSyncDispatcherImplTest {
                 eq("cloud-id"),
                 eq("SAGA"),
                 any(),
+                any(),
                 eq(null)
         )).thenReturn(new JiraIssuePage(List.of(first), "page-2", false));
         when(jiraClient.searchIssues(
-                "token",
-                "cloud-id",
-                "SAGA",
-                null,
-                "page-2"
+                eq("token"),
+                eq("cloud-id"),
+                eq("SAGA"),
+                isNull(),
+                any(),
+                eq("page-2")
         )).thenReturn(new JiraIssuePage(List.of(second), null, true));
         when(jiraUpsertService.upsert(any(), any())).thenReturn(true);
 
@@ -142,22 +173,19 @@ class AutomaticSyncDispatcherImplTest {
                 eq("cloud-id"),
                 eq("SAGA"),
                 eq(null),
+                any(),
                 any()
         );
-        assertEquals(
-                LocalDateTime.parse("2026-07-29T11:00:00"),
-                board.getSyncCursor()
+        verify(jiraBoardStateService).complete(eq(boardId), any());
+        verify(syncJobFinalizationService).finalizeJob(
+                eq(jiraJob.getId()),
+                eq(SyncJobStatus.COMPLETED),
+                eq(2),
+                eq(0),
+                any(),
+                isNull(),
+                isNull()
         );
-        assertEquals(IntegrationStatus.ACTIVE, board.getConnectionStatus());
-        assertEquals(0, board.getConsecutiveFailures());
-        ArgumentCaptor<SyncJobLog> jobs =
-                ArgumentCaptor.forClass(SyncJobLog.class);
-        verify(jobRepository, times(2)).saveAndFlush(jobs.capture());
-        assertEquals(
-                SyncJobStatus.COMPLETED,
-                jobs.getAllValues().get(1).getStatus()
-        );
-        assertEquals(2, jobs.getAllValues().get(1).getItemsProcessed());
     }
 
     @Test
@@ -174,6 +202,7 @@ class AutomaticSyncDispatcherImplTest {
                 eq("cloud-id"),
                 eq("SAGA"),
                 any(),
+                any(),
                 eq(null)
         )).thenReturn(new JiraIssuePage(List.of(issue), null, true));
         when(jiraUpsertService.upsert(boardId, issue))
@@ -182,16 +211,199 @@ class AutomaticSyncDispatcherImplTest {
         dispatcher.syncJira(boardId, SyncJobType.RECONCILIATION);
 
         assertEquals(originalCursor, board.getSyncCursor());
-        assertEquals(IntegrationStatus.DEGRADED, board.getConnectionStatus());
-        assertEquals(1, board.getConsecutiveFailures());
-        ArgumentCaptor<SyncJobLog> jobs =
-                ArgumentCaptor.forClass(SyncJobLog.class);
-        verify(jobRepository, times(2)).saveAndFlush(jobs.capture());
-        SyncJobLog completed = jobs.getAllValues().get(1);
-        assertEquals(SyncJobStatus.PARTIAL_FAILURE, completed.getStatus());
-        assertEquals(1, completed.getItemsFailed());
-        assertNull(completed.getCursorAfter());
-        assertEquals("ITEM_UPSERT_FAILED", completed.getErrorMessage());
+        verify(jiraBoardStateService, never()).complete(any(), any());
+        verify(jiraBoardStateService).degrade(boardId);
+        verify(syncJobFinalizationService).finalizeJob(
+                jiraJob.getId(),
+                SyncJobStatus.PARTIAL_FAILURE,
+                0,
+                1,
+                null,
+                "ITEM_UPSERT_FAILED",
+                "UPSERT_ISSUES"
+        );
+    }
+
+    @Test
+    void jiraBackfillWithNoIssuesCompletesWithZeroCounts() {
+        when(jiraClient.searchIssues(
+                eq("token"), eq("cloud-id"), eq("SAGA"), any(), any(), eq(null)
+        )).thenReturn(new JiraIssuePage(List.of(), null, true));
+
+        dispatcher.syncJira(boardId, SyncJobType.INITIAL_BACKFILL);
+
+        verify(syncJobFinalizationService).finalizeJob(
+                eq(jiraJob.getId()),
+                eq(SyncJobStatus.COMPLETED),
+                eq(0),
+                eq(0),
+                any(),
+                isNull(),
+                isNull()
+        );
+    }
+
+    @Test
+    void reconciliationReadsOverlapWindowAndCountsIssueUpdatedBeforeJobStart() {
+        LocalDateTime issueUpdated = LocalDateTime.now().minusSeconds(4);
+        LocalDateTime committedCursor = issueUpdated.plusSeconds(1);
+        board.setSyncCursor(committedCursor);
+        JiraIssueSnapshot sdpOne = new JiraIssueSnapshot(
+                "10452", "SDP-1", "SAGA WEBHOOK TEST 01 - UPDATED",
+                "Task", "In Progress", null, null, null, null, null,
+                issueUpdated.minusDays(1), issueUpdated, null, null, null, null
+        );
+        when(jiraClient.searchIssues(
+                eq("token"), eq("cloud-id"), eq("SAGA"), any(), any(), eq(null)
+        )).thenReturn(new JiraIssuePage(List.of(sdpOne), null, true));
+
+        dispatcher.syncJira(boardId, SyncJobType.RECONCILIATION);
+
+        ArgumentCaptor<LocalDateTime> lowerBound = ArgumentCaptor.forClass(
+                LocalDateTime.class
+        );
+        ArgumentCaptor<LocalDateTime> upperBound = ArgumentCaptor.forClass(
+                LocalDateTime.class
+        );
+        verify(jiraClient).searchIssues(
+                eq("token"), eq("cloud-id"), eq("SAGA"),
+                lowerBound.capture(), upperBound.capture(), eq(null)
+        );
+        assertEquals(
+                committedCursor.minusMinutes(5).withSecond(0).withNano(0),
+                lowerBound.getValue()
+        );
+        assertThat(upperBound.getValue()).isAfter(issueUpdated);
+        verify(jiraUpsertService).upsert(boardId, sdpOne);
+        ArgumentCaptor<LocalDateTime> committedUpperBound =
+                ArgumentCaptor.forClass(LocalDateTime.class);
+        verify(jiraBoardStateService).complete(
+                eq(boardId), committedUpperBound.capture()
+        );
+        assertEquals(
+                upperBound.getValue().minusMinutes(1),
+                committedUpperBound.getValue().withSecond(0).withNano(0)
+        );
+        verify(syncJobFinalizationService).finalizeJob(
+                eq(jiraJob.getId()),
+                eq(SyncJobStatus.COMPLETED),
+                eq(1),
+                eq(0),
+                any(),
+                isNull(),
+                isNull()
+        );
+    }
+
+    @Test
+    void reconciliationDoesNotProcessIssueNewerThanCapturedUpperBound() {
+        JiraIssueSnapshot futureIssue = issue(
+                "future",
+                LocalDateTime.now().plusMinutes(1)
+        );
+        when(jiraClient.searchIssues(
+                eq("token"), eq("cloud-id"), eq("SAGA"), any(), any(), eq(null)
+        )).thenReturn(new JiraIssuePage(List.of(futureIssue), null, true));
+
+        dispatcher.syncJira(boardId, SyncJobType.RECONCILIATION);
+
+        verify(jiraUpsertService, never()).upsert(any(), any());
+        verify(syncJobFinalizationService).finalizeJob(
+                eq(jiraJob.getId()),
+                eq(SyncJobStatus.COMPLETED),
+                eq(0),
+                eq(0),
+                any(),
+                isNull(),
+                isNull()
+        );
+    }
+
+    @Test
+    void jiraSearchFailureFinalizesJobAsFailed() {
+        when(jiraClient.searchIssues(
+                eq("token"), eq("cloud-id"), eq("SAGA"), any(), any(), eq(null)
+        )).thenThrow(IntegrationException.unavailable("JIRA_PROVIDER_UNAVAILABLE"));
+
+        dispatcher.syncJira(boardId, SyncJobType.INITIAL_BACKFILL);
+
+        verify(syncJobFinalizationService).finalizeJob(
+                jiraJob.getId(),
+                SyncJobStatus.FAILED,
+                0,
+                0,
+                null,
+                "JIRA_PROVIDER_UNAVAILABLE",
+                "SEARCH_ISSUES"
+        );
+    }
+
+    @Test
+    void jiraCredentialFailureFinalizesJobAsFailed() {
+        when(credentialService.validAccessToken(board))
+                .thenThrow(new IllegalStateException("decrypt failed"));
+
+        dispatcher.syncJira(boardId, SyncJobType.INITIAL_BACKFILL);
+
+        verify(syncJobFinalizationService).finalizeJob(
+                jiraJob.getId(),
+                SyncJobStatus.FAILED,
+                0,
+                0,
+                null,
+                "UNEXPECTED_SYNC_FAILURE",
+                "LOAD_CREDENTIAL"
+        );
+    }
+
+    @Test
+    void jiraFailureLogsThrowableWithoutLeakingCredentialText() {
+        when(credentialService.validAccessToken(board))
+                .thenThrow(new IllegalStateException("ACCESS_TOKEN_SECRET"));
+        Logger logger = (Logger) LoggerFactory.getLogger(
+                AutomaticSyncDispatcherImpl.class
+        );
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            dispatcher.syncJira(boardId, SyncJobType.INITIAL_BACKFILL);
+            ILoggingEvent event = appender.list.stream()
+                    .filter(value -> value.getFormattedMessage()
+                            .contains("Jira sync failed"))
+                    .findFirst()
+                    .orElseThrow();
+            assertNotNull(event.getThrowableProxy());
+            assertEquals(true, event.getFormattedMessage()
+                    .contains("stage=LOAD_CREDENTIAL"));
+            assertEquals(false, event.getFormattedMessage()
+                    .contains("ACCESS_TOKEN_SECRET"));
+            assertEquals(false, event.getThrowableProxy().getMessage()
+                    .contains("ACCESS_TOKEN_SECRET"));
+        } finally {
+            logger.detachAppender(appender);
+        }
+    }
+
+    @Test
+    void jiraDegradationFailureDoesNotPreventFailedFinalization() {
+        when(jiraClient.searchIssues(
+                eq("token"), eq("cloud-id"), eq("SAGA"), any(), any(), eq(null)
+        )).thenThrow(new IllegalStateException("provider failed"));
+        doThrow(new IllegalStateException("board persistence failed"))
+                .when(jiraBoardStateService).degrade(boardId);
+
+        dispatcher.syncJira(boardId, SyncJobType.INITIAL_BACKFILL);
+
+        verify(syncJobFinalizationService).finalizeJob(
+                jiraJob.getId(),
+                SyncJobStatus.FAILED,
+                0,
+                0,
+                null,
+                "UNEXPECTED_SYNC_FAILURE",
+                "SEARCH_ISSUES"
+        );
     }
 
     @Test

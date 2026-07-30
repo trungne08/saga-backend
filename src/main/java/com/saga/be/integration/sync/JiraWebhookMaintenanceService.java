@@ -5,6 +5,7 @@ import com.saga.be.entity.JiraBoard;
 import com.saga.be.entity.enums.IntegrationStatus;
 import com.saga.be.integration.project.JiraCredentialService;
 import com.saga.be.integration.provider.JiraProviderClient;
+import com.saga.be.integration.provider.JiraWebhookRegistration;
 import com.saga.be.repository.JiraBoardRepository;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -46,31 +47,49 @@ public class JiraWebhookMaintenanceService {
         ) {
             return;
         }
+        String token = null;
+        JiraWebhookRegistration registration = null;
         try {
-            String token = credentialService.validAccessToken(board);
+            token = credentialService.validAccessToken(board);
             String secret = randomSecret();
-            String newWebhookId = jiraClient.registerWebhook(
+            registration = jiraClient.ensureWebhook(
                     token,
                     board.getCloudId(),
                     board.getProjectKey(),
-                    callback(secret)
+                    callback(secret),
+                    board.getWebhookId()
             );
-            String oldWebhookId = board.getWebhookId();
-            board.setWebhookId(newWebhookId);
-            board.setWebhookSecretHash(sha256(secret));
+            board.setWebhookId(registration.webhookId());
+            if (registration.created()) {
+                board.setWebhookSecretHash(sha256(secret));
+            }
             board.setWebhookExpiresAt(LocalDateTime.now().plusDays(29));
             boardRepository.saveAndFlush(board);
-            if (oldWebhookId != null) {
-                jiraClient.deleteWebhook(
-                        token,
-                        board.getCloudId(),
-                        oldWebhookId
-                );
-            }
         } catch (RuntimeException exception) {
+            compensateCreatedWebhook(board, token, registration);
             board.setConnectionStatus(IntegrationStatus.DEGRADED);
             board.setConsecutiveFailures(board.getConsecutiveFailures() + 1);
             boardRepository.saveAndFlush(board);
+        }
+    }
+
+    private void compensateCreatedWebhook(
+            JiraBoard board,
+            String token,
+            JiraWebhookRegistration registration
+    ) {
+        if (token == null || registration == null || !registration.created()) {
+            return;
+        }
+        try {
+            jiraClient.deleteWebhook(
+                    token,
+                    board.getCloudId(),
+                    registration.webhookId()
+            );
+        } catch (RuntimeException ignored) {
+            // The next reconciliation attempt can register a fresh webhook.
+            // Never log bearer tokens or callback query tokens.
         }
     }
 
