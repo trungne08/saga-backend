@@ -14,6 +14,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.forwardedUrl;
 
 import com.saga.be.security.ApplicationRole;
 import com.saga.be.security.NoStoreOAuth2AuthorizedClientRepository;
@@ -66,6 +68,19 @@ class SecurityIntegrationTest {
 
         mockMvc.perform(get("/actuator/health"))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    void landingPageIsPublicAndLinksToOperationalEndpoints() throws Exception {
+        mockMvc.perform(get("/"))
+                .andExpect(status().isOk())
+                .andExpect(forwardedUrl("index.html"));
+
+        mockMvc.perform(get("/index.html"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("SAGA Backend")))
+                .andExpect(content().string(containsString("/swagger-ui/index.html")))
+                .andExpect(content().string(containsString("/actuator/health")));
     }
 
     @Test

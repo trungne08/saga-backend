@@ -66,7 +66,8 @@ public class SecurityConfig {
             CognitoLogoutSuccessHandler logoutSuccessHandler,
             JsonAuthenticationEntryPoint authenticationEntryPoint,
             JsonAccessDeniedHandler accessDeniedHandler,
-            @Value("${springdoc.api-docs.enabled:false}") boolean swaggerEnabled
+            @Value("${springdoc.api-docs.enabled:false}") boolean apiDocsEnabled,
+            @Value("${springdoc.swagger-ui.enabled:false}") boolean swaggerUiEnabled
     ) throws Exception {
         http
                 .cors(cors -> cors.configurationSource(corsConfigurationSource))
@@ -91,6 +92,13 @@ public class SecurityConfig {
                     ).permitAll();
                     authorize.requestMatchers(
                             HttpMethod.GET,
+                            "/",
+                            "/index.html",
+                            "/favicon.ico",
+                            "/assets/**",
+                            "/css/**",
+                            "/js/**",
+                            "/images/**",
                             "/api/auth/login",
                             "/actuator/health",
                             "/actuator/health/**"
@@ -100,7 +108,7 @@ public class SecurityConfig {
                             "/api/webhooks/github",
                             "/api/webhooks/jira"
                     ).permitAll();
-                    if (swaggerEnabled) {
+                    if (apiDocsEnabled || swaggerUiEnabled) {
                         authorize.requestMatchers(
                                 "/v3/api-docs/**",
                                 "/swagger-ui/**",
