@@ -11,4 +11,6 @@ public interface StudentRepository extends JpaRepository<Student, UUID> {
     Optional<Student> findByCognitoSub(String cognitoSub);
 
     Optional<Student> findByEmailIgnoreCase(String email);
+
+    Optional<Student> findByStudentCode(String studentCode);
 }
