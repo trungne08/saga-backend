@@ -40,6 +40,21 @@ export function isVerified(value) {
     || (typeof value === "string" && value.trim().toLowerCase() === "true");
 }
 
+export function isTrustedProviderName(value) {
+  return typeof value === "string"
+    && value.toLowerCase() === TRUSTED_PROVIDER.toLowerCase();
+}
+
+export function hasTrustedProviderPrefix(userName) {
+  if (typeof userName !== "string") {
+    return false;
+  }
+
+  const separator = userName.indexOf("_");
+  return separator > 0
+    && isTrustedProviderName(userName.slice(0, separator));
+}
+
 export function parseExternalUsername(userName) {
   if (typeof userName !== "string") {
     throw linkingError("MALFORMED_PROVIDER_USERNAME", "INVALID_PROVIDER");
@@ -50,9 +65,9 @@ export function parseExternalUsername(userName) {
     throw linkingError("MALFORMED_PROVIDER_USERNAME", "INVALID_PROVIDER");
   }
 
-  const providerName = userName.slice(0, separator);
+  const rawProviderName = userName.slice(0, separator);
   const providerSubject = userName.slice(separator + 1);
-  if (providerName !== TRUSTED_PROVIDER) {
+  if (!isTrustedProviderName(rawProviderName)) {
     throw linkingError("UNSUPPORTED_PROVIDER", "INVALID_PROVIDER");
   }
   if (
@@ -64,7 +79,7 @@ export function parseExternalUsername(userName) {
     throw linkingError("MALFORMED_PROVIDER_SUBJECT", "INVALID_PROVIDER");
   }
 
-  return { providerName, providerSubject };
+  return { providerName: TRUSTED_PROVIDER, providerSubject };
 }
 
 export function safeHash(value) {
@@ -323,8 +338,7 @@ function hasLinkedIdentity(user, providerName, providerSubject) {
 
 function isFederatedProfile(user) {
   return user?.UserStatus === EXTERNAL_STATUS
-    || (typeof user?.Username === "string"
-      && user.Username.startsWith(`${TRUSTED_PROVIDER}_`));
+    || hasTrustedProviderPrefix(user?.Username);
 }
 
 function isValidEmail(email) {
@@ -372,7 +386,7 @@ function linkingError(category, publicErrorKey, cause = undefined) {
 }
 
 function providerLogValue(userName) {
-  return typeof userName === "string" && userName.startsWith("Google_")
+  return hasTrustedProviderPrefix(userName)
     ? TRUSTED_PROVIDER
     : "UNSUPPORTED";
 }

@@ -1,6 +1,7 @@
 package com.saga.be.controller;
 
 import com.saga.be.dto.response.AuthMeResponse;
+import com.saga.be.dto.response.CsrfTokenResponse;
 import com.saga.be.exception.UnauthenticatedRequestException;
 import com.saga.be.security.SagaPrincipal;
 import jakarta.servlet.http.HttpServletRequest;
@@ -39,5 +40,21 @@ public class AuthController {
             csrfToken.getToken();
         }
         return AuthMeResponse.from(principal);
+    }
+
+    @GetMapping("/csrf")
+    public CsrfTokenResponse csrf(
+            @AuthenticationPrincipal SagaPrincipal principal,
+            HttpServletRequest request
+    ) {
+        if (principal == null) {
+            throw new UnauthenticatedRequestException();
+        }
+
+        Object csrfAttribute = request.getAttribute(CsrfToken.class.getName());
+        if (csrfAttribute instanceof CsrfToken csrfToken) {
+            return CsrfTokenResponse.from(csrfToken);
+        }
+        throw new IllegalStateException("Spring Security did not provide a CSRF token");
     }
 }

@@ -36,6 +36,26 @@ describe("Cognito account-linking Pre Sign-up handler", () => {
     });
   });
 
+  for (const userName of [
+    `google_${GOOGLE_SUBJECT}`,
+    `GOOGLE_${GOOGLE_SUBJECT}`,
+  ]) {
+    it(`links a trusted provider username with prefix ${userName.slice(0, userName.indexOf("_"))}`, async () => {
+      const client = clientFor({
+        listedUsers: [localSummary()],
+        localUsers: { [LOCAL_USERNAME]: localUser() },
+      });
+
+      await handlerFor(client)(externalEvent({ userName }), context());
+
+      assert.deepEqual(call(client, "AdminLinkProviderForUserCommand").input.SourceUser, {
+        ProviderName: "Google",
+        ProviderAttributeName: "Cognito_Subject",
+        ProviderAttributeValue: GOOGLE_SUBJECT,
+      });
+    });
+  }
+
   it("allows normal Google signup when no native user exists", async () => {
     const client = clientFor({ listedUsers: [] });
     const event = externalEvent();
@@ -157,6 +177,22 @@ describe("Cognito account-linking Pre Sign-up handler", () => {
     assert.equal(calls(client, "AdminLinkProviderForUserCommand").length, 0);
   });
 
+  for (const userName of ["google_another-subject", "GOOGLE_another-subject"]) {
+    it(`recognizes ${userName.slice(0, userName.indexOf("_"))} prefixed users as federated profiles`, async () => {
+      const client = clientFor({
+        listedUsers: [{
+          Username: userName,
+          UserStatus: "CONFIRMED",
+        }],
+      });
+      const event = externalEvent();
+
+      assert.equal(await handlerFor(client)(event, context()), event);
+      assert.equal(calls(client, "AdminGetUserCommand").length, 1);
+      assert.equal(calls(client, "AdminLinkProviderForUserCommand").length, 0);
+    });
+  }
+
   it("rejects a native destination whose email is not verified", async () => {
     const client = clientFor({
       listedUsers: [localSummary()],
@@ -170,14 +206,30 @@ describe("Cognito account-linking Pre Sign-up handler", () => {
     assert.equal(calls(client, "AdminLinkProviderForUserCommand").length, 0);
   });
 
-  it("splits provider usernames only on the first underscore", () => {
-    assert.deepEqual(
-      parseExternalUsername(`Google_${GOOGLE_SUBJECT}`),
-      {
+  it("parses trusted provider prefixes case-insensitively and preserves subjects with underscores", () => {
+    for (const userName of [
+      `Google_${GOOGLE_SUBJECT}`,
+      `google_${GOOGLE_SUBJECT}`,
+      `GOOGLE_${GOOGLE_SUBJECT}`,
+    ]) {
+      assert.deepEqual(parseExternalUsername(userName), {
         providerName: "Google",
         providerSubject: GOOGLE_SUBJECT,
-      },
+      });
+    }
+  });
+
+  it("rejects unsupported and malformed external provider usernames", () => {
+    assert.throws(
+      () => parseExternalUsername("Facebook_subject"),
+      { name: "AccountLinkingError", category: "UNSUPPORTED_PROVIDER" },
     );
+    for (const userName of ["Google_", "Google", "_subject", ""]) {
+      assert.throws(
+        () => parseExternalUsername(userName),
+        { name: "AccountLinkingError", category: "MALFORMED_PROVIDER_USERNAME" },
+      );
+    }
   });
 
   it("fails safely when the AWS link call is unauthorized", async () => {
@@ -225,10 +277,55 @@ describe("Cognito account-linking Pre Sign-up handler", () => {
     const output = messages.join("\n");
     assert.doesNotMatch(output, /person@example\.com/u);
     assert.doesNotMatch(output, /google-subject_123/u);
+    assert.doesNotMatch(output, /Google_google-subject_123/u);
     assert.doesNotMatch(output, /highly-sensitive-token/u);
     assert.doesNotMatch(output, /userAttributes/u);
     assert.match(output, /"emailHash":"[a-f0-9]{16}"/u);
     assert.match(output, /"linkResult":"LINKED"/u);
+  });
+
+  it("uses canonical and unsupported provider values in audit logs without raw identity data", async () => {
+    for (const userName of ["Google_", "google_", "GOOGLE_"]) {
+      const messages = [];
+      const logger = {
+        info: (message) => messages.push(message),
+        error: (message) => messages.push(message),
+      };
+
+      await assert.rejects(
+        handlerFor(clientFor({}), logger)(
+          externalEvent({ userName, email: "private@example.com" }),
+          context(),
+        ),
+        { message: "External identity cannot be linked" },
+      );
+
+      const output = messages.join("\n");
+      assert.match(output, /"providerName":"Google"/u);
+      assert.doesNotMatch(output, new RegExp(userName, "u"));
+      assert.doesNotMatch(output, /private@example\.com/u);
+    }
+
+    const messages = [];
+    const logger = {
+      info: (message) => messages.push(message),
+      error: (message) => messages.push(message),
+    };
+    const unsupportedUserName = "Facebook_private-provider-subject";
+
+    await assert.rejects(
+      handlerFor(clientFor({}), logger)(
+        externalEvent({ userName: unsupportedUserName, email: "private@example.com" }),
+        context(),
+      ),
+      { message: "External identity cannot be linked" },
+    );
+
+    const output = messages.join("\n");
+    assert.match(output, /"providerName":"UNSUPPORTED"/u);
+    assert.doesNotMatch(output, new RegExp(unsupportedUserName, "u"));
+    assert.doesNotMatch(output, /private-provider-subject/u);
+    assert.doesNotMatch(output, /private@example\.com/u);
   });
 
   it("requires manual reconciliation when the federated profile already exists", async () => {
@@ -284,7 +381,7 @@ function clientFor({
       this.calls.push(command);
       switch (command.constructor.name) {
         case "AdminGetUserCommand":
-          if (command.input.Username.startsWith("Google_")) {
+          if (hasGooglePrefix(command.input.Username)) {
             if (sourceExists) {
               return {
                 Username: command.input.Username,
@@ -391,6 +488,12 @@ function awsError(name, message) {
 
 function context() {
   return { awsRequestId: "12345678-abcd-1234-abcd-123456789012" };
+}
+
+function hasGooglePrefix(userName) {
+  const separator = userName.indexOf("_");
+  return separator > 0
+    && userName.slice(0, separator).toLowerCase() === "google";
 }
 
 function silentLogger() {

@@ -1,10 +1,12 @@
 package com.saga.be.controller;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.saga.be.dto.response.AuthMeResponse;
+import com.saga.be.dto.response.CsrfTokenResponse;
 import com.saga.be.entity.enums.AccountStatus;
 import com.saga.be.exception.UnauthenticatedRequestException;
 import com.saga.be.security.ApplicationRole;
@@ -16,6 +18,8 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.security.web.csrf.CsrfToken;
+import org.springframework.security.web.csrf.DefaultCsrfToken;
 
 class AuthControllerTest {
 
@@ -73,6 +77,36 @@ class AuthControllerTest {
         assertThrows(
                 UnauthenticatedRequestException.class,
                 () -> controller.me(null, new MockHttpServletRequest())
+        );
+    }
+
+    @Test
+    void csrfReturnsOnlyTheSpringSecurityCsrfContract() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setAttribute(
+                CsrfToken.class.getName(),
+                new DefaultCsrfToken("X-XSRF-TOKEN", "_csrf", "csrf-value")
+        );
+        SagaPrincipal principal = new SagaPrincipal(
+                "cognito-subject",
+                "student@fpt.edu.vn",
+                "Student Name",
+                ApplicationRole.STUDENT,
+                UUID.randomUUID(),
+                AccountStatus.ACTIVE
+        );
+
+        CsrfTokenResponse response = controller.csrf(principal, request);
+
+        assertEquals("csrf-value", response.token());
+        assertEquals("X-XSRF-TOKEN", response.headerName());
+        assertEquals("_csrf", response.parameterName());
+        assertFalse(response.toString().contains("csrf-value"));
+        assertEquals(
+                List.of("token", "headerName", "parameterName"),
+                Arrays.stream(CsrfTokenResponse.class.getRecordComponents())
+                        .map(component -> component.getName())
+                        .toList()
         );
     }
 }

@@ -89,6 +89,10 @@ class SecurityIntegrationTest {
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.status").value(401))
                 .andExpect(jsonPath("$.message").value("Authentication is required"));
+
+        mockMvc.perform(get("/api/auth/csrf"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.status").value(401));
     }
 
     @Test
@@ -170,12 +174,21 @@ class SecurityIntegrationTest {
     @Test
     void csrfCookieAndHeaderProtectUnsafeRequests() throws Exception {
         Authentication admin = adminAuthentication();
-        MvcResult meResult = mockMvc.perform(get("/api/auth/me")
+        MvcResult csrfResult = mockMvc.perform(get("/api/auth/csrf")
                         .with(authentication(admin)))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.token").isNotEmpty())
+                .andExpect(jsonPath("$.headerName").value("X-XSRF-TOKEN"))
+                .andExpect(jsonPath("$.parameterName").value("_csrf"))
+                .andExpect(jsonPath("$.JSESSIONID").doesNotExist())
+                .andExpect(jsonPath("$.sessionId").doesNotExist())
+                .andExpect(jsonPath("$.accessToken").doesNotExist())
+                .andExpect(jsonPath("$.idToken").doesNotExist())
+                .andExpect(jsonPath("$.refreshToken").doesNotExist())
+                .andExpect(jsonPath("$.clientSecret").doesNotExist())
                 .andReturn();
 
-        Cookie csrfCookie = meResult.getResponse().getCookie("XSRF-TOKEN");
+        Cookie csrfCookie = csrfResult.getResponse().getCookie("XSRF-TOKEN");
         assertNotNull(csrfCookie);
         assertFalse(csrfCookie.isHttpOnly());
         assertFalse(csrfCookie.getSecure());
@@ -201,7 +214,7 @@ class SecurityIntegrationTest {
     void corsAllowsTheConfiguredFrontendToSendTheCsrfHeaderWithCredentials()
             throws Exception {
         mockMvc.perform(options("/api/v1/subjects")
-                        .header("Origin", "http://localhost:5173")
+                        .header("Origin", "http://localhost:3000")
                         .header("Access-Control-Request-Method", "POST")
                         .header(
                                 "Access-Control-Request-Headers",
@@ -210,7 +223,7 @@ class SecurityIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(header().string(
                         "Access-Control-Allow-Origin",
-                        "http://localhost:5173"
+                        "http://localhost:3000"
                 ))
                 .andExpect(header().string(
                         "Access-Control-Allow-Credentials",
@@ -220,6 +233,17 @@ class SecurityIntegrationTest {
                         "Access-Control-Allow-Headers",
                         containsString("X-XSRF-TOKEN")
                 ));
+    }
+
+    @Test
+    void corsDoesNotGrantCredentialsToAnUnconfiguredOrigin() throws Exception {
+        mockMvc.perform(options("/api/v1/subjects")
+                        .header("Origin", "http://localhost:3001")
+                        .header("Access-Control-Request-Method", "POST")
+                        .header("Access-Control-Request-Headers", "X-XSRF-TOKEN"))
+                .andExpect(status().isForbidden())
+                .andExpect(header().doesNotExist("Access-Control-Allow-Origin"))
+                .andExpect(header().doesNotExist("Access-Control-Allow-Credentials"));
     }
 
     @Test
