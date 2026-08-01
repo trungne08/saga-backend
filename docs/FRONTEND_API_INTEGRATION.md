@@ -72,6 +72,52 @@ window.location.assign(`${API_BASE_URL}/api/auth/login`);
 hình backend, không phải response FE được tự đặt. Cả hai phải là URL HTTP(S)
 tuyệt đối.
 
+### Logout: POST browser navigation qua Cognito
+
+Không dùng `GET /api/auth/logout` và không dùng `fetch`/Axios để mong browser
+tự theo redirect logout. Backend dùng Spring Security `LogoutFilter` cho
+`POST /api/auth/logout`: request cần session và CSRF hợp lệ, sau đó backend
+invalidate session, clear authentication, xoá `JSESSIONID`/`XSRF-TOKEN`, rồi
+redirect browser đến Cognito `/logout` với `client_id` và logout URI đã cấu hình.
+Không có Cognito token, session id hay cookie nào được đưa vào redirect URL.
+
+Từ FE, lấy CSRF token rồi submit form POST để đây là top-level navigation:
+
+```ts
+export async function logout(): Promise<void> {
+  const csrfResponse = await fetch(`${API_BASE_URL}/api/auth/csrf`, {
+    credentials: "include",
+    headers: { Accept: "application/json" }
+  });
+
+  if (!csrfResponse.ok) {
+    window.location.replace("/login");
+    return;
+  }
+
+  const csrf = await csrfResponse.json() as {
+    token: string;
+    parameterName: string;
+  };
+  const form = document.createElement("form");
+  form.method = "POST";
+  form.action = `${API_BASE_URL}/api/auth/logout`;
+
+  const input = document.createElement("input");
+  input.type = "hidden";
+  input.name = csrf.parameterName;
+  input.value = csrf.token;
+  form.appendChild(input);
+  document.body.appendChild(form);
+  form.submit();
+}
+```
+
+Sau redirect `Backend → Cognito → Frontend`, route FE
+`/logout/callback` phải xoá user và CSRF token trong AuthContext/Redux/Zustand
+(memory), rồi điều hướng về `/login` hoặc trang chủ. Không đọc/xoá `JSESSIONID`
+bằng JavaScript và không gọi Cognito logout bằng server-to-server request.
+
 `GET /api/auth/me` trả:
 
 ```ts
@@ -280,9 +326,16 @@ không dùng tên relaxed-binding khác:
 ```env
 FRONTEND_ORIGINS=http://localhost:3000
 AUTH_SUCCESS_REDIRECT_URI=http://localhost:3000/auth/callback
+AUTH_LOGOUT_REDIRECT_URI=http://localhost:3000/logout/callback
 SESSION_COOKIE_SECURE=true
 SESSION_COOKIE_SAME_SITE=none
 ```
+
+Trên Cognito Hosted UI, Allowed sign-out URL phải chứa chính xác
+`http://localhost:3000/logout/callback`. `COGNITO_CLIENT_ID` là client id đã
+có của backend; `COGNITO_DOMAIN` là tùy chọn nếu muốn chỉ định origin Cognito
+HTTPS, nếu trống backend suy ra domain từ authorization URI. Không truyền
+`logout_uri` từ query string người dùng: backend chỉ dùng URI cấu hình.
 
 `FRONTEND_ORIGINS` được tách bằng dấu phẩy, trim từng phần, bỏ phần rỗng,
 deduplicate và chỉ chấp nhận HTTP(S) origin không wildcard/path/query/fragment.

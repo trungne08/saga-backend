@@ -287,7 +287,8 @@ class SecurityIntegrationTest {
                         .session(session)
                         .with(authentication(student))
                         .cookie(csrfCookie)
-                        .header("X-XSRF-TOKEN", csrfCookie.getValue()))
+                        .header("X-XSRF-TOKEN", csrfCookie.getValue())
+                        .param("logout_uri", "https://evil.example"))
                 .andExpect(status().isFound())
                 .andReturn();
 
@@ -295,7 +296,39 @@ class SecurityIntegrationTest {
         assertTrue(session.isInvalid());
         assertTrue(location != null && location.startsWith("https://cognito.test/logout?"));
         assertTrue(location.contains("client_id=test-client"));
+        assertTrue(location.contains(
+                "logout_uri=http%3A%2F%2Flocalhost%3A3000%2Flogout%2Fcallback"
+        ));
         assertFalse(location.contains("test-secret"));
+        assertFalse(location.contains("evil.example"));
+        assertEquals(0, result.getResponse().getCookie("JSESSIONID").getMaxAge());
+        assertEquals(0, result.getResponse().getCookie("XSRF-TOKEN").getMaxAge());
+    }
+
+    @Test
+    void logoutRejectsMissingCsrfWithoutInvalidatingTheSession() throws Exception {
+        MockHttpSession session = new MockHttpSession();
+        Authentication student = authenticationFor(ApplicationRole.STUDENT);
+
+        mockMvc.perform(post("/api/auth/logout")
+                        .session(session)
+                        .with(authentication(student)))
+                .andExpect(status().isForbidden());
+
+        assertFalse(session.isInvalid());
+    }
+
+    @Test
+    void getLogoutDoesNotInvalidateTheSession() throws Exception {
+        MockHttpSession session = new MockHttpSession();
+        Authentication student = authenticationFor(ApplicationRole.STUDENT);
+
+        mockMvc.perform(get("/api/auth/logout")
+                        .session(session)
+                        .with(authentication(student)))
+                .andExpect(status().isNotFound());
+
+        assertFalse(session.isInvalid());
     }
 
     private Authentication adminAuthentication() {
