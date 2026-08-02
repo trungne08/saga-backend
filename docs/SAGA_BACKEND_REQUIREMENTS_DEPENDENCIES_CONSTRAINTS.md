@@ -1,6 +1,6 @@
 # SAGA Backend — Yêu cầu, Dependency, Phân quyền và Ràng buộc
 
-> **Trạng thái audit:** CONFIRMED = được code hiện tại chứng minh; PARTIAL = mới có một phần code/mô hình; TBD = repository không đủ bằng chứng; RECOMMENDED = đề xuất, không phải hành vi hiện tại. Audit dựa trên nhánh đang checkout ngày 2026-08-01; không dùng tài liệu cũ làm bằng chứng chính và không chép giá trị bí mật.
+> **Trạng thái audit:** CONFIRMED = được code hiện tại chứng minh; PARTIAL = mới có một phần code/mô hình; TBD = repository không đủ bằng chứng; RECOMMENDED = đề xuất, không phải hành vi hiện tại. Audit dựa trên branch `main`, HEAD `d855313` (`sửa lỗi phân quyền`) ngày 2026-08-02; application code working tree sạch và chỉ bốn tài liệu audit còn thay đổi chưa commit. Không dùng tài liệu cũ làm bằng chứng chính và không chép giá trị bí mật.
 
 ## 1. Mục đích tài liệu
 
@@ -12,7 +12,7 @@ SAGA là backend Spring Boot quản lý dữ liệu học phần/lớp/học k�
 
 | Trạng thái | Module thực tế |
 | --- | --- |
-| **ĐÃ TRIỂN KHAI** | Cognito OIDC session login/profile provisioning; Subject/Class/Semester/Course Create+Read; personal identity mapping; review mapping; tạo team project; Jira/GitHub project integration; webhook có xác thực; backfill, reconciliation, sync job và audit log. |
+| **ĐÃ TRIỂN KHAI** | Cognito OIDC session login/profile provisioning; Subject/Class/Semester/Course Create+Read; course student-import authorization; personal identity mapping; review mapping; tạo team project; Jira/GitHub project integration; webhook có xác thực; backfill, reconciliation, sync job và audit log. |
 | **PARTIAL** | Entity cho assessment, rubric, CAM, AI log, document, meeting, notification, peer review, sprint/task đã có nhưng không tìm thấy controller/service HTTP hoàn chỉnh cho các module này. Master data chưa có Update/Delete. |
 | **CHƯA TRIỂN KHAI / TBD** | Không có code Lambda gán role Cognito. README Lambda chỉ nhắc một Pre Token Generation Lambda khác; không được coi là đã triển khai trong repository. |
 
@@ -24,9 +24,9 @@ Application role khác team role. `STUDENT` có `RoleInTeam.LEADER` vẫn là ST
 
 | Role | Ý nghĩa và quyền code chứng minh | Phạm vi/ràng buộc | TBD |
 | --- | --- | --- | --- |
-| `ADMIN` | Tạo Subject/Class/Semester/Course; quản lý integration mọi team/project; review mọi identity mapping. | Override project/team được ghi audit. | Không có controller `/api/admin/**` hiện hữu. |
-| `LECTURER` | Quản lý project integration nếu là instructor của Course chứa Team; review mapping Student thuộc team/course do mình dạy. | So sánh `localProfileId` với `course.instructor.id`. | Không có quyền tạo master data. |
-| `STUDENT` | Quản lý mapping Jira/GitHub của chính mình. | Bắt buộc role STUDENT và local profile id. | Không có API profile update. |
+| `ADMIN` | Tạo Subject/Class/Semester/Course; import sinh viên mọi Course; quản lý integration mọi team/project; review mọi identity mapping. | Override project/team được ghi audit. | Không có controller `/api/admin/**` hiện hữu. |
+| `LECTURER` | Import sinh viên khi là instructor Course; quản lý project integration nếu là instructor của Course chứa Team; review mapping Student thuộc team/course do mình dạy. | So sánh `localProfileId` với `course.instructor.id`. | Không có quyền tạo master data. |
+| `STUDENT` | Quản lý mapping Jira/GitHub của chính mình. | Bắt buộc role STUDENT và local profile id; không được import sinh viên. | Không có API profile update. |
 | `LEADER` | Cho phép Student quản lý team project/integration. | Phải có TeamMember đúng team, đúng student và `LEADER`. | Không phải application role. |
 | `MEMBER`, `MENTOR` | Giá trị enum tồn tại. | Không được cấp quyền manager trong code. | Các quyền khác không được chứng minh. |
 
@@ -56,8 +56,8 @@ Bằng chứng: `AuthController.java:L17-L39`; `SecurityConfig.java:securityFilt
 | Tầng | Hành vi hiện tại |
 | --- | --- |
 | URL-level | PUBLIC: `/oauth2/**`, `/login/**`, `/error`, static GET, `/api/auth/login`, health GET, provider webhook, Springdoc khi flag bật. `/api/admin/**` yêu cầu ADMIN. Mọi route còn lại authenticated. |
-| Method-level | `@EnableMethodSecurity` bật. Chỉ có 4 `@PreAuthorize`, đều `hasRole('ADMIN')`; không có `@Secured`. |
-| Service-level | Personal mapping bắt buộc Student; identity review là ADMIN hoặc Lecturer scoped; project manager là ADMIN, Lecturer owner hoặc Student LEADER. |
+| Method-level | `@EnableMethodSecurity` bật. Create master-data dùng `hasRole('ADMIN')`; import dùng `hasAnyRole('ADMIN','LECTURER')`; không có `@Secured`. |
+| Service-level | Personal mapping bắt buộc Student; identity review là ADMIN hoặc Lecturer scoped; project manager là ADMIN, Lecturer owner hoặc Student LEADER; import dùng Course scope riêng. |
 | Ownership/membership | Mapping dùng local profile id; Lecturer dùng Course instructor id; Student manager dùng truy vấn TeamMember exact. |
 | Account status | `AccountStatus` được lưu/trả/audit nhưng không có check ACTIVE/INACTIVE/SUSPENDED/PENDING trước khi cấp API permission. |
 | CSRF | Cookie CSRF áp dụng mutation; chỉ `/api/webhooks/**` được miễn. |
@@ -86,6 +86,7 @@ Quy ước: `AUTHENTICATED` = chỉ cần session; `SCOPED` = phụ thuộc owne
 | GET | `/api/v1/courses/{id}` | `getCourseById` | AUTHENTICATED | YES | YES | YES | — | — | NO | — | `Course` | 200,404 | `CourseController.java:L28-L30` |
 | POST | `/api/v1/courses` | `createCourse` | AUTHENTICATED | YES | NO | NO | `@PreAuthorize(ADMIN)` | — | YES | `CourseRequest` | `Course` | 201,400,403,404,409 | `CourseController.java:L33-L36` |
 | GET | `/api/v1/courses` | `getCourses` | AUTHENTICATED | YES | YES | YES | filter không phải permission scope | — | NO | query | `Page<Course>` | 200 | `CourseController.java:L39-L51` |
+| POST | `/api/v1/courses/{courseId}/import-students` | `importStudents` | AUTHENTICATED | YES | SCOPED | NO | ADMIN mọi Course; LECTURER phải có `localProfileId == course.instructor.id`; Course thiếu 404 | — | YES | multipart `file` | `String` | 200,401,403,404,500 | `CourseController#importStudents`; `CourseImportAuthorizationService#requireImportAccess` |
 | GET | `/api/integrations/identity-mappings` | `mappings` | AUTHENTICATED | YES | SCOPED | NO | Lecturer dạy Course có Student target | — | NO | `studentId` | `IdentityConnectionResponse[]` | 200,403 | `IdentityMappingReviewController.java:L32-L38`; `IdentityMappingReviewService#requireReviewer` |
 | PATCH | `/api/integrations/identity-mappings/{mappingId}` | `review` | AUTHENTICATED | YES | SCOPED | NO | review/correction đều recheck reviewer | — | YES | `IdentityMappingReviewRequest` | `IdentityConnectionResponse` | 200,400,403,409 | `IdentityMappingReviewController.java:L40-L51`; `IdentityMappingReviewService#review` |
 | GET | `/api/me/integrations` | `connections` | AUTHENTICATED | NO | NO | YES | chỉ mapping của Student hiện tại | — | NO | — | `PersonalIntegrationsResponse` | 200,403 | `PersonalIntegrationController.java:L36-L40`; `IdentityMappingService#getOwnConnections` |
@@ -197,6 +198,16 @@ Master-data GET cho mọi authenticated user; `AccountStatus` không được en
 | Validation / failure | DTO required; missing reference 404; duplicate 409 |
 | Implementation status / evidence | CONFIRMED/PARTIAL CRUD — `CourseService#createCourse`; `CourseController.java` |
 
+| Thuộc tính | FR-COURSE-IMPORT-001 |
+| --- | --- |
+| Tên requirement | Import danh sách sinh viên vào Course |
+| Actor | ADMIN; LECTURER là instructor của Course |
+| Preconditions | Authenticated `SagaPrincipal`, CSRF hợp lệ, Course tồn tại, file spreadsheet hợp lệ theo parser hiện tại |
+| Main behavior | Tạo/reuse Student theo student code, Team `Group n` và TeamMember; import lặp không tạo duplicate membership theo team+student |
+| Authorization | ADMIN mọi Course; LECTURER có `localProfileId == Course.instructor.id`; STUDENT bị 403 |
+| Validation / failure | Anonymous 401; thiếu CSRF/không đủ scope 403; Course thiếu 404; exception trong transaction rollback. Header/schema/identity provisioning còn PARTIAL |
+| Implementation status / evidence | PARTIAL — `CourseImportAuthorizationService`, `ExcelImportService`, `CourseImportSecurityIntegrationTest` (12 cases pass) |
+
 | Thuộc tính | FR-TEAM-001 / FR-PROJECT-001 |
 | --- | --- |
 | Tên requirement | Tạo Team Project và quản lý project integration |
@@ -257,6 +268,7 @@ Master-data GET cho mọi authenticated user; `AccountStatus` không được en
 - Personal identity mapping: một mapping/provider/Student và một external provider id toàn cục; mapping active khác phải disconnect trước replace. `IdentityMappingService`; `V2__integration_identity_and_sync.sql`.
 - Reviewer là ADMIN hoặc Lecturer dạy Course có Student target. `IdentityMappingReviewService#requireReviewer`.
 - Project manager là ADMIN, Course instructor, hoặc Student LEADER exact team; ADMIN override được audit. `ProjectIntegrationAuthorizationService#requireTeamManager`.
+- Import sinh viên: ADMIN mọi Course; LECTURER chỉ Course do mình dạy; STUDENT bị từ chối. `CourseImportAuthorizationService#requireImportAccess`.
 - OAuth state random 32 bytes, lưu hash trong session, one-time, TTL mặc định PT10M và bind sub/profile/flow/target. `OAuthStateService`.
 - Secret integration AES-256-GCM, nonce 12 bytes, AAD theo purpose, key version/rotation. `IntegrationSecretCipher`.
 - Webhook receipt encrypted, deduplicate `(provider, delivery_id)`. `WebhookIngestionService#persist`; migration V2.
@@ -424,6 +436,8 @@ Gửi `JSESSIONID` qua `credentials: "include"`; lấy cookie `XSRF-TOKEN` và g
 | --- | --- | --- | --- | --- |
 | HIGH | AccountStatus không enforce permission. | PENDING/INACTIVE/SUSPENDED vẫn không bị chặn bởi inspected authorization code. | `AuthenticatedProfileService:L209-L211,L261`; account-status search | RECOMMENDED: xác định và enforce policy status. |
 | HIGH | Master data CRUD không hoàn chỉnh, Create ADMIN-only. | Sai nếu kỳ vọng CRUD Lecturer-only. | bốn controller master data | RECOMMENDED: chốt policy rồi bổ sung/update quyền. |
+| HIGH | Import tạo Student `PENDING` không có Cognito subject; validation spreadsheet còn dựa magic columns. | Có thể conflict identity hoặc nhận dữ liệu không đúng contract. | `ExcelImportService` | RECOMMENDED: chốt provisioning/validation contract trước production. |
+| MEDIUM | Import duplicate guard theo application check, chưa thấy database unique constraint team+student. | Concurrent requests vẫn cần kiểm chứng. | `ExcelImportService`; `TeamMemberRepository` | RECOMMENDED: cân nhắc unique constraint và concurrency test. |
 | MEDIUM | Master-data GET mở cho mọi authenticated Student. | Có thể lộ dữ liệu ngoài scope nếu policy muốn hạn chế. | `SecurityConfig:L119`; controller GET | RECOMMENDED: xác nhận scope nghiệp vụ. |
 | MEDIUM | Project integration dựa service checks, không annotation. | Endpoint mới có thể bypass nếu gọi service sai. | `ProjectIntegrationController`; permission service | RECOMMENDED: bổ sung negative tests/guard pattern. |
 | MEDIUM | Swagger session cookie không tự xử lý CSRF. | Mutation test khó và dễ nhầm 403. | `OpenApiConfig`; `SecurityConfig` | RECOMMENDED: hướng dẫn/CSRF support cho QA. |
