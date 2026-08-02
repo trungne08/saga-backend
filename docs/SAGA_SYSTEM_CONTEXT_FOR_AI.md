@@ -7,9 +7,9 @@
 | Mục | Giá trị |
 |---|---|
 | Branch | `main` |
-| Commit | `d855313` (`sửa lỗi phân quyền`) |
+| Commit | `702855a` (`cập nhật doc của hệ thống saga`); application authorization nằm ở ancestor `d855313` (`sửa lỗi phân quyền`) |
 | Thời điểm audit | 2026-08-02 (Asia/Saigon, UTC+07:00) |
-| Working tree | Application code sạch; chỉ còn bốn tài liệu audit có thay đổi chưa commit. Authorization import và test integration đã nằm trong HEAD `d855313`. |
+| Working tree | Application code sạch khi bắt đầu audit này; task hiện tại chỉ thay đổi bốn tài liệu audit. Authorization import và test integration đã nằm trong commit `d855313`. |
 | Java / Spring Boot | Java 17 / Spring Boot 4.1.0 |
 | Profile tìm thấy | mặc định, `local`, `prod`, `test` |
 | Phạm vi | `src/main`, `src/test`, `pom.xml`, cấu hình, Railway, Lambda Cognito, scripts và docs hiện hữu |
@@ -53,7 +53,7 @@ flowchart LR
 |---|---|---|---|
 | `config` | security, CORS, OpenAPI, property binding, Mongo health, local seed | `SecurityConfig`, `CorsConfig`, `IntegrationPublicUrlValidator` | CONFIRMED |
 | `security`, `auth`, `service` | OIDC claims, role, local profile, session/login/logout | `CognitoAuthenticationSuccessHandler`, `AuthenticatedProfileService` | CONFIRMED |
-| `controller` | HTTP API | 13 REST controllers | CONFIRMED |
+| `controller` | HTTP API | 12 REST controllers có HTTP mapping (40 methods) và 1 `@RestControllerAdvice` không endpoint | CONFIRMED |
 | `entity`, `repository` | JPA/MySQL domain và Mongo audit | `Student`, `Team`, `Project`, `SystemAuditLog` | CONFIRMED |
 | `integration/identity` | personal identity mapping/review | `IdentityMappingService`, `IdentityMappingReviewService` | CONFIRMED |
 | `integration/project` | team project, Jira/GitHub link flow | `ProjectIntegrationService`, `TeamProjectService` | CONFIRMED |
@@ -122,7 +122,7 @@ Application role khác team role. Một Student có thể là `LEADER`; điều 
 ### Authorization model
 
 - **CONFIRMED:** mọi route trừ OAuth/login/error, static GET, health, hai webhook POST (và Swagger khi flag bật) cần authenticated session. `/api/admin/**` cần `ROLE_ADMIN`. Evidence: `SecurityConfig#securityFilterChain`.
-- **CONFIRMED:** method security bật. Create Class/Course/Subject/Semester là ADMIN-only; import student chặn role tổng quát ADMIN/LECTURER, sau đó service kiểm tra course scope. Evidence: controller master data, `CourseController#importStudents`, `CourseImportAuthorizationService`.
+- **CONFIRMED:** method security bật: 5 `@PreAuthorize`, 0 `@Secured`. Create Class/Course/Subject/Semester là ADMIN-only; import student chặn role tổng quát ADMIN/LECTURER, sau đó service kiểm tra course scope. Evidence: controller master data, `CourseController#importStudents`, `CourseImportAuthorizationService`.
 - **CONFIRMED:** team/project integration dùng service-level ownership: ADMIN, lecturer là `Course.instructor`, hoặc student là Team LEADER. Evidence: `ProjectIntegrationAuthorizationService#requireTeamManager`.
 - **CONFIRMED:** identity mapping reviewer là ADMIN, hoặc LECTURER có membership/couse instructor relationship. Evidence: `IdentityMappingReviewService#requireReviewer`.
 - **CONFIRMED:** CSRF áp dụng cho HTTP unsafe; chỉ `/api/webhooks/**` bị exempt. Evidence: `SecurityConfig#securityFilterChain`.
@@ -131,7 +131,7 @@ Application role khác team role. Một Student có thể là `LEADER`; điều 
 
 ## 6. API endpoint matrix
 
-Có 40 HTTP methods được khai báo trực tiếp trong 13 REST controllers. Bảng còn ghi riêng các route framework/Actuator/OpenAPI quan trọng nên tổng số dòng route là 46. Mặc định `Auth` nghĩa authenticated session theo SecurityConfig. CSRF: `Có` cho POST/PUT/PATCH/DELETE, `Không áp dụng` cho GET, `Miễn` chỉ webhook.
+Có 40 HTTP methods được khai báo trực tiếp trong 12 REST controllers. `GlobalExceptionHandler` là 1 `@RestControllerAdvice`, không khai báo endpoint. Bảng còn ghi riêng các route framework/Actuator/OpenAPI quan trọng nên tổng số dòng route là 46. Mặc định `Auth` nghĩa authenticated session theo SecurityConfig. CSRF: `Có` cho POST/PUT/PATCH/DELETE, `Không áp dụng` cho GET, `Miễn` chỉ webhook.
 
 | Method | Path | Controller#Method | Public/Auth | Role/scope | CSRF | Request → Response | Evidence |
 |---|---|---|---|---|---|---|---|
@@ -287,7 +287,7 @@ Key classes: `ProjectIntegrationService#beginGitHubInstallation/#linkGitHubRepos
 
 ### Test hiện có
 
-Có 42 `*Test.java`, gồm `CourseImportSecurityIntegrationTest` với 12 case cho anonymous, CSRF, ADMIN, Lecturer owner/non-owner, Student, missing Course, rollback và import lặp. **CONFIRMED:** test riêng pass 12/12; suite gồm import và security pass 25/25; full `./mvnw.cmd test` pass 186 tests, 0 failures, 0 errors, 0 skipped. `CourseImportSecurityIntegrationTest` dùng `@DirtiesContext(AFTER_CLASS)` để không rò CSRF mock state sang security integration test. Maven dùng Java runtime 21.0.7 trên máy audit, trong khi project compile target Java 17. `npm.cmd test` Lambda đã pass 23 tests ở audit trước.
+Có 43 test source classes: 42 file khớp `*Test.java` và `BeApplicationTests.java`; gồm `CourseImportSecurityIntegrationTest` với 12 case cho anonymous, CSRF, ADMIN, Lecturer owner/non-owner, Student, missing Course, rollback và import lặp. **CONFIRMED:** test riêng pass 12/12; suite gồm import và security pass 25/25; full `./mvnw.cmd test` pass 186 tests, 0 failures, 0 errors, 0 skipped. `CourseImportSecurityIntegrationTest` dùng `@DirtiesContext(AFTER_CLASS)` để không rò CSRF mock state sang security integration test. Maven dùng Java runtime 21.0.7 trên máy audit, trong khi project compile target Java 17. `npm.cmd test` Lambda đã pass 23 tests ở audit trước.
 
 Evidence: `src/test/java/**`, `infra/lambda/cognito-account-linking/test/index.test.mjs`.
 

@@ -2,7 +2,7 @@
 
 Tài liệu ghi lại quyết định đã được code/runtime fact chứng minh và các đề xuất còn mở. `ACCEPTED` không có nghĩa production đã được kiểm chứng; evidence của từng quyết định xác định phạm vi xác nhận.
 
-> Metadata audit: branch `main`, HEAD `d855313` (`sửa lỗi phân quyền`). Application code working tree sạch; chỉ bốn tài liệu audit còn thay đổi chưa commit.
+> Metadata audit: branch `main`, HEAD thực tế `702855a` (`cập nhật doc của hệ thống saga`); authorization application code ở `d855313` (`sửa lỗi phân quyền`). Application code sạch khi bắt đầu audit; task hiện tại chỉ thay đổi bốn tài liệu audit. Quét source/test: 12 REST controllers có mapping + 1 `@RestControllerAdvice`, 40 controller HTTP methods, 5 `@PreAuthorize`, 0 `@Secured`, 43 test source classes (42 `*Test.java` + `BeApplicationTests.java`); Maven report 186 tests pass.
 
 ## DEC-001 — Dùng Spring Security OAuth2/OIDC và server-side session
 
@@ -199,7 +199,7 @@ Tài liệu ghi lại quyết định đã được code/runtime fact chứng mi
 ## DEC-017 — Policy phân quyền import sinh viên theo Course
 
 - Ngày: 2026-08-02
-- Trạng thái: ACCEPTED (đã commit trong HEAD `d855313`)
+- Trạng thái: ACCEPTED (đã commit trong `d855313`; HEAD hiện tại là `702855a` chỉ cập nhật tài liệu)
 - Bối cảnh: Import sinh viên là mutation có thể tạo Student, Team và TeamMember nên không đủ an toàn nếu chỉ yêu cầu authenticated session.
 - Quyết định: ADMIN được import mọi Course; LECTURER chỉ import khi `SagaPrincipal.localProfileId` bằng `Course.instructor.id`; STUDENT bị từ chối. Method security chặn role tổng quát, service chịu trách nhiệm ownership và 404 Course.
 - Lý do: Tái sử dụng model `SagaPrincipal`/authority session và pattern ownership hiện có; không đọc Cognito token hoặc raw group trong controller.

@@ -1,6 +1,6 @@
 # SAGA Backend — Yêu cầu, Dependency, Phân quyền và Ràng buộc
 
-> **Trạng thái audit:** CONFIRMED = được code hiện tại chứng minh; PARTIAL = mới có một phần code/mô hình; TBD = repository không đủ bằng chứng; RECOMMENDED = đề xuất, không phải hành vi hiện tại. Audit dựa trên branch `main`, HEAD `d855313` (`sửa lỗi phân quyền`) ngày 2026-08-02; application code working tree sạch và chỉ bốn tài liệu audit còn thay đổi chưa commit. Không dùng tài liệu cũ làm bằng chứng chính và không chép giá trị bí mật.
+> **Trạng thái audit:** CONFIRMED = được code hiện tại chứng minh; PARTIAL = mới có một phần code/mô hình; TBD = repository không đủ bằng chứng; RECOMMENDED = đề xuất, không phải hành vi hiện tại. Audit dựa trên branch `main`, HEAD thực tế `702855a` (`cập nhật doc của hệ thống saga`) ngày 2026-08-02; authorization application code ở ancestor `d855313` (`sửa lỗi phân quyền`). Application code sạch khi bắt đầu audit và task hiện tại chỉ thay đổi bốn tài liệu audit. Không dùng tài liệu cũ làm bằng chứng chính và không chép giá trị bí mật.
 
 ## 1. Mục đích tài liệu
 
@@ -184,7 +184,7 @@ Master-data GET cho mọi authenticated user; `AccountStatus` không được en
 | Actor | ADMIN tạo; mọi authenticated role đọc |
 | Preconditions | DTO hợp lệ |
 | Main behavior | Tạo code duy nhất, tìm kiếm/phân trang, đọc theo id |
-| Authorization | Bốn POST có `@PreAuthorize(ADMIN)` |
+| Authorization | Bốn POST master-data có `@PreAuthorize(ADMIN)`; `@PreAuthorize` thứ năm thuộc endpoint import với ADMIN/LECTURER scope |
 | Validation / failure | `@NotBlank`, `@Size`; duplicate 409; Semester end không trước start |
 | Implementation status / evidence | CONFIRMED/PARTIAL CRUD — `SemesterService#createSemester`, `SubjectService#createSubject`, `ClassService#createClass` |
 
@@ -474,9 +474,9 @@ Không có bằng chứng ADMIN thiếu override: `requireTeamManager` chứng m
 
 ## Biên bản kiểm tra sau khi tạo file
 
-- Quét lại: **12 controller có request mapping, 38 endpoint controller**; ma trận có thêm 8 route/matcher Security-managed (OAuth/login/error/static, logout, health, Springdoc, admin) để QA không bỏ sót. `GlobalExceptionHandler` là advice, không có endpoint.
-- `@PreAuthorize`: **4**; `@Secured`: **0**. Permission check chính: `IdentityMappingService#requireStudent`, `IdentityMappingReviewService#requireReviewer`, `ProjectIntegrationAuthorizationService#requireTeamManager`, `ProjectIntegrationService#requireInstallationOwner`.
+- Quét lại: **12 REST controller có HTTP mapping, 40 endpoint/controller HTTP methods**; thêm 1 `@RestControllerAdvice` (`GlobalExceptionHandler`) không có endpoint. Ma trận có thêm 8 route/matcher Security-managed (OAuth/login/error/static, logout, health, Springdoc, admin) để QA không bỏ sót.
+- `@PreAuthorize`: **5**; `@Secured`: **0**. Permission check chính: `CourseImportAuthorizationService#requireImportAccess`, `IdentityMappingService#requireStudent`, `IdentityMappingReviewService#requireReviewer`, `ProjectIntegrationAuthorizationService#requireTeamManager`, `ProjectIntegrationService#requireInstallationOwner`.
 - Đối chiếu `pom.xml`, package Lambda và bảng dependency; có 16 dependency Maven application/test, 2 dependency Flyway plugin và 1 Node Lambda dependency.
 - Đối chiếu properties/placeholders với bảng configuration; không copy password, token, private key hoặc client secret vào tài liệu.
-- Test đã chạy: `./mvnw.cmd test` — **170 tests, 0 failures, 0 errors, 0 skipped**.
-- Không sửa application code; chỉ cập nhật file Markdown này.
+- Test class source: **43** (42 `*Test.java` và `BeApplicationTests.java`); Surefire có 43 test suites. Maven report hiện có: `./mvnw.cmd test` — **186 tests, 0 failures, 0 errors, 0 skipped**.
+- Không sửa application code hoặc test; task này chỉ cập nhật bốn file Markdown audit.

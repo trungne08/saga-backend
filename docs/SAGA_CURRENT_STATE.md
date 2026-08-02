@@ -5,9 +5,9 @@
 | Mục | Giá trị |
 |---|---|
 | Branch được audit | `main` |
-| Commit được audit | `d855313` (`sửa lỗi phân quyền`) |
+| Commit được audit | `702855a` (`cập nhật doc của hệ thống saga`); authorization application code ở `d855313` (`sửa lỗi phân quyền`) |
 | Ngày cập nhật | 2026-08-02 (Asia/Saigon, UTC+07:00) |
-| Working tree hiện tại | Application code sạch; chỉ có bốn tài liệu audit có thay đổi chưa commit |
+| Working tree hiện tại | Application code sạch khi bắt đầu audit; task hiện tại chỉ thay đổi bốn tài liệu audit |
 | Phạm vi thay đổi của task | Cập nhật metadata/trạng thái sau khi authorization import và regression tests đã được commit vào HEAD |
 
 ## 2. Đã hoàn thành
@@ -27,6 +27,7 @@
 | Import authorization integration test | `-Dtest=CourseImportSecurityIntegrationTest test` | 12 tests, 0 failures/errors/skips; `BUILD SUCCESS` |
 | Existing Security integration test | `-Dtest=SecurityIntegrationTest test` (three repeated runs) | 13 tests/run, all pass |
 | Maven test suite | `./mvnw.cmd test` sau thay đổi | 186 tests, 0 failures, 0 errors, 0 skipped; `BUILD SUCCESS` |
+| Source/test audit count | quét `src/main` và `src/test` | 12 REST controllers có mapping; 1 `@RestControllerAdvice`; 40 controller HTTP methods; 5 `@PreAuthorize`; 0 `@Secured`; 43 test source classes (42 `*Test.java` + `BeApplicationTests.java`) |
 | Compile | Maven compile trong test lifecycle | 229 main source files và 44 test source files compile thành công |
 | Security/CSRF/CORS | `SecurityIntegrationTest` | 13 tests pass, gồm anonymous 401, role 403, CSRF và preflight |
 | Profile/OIDC | `AuthenticatedProfileServiceTest`, `OidcIdentityServiceTest`, security tests | pass trong Maven suite |
