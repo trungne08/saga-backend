@@ -1,9 +1,10 @@
 package com.saga.be.controller;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -44,6 +45,8 @@ import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
+import jakarta.servlet.http.Cookie;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -96,9 +99,15 @@ class CourseImportSecurityIntegrationTest {
 
     @Test
     void anonymousRequestWithValidCsrfIsUnauthorized() throws Exception {
+        Cookie csrfCookie = csrfCookie(authenticationFor(
+                ApplicationRole.ADMIN,
+                UUID.randomUUID()
+        ));
+
         mockMvc.perform(multipart(IMPORT_PATH, UUID.randomUUID())
                         .file(workbook(row("SE000001", "anonymous@example.test", "1", "x")))
-                        .with(csrf()))
+                        .cookie(csrfCookie)
+                        .header("X-XSRF-TOKEN", csrfCookie.getValue()))
                 .andExpect(status().isUnauthorized());
     }
 
@@ -112,6 +121,22 @@ class CourseImportSecurityIntegrationTest {
                                 ApplicationRole.ADMIN,
                                 UUID.randomUUID()
                         ))))
+                .andExpect(status().isForbidden());
+
+        assertEquals(0, studentRepository.count());
+    }
+
+    @Test
+    void requestWithInvalidCsrfIsForbiddenBeforeController() throws Exception {
+        Course course = createCourse(createLecturer());
+        Authentication admin = authenticationFor(ApplicationRole.ADMIN, UUID.randomUUID());
+        Cookie csrfCookie = csrfCookie(admin);
+
+        mockMvc.perform(multipart(IMPORT_PATH, course.getId())
+                        .file(workbook(row("SE000002A", "invalid-csrf@example.test", "1", "x")))
+                        .with(authentication(admin))
+                        .cookie(csrfCookie)
+                        .header("X-XSRF-TOKEN", "invalid-csrf-token"))
                 .andExpect(status().isForbidden());
 
         assertEquals(0, studentRepository.count());
@@ -189,14 +214,14 @@ class CourseImportSecurityIntegrationTest {
     @Test
     void clientSuppliedHeadersCannotChangeSessionRoleOrProfileId() throws Exception {
         Course course = createCourse(createLecturer());
+        Authentication student = authenticationFor(ApplicationRole.STUDENT, UUID.randomUUID());
+        Cookie csrfCookie = csrfCookie(student);
 
         mockMvc.perform(multipart(IMPORT_PATH, course.getId())
                         .file(workbook(row("SE000008", "header@example.test", "1", "x")))
-                        .with(authentication(authenticationFor(
-                                ApplicationRole.STUDENT,
-                                UUID.randomUUID()
-                        )))
-                        .with(csrf())
+                        .with(authentication(student))
+                        .cookie(csrfCookie)
+                        .header("X-XSRF-TOKEN", csrfCookie.getValue())
                         .header("X-Application-Role", "ADMIN")
                         .header("X-Local-Profile-Id", course.getInstructor().getId().toString()))
                 .andExpect(status().isForbidden());
@@ -206,8 +231,6 @@ class CourseImportSecurityIntegrationTest {
 
     @Test
     void masterDataCreateEndpointsRemainAdminOnly() throws Exception {
-        Authentication student = authenticationFor(ApplicationRole.STUDENT, UUID.randomUUID());
-
         List<MasterDataRequest> requests = List.of(
                 new MasterDataRequest("/api/v1/subjects", """
                         {"subjectCode":"SWE-401","name":"Software Engineering"}
@@ -223,13 +246,18 @@ class CourseImportSecurityIntegrationTest {
                         """).formatted(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID()))
         );
 
-        for (MasterDataRequest request : requests) {
-            mockMvc.perform(post(request.path())
-                            .with(authentication(student))
-                            .with(csrf())
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .content(request.body()))
-                    .andExpect(status().isForbidden());
+        for (ApplicationRole role : List.of(ApplicationRole.STUDENT, ApplicationRole.LECTURER)) {
+            Authentication authentication = authenticationFor(role, UUID.randomUUID());
+            Cookie csrfCookie = csrfCookie(authentication);
+            for (MasterDataRequest request : requests) {
+                mockMvc.perform(post(request.path())
+                                .with(authentication(authentication))
+                                .cookie(csrfCookie)
+                                .header("X-XSRF-TOKEN", csrfCookie.getValue())
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(request.body()))
+                        .andExpect(status().isForbidden());
+            }
         }
     }
 
@@ -332,11 +360,23 @@ class CourseImportSecurityIntegrationTest {
             Authentication authentication,
             UUID courseId,
             StudentRow... rows
-    ) throws IOException {
+    ) throws Exception {
+        Cookie csrfCookie = csrfCookie(authentication);
         return multipart(IMPORT_PATH, courseId)
                 .file(workbook(rows))
                 .with(authentication(authentication))
-                .with(csrf());
+                .cookie(csrfCookie)
+                .header("X-XSRF-TOKEN", csrfCookie.getValue());
+    }
+
+    private Cookie csrfCookie(Authentication authentication) throws Exception {
+        MvcResult result = mockMvc.perform(get("/api/auth/csrf")
+                        .with(authentication(authentication)))
+                .andExpect(status().isOk())
+                .andReturn();
+        Cookie csrfCookie = result.getResponse().getCookie("XSRF-TOKEN");
+        assertNotNull(csrfCookie);
+        return csrfCookie;
     }
 
     private Lecturer createLecturer() {

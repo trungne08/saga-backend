@@ -45,7 +45,10 @@ public class OpenApiConfig {
                                 + "X-XSRF-TOKEN CSRF header is required. With a valid CSRF token, "
                                 + "the framework invalidates any current JSESSIONID session and "
                                 + "redirects the browser to Cognito logout; this also applies when "
-                                + "there is no current session.")
+                                + "there is no current session. Swagger UI fetch may show 'Failed to "
+                                + "fetch' when the browser follows this cross-origin Cognito redirect. "
+                                + "For browser logout, use a top-level form POST with a hidden _csrf "
+                                + "parameter, or send X-XSRF-TOKEN from JavaScript.")
                         .addSecurityItem(new SecurityRequirement().addList(securitySchemeName))
                         .addParametersItem(new Parameter()
                                 .in("header")

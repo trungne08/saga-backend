@@ -24,6 +24,7 @@ import org.springframework.security.web.context.SecurityContextRepository;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 import org.springframework.security.web.csrf.CsrfTokenRepository;
+import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 import org.springframework.security.oauth2.client.web.OAuth2LoginAuthenticationFilter;
 import org.springframework.web.cors.CorsConfigurationSource;
 
@@ -74,7 +75,16 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf
                         .csrfTokenRepository(csrfTokenRepository)
                         .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
-                        .ignoringRequestMatchers("/api/webhooks/**")
+                        .ignoringRequestMatchers(
+                                PathPatternRequestMatcher.pathPattern(
+                                        HttpMethod.POST,
+                                        "/api/webhooks/github"
+                                ),
+                                PathPatternRequestMatcher.pathPattern(
+                                        HttpMethod.POST,
+                                        "/api/webhooks/jira"
+                                )
+                        )
                 )
                 .securityContext(context -> context
                         .securityContextRepository(securityContextRepository)

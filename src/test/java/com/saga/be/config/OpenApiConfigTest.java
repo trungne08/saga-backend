@@ -20,6 +20,8 @@ class OpenApiConfigTest {
         assertNotNull(logout);
         assertTrue(logout.getDescription().contains("framework-managed"));
         assertTrue(logout.getDescription().contains("JSESSIONID"));
+        assertTrue(logout.getDescription().contains("Failed to fetch"));
+        assertTrue(logout.getDescription().contains("top-level form POST"));
         assertNotNull(logout.getSecurity());
         assertTrue(logout.getSecurity().stream()
                 .anyMatch(requirement -> requirement.containsKey("sessionCookie")));
@@ -33,5 +35,6 @@ class OpenApiConfigTest {
         assertNotNull(logout.getResponses().get("302").getHeaders().get("Location"));
         assertNotNull(logout.getResponses().get("403"));
         assertFalse(logout.getResponses().containsKey("401"));
+        assertFalse(openAPI.getComponents().getSecuritySchemes().containsKey("bearerAuth"));
     }
 }

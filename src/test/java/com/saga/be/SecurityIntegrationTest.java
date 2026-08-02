@@ -124,6 +124,13 @@ class SecurityIntegrationTest {
     }
 
     @Test
+    void csrfExemptionIsLimitedToTheTwoWebhookPostEndpoints() throws Exception {
+        mockMvc.perform(post("/api/webhooks/not-a-webhook")
+                        .with(authentication(adminAuthentication())))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
     void oauthAuthorizedClientStorageIsDeliberatelyDisabled() {
         Map<String, OAuth2AuthorizedClientRepository> repositories =
                 applicationContext.getBeansOfType(OAuth2AuthorizedClientRepository.class);
@@ -199,6 +206,14 @@ class SecurityIntegrationTest {
                         .with(authentication(admin))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(subjectJson("CSRF-MISSING")))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(post("/api/v1/subjects")
+                        .with(authentication(admin))
+                        .cookie(csrfCookie)
+                        .header("X-XSRF-TOKEN", "invalid-csrf-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(subjectJson("CSRF-INVALID")))
                 .andExpect(status().isForbidden());
 
         mockMvc.perform(post("/api/v1/subjects")
