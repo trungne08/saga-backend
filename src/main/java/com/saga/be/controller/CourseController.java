@@ -4,6 +4,7 @@ import com.saga.be.dto.request.CourseRequest;
 import com.saga.be.entity.Course;
 import com.saga.be.service.CourseService;
 import com.saga.be.service.ExcelImportService;
+import com.saga.be.security.SagaPrincipal;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -18,6 +19,7 @@ import org.springframework.validation.annotation.Validated;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Page;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import java.util.UUID;
 
 @RestController
@@ -53,7 +55,9 @@ public class CourseController {
     }
 
     @PostMapping(value = "/{courseId}/import-students", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("hasAnyRole('ADMIN', 'LECTURER')")
     public ResponseEntity<String> importStudents(
+            @AuthenticationPrincipal SagaPrincipal principal,
             @PathVariable UUID courseId,
             @RequestParam("file") MultipartFile file) {
         
@@ -62,7 +66,7 @@ public class CourseController {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Vui lòng tải lên file Excel (.xlsx) hợp lệ");
         }
 
-        excelImportService.importStudentsToCourse(courseId, file);
+        excelImportService.importStudentsToCourse(principal, courseId, file);
         return ResponseEntity.ok("Import danh sách sinh viên thành công!");
     }
 }

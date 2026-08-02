@@ -6,10 +6,10 @@ import com.saga.be.entity.Team;
 import com.saga.be.entity.TeamMember;
 import com.saga.be.entity.enums.AccountStatus;
 import com.saga.be.entity.enums.RoleInTeam;
-import com.saga.be.repository.CourseRepository;
 import com.saga.be.repository.StudentRepository;
 import com.saga.be.repository.TeamMemberRepository;
 import com.saga.be.repository.TeamRepository;
+import com.saga.be.security.SagaPrincipal;
 import lombok.RequiredArgsConstructor;
 import org.apache.poi.ss.usermodel.DataFormatter;
 import org.apache.poi.ss.usermodel.Row;
@@ -27,15 +27,18 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class ExcelImportService {
 
-    private final CourseRepository courseRepository;
+    private final CourseImportAuthorizationService authorizationService;
     private final StudentRepository studentRepository;
     private final TeamRepository teamRepository;
     private final TeamMemberRepository teamMemberRepository;
 
     @Transactional
-    public void importStudentsToCourse(UUID courseId, MultipartFile file) {
-        Course course = courseRepository.findById(courseId)
-                .orElseThrow(() -> new RuntimeException("Course not found"));
+    public void importStudentsToCourse(
+            SagaPrincipal principal,
+            UUID courseId,
+            MultipartFile file
+    ) {
+        Course course = authorizationService.requireImportAccess(principal, courseId);
 
         try (InputStream is = file.getInputStream(); Workbook workbook = new XSSFWorkbook(is)) {
             Sheet sheet = workbook.getSheetAt(0);
@@ -83,14 +86,10 @@ public class ExcelImportService {
                     // Xác định Role trước
                     RoleInTeam role = leaderMark.equalsIgnoreCase("x") ? RoleInTeam.LEADER : RoleInTeam.MEMBER;
                     
-                    // Kiểm tra sự tồn tại dựa trên cả teamId, studentId và role
-                    boolean isMemberExist = teamMemberRepository.existsByTeamIdAndStudentIdAndRoleInTeam(
-                            team.getId(), 
-                            student.getId(), 
-                            role
-                    );
-
-                    if (!isMemberExist) {
+                    if (teamMemberRepository.findByTeamIdAndStudentId(
+                            team.getId(),
+                            student.getId()
+                    ).isEmpty()) {
                         TeamMember teamMember = TeamMember.builder()
                                 .team(team)
                                 .student(student)
