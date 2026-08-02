@@ -4,6 +4,7 @@ import com.saga.be.dto.request.CourseRequest;
 import com.saga.be.dto.response.CourseStudentRosterItem;
 import com.saga.be.dto.response.CourseStudentRosterResponse;
 import com.saga.be.dto.response.CourseStudentTeamSummaryResponse;
+import com.saga.be.dto.response.LecturerOptionResponse;
 import com.saga.be.dto.response.TeamMemberResponse;
 import com.saga.be.entity.Class;
 import com.saga.be.entity.Course;
@@ -103,6 +104,23 @@ public class CourseService {
         }
 
         return courseRepository.findAll(specification, pageable);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<LecturerOptionResponse> getLecturersForCourseAssignment(String keyword, Pageable pageable) {
+        Specification<Lecturer> specification = (root, query, criteriaBuilder) -> criteriaBuilder.conjunction();
+
+        if (keyword != null && !keyword.isBlank()) {
+            String needle = "%" + keyword.trim().toLowerCase() + "%";
+            specification = specification.and((root, query, criteriaBuilder) -> criteriaBuilder.or(
+                    criteriaBuilder.like(criteriaBuilder.lower(root.get("fullName")), needle),
+                    criteriaBuilder.like(criteriaBuilder.lower(root.get("email")), needle),
+                    criteriaBuilder.like(criteriaBuilder.lower(root.get("cognitoSub")), needle)
+            ));
+        }
+
+        return lecturerRepository.findAll(specification, pageable)
+                .map(LecturerOptionResponse::from);
     }
 
     @Transactional(readOnly = true)

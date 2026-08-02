@@ -2,6 +2,7 @@ package com.saga.be.controller;
 
 import com.saga.be.dto.request.CourseRequest;
 import com.saga.be.dto.response.CourseStudentRosterResponse;
+import com.saga.be.dto.response.LecturerOptionResponse;
 import com.saga.be.entity.Course;
 import com.saga.be.service.CourseService;
 import com.saga.be.service.ExcelImportService;
@@ -19,6 +20,7 @@ import org.springframework.http.MediaType;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Sort;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import java.util.UUID;
@@ -50,9 +52,25 @@ public class CourseController {
             @RequestParam(required = false) UUID instructorId,
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "10") @Min(1) @Max(100) int size) {
-         
+
         Pageable pageable = PageRequest.of(page, size);
         return ResponseEntity.ok(courseService.getCoursesWithFilters(subjectId, semesterId, instructorId, pageable));
+    }
+
+    @GetMapping("/instructors")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Page<LecturerOptionResponse>> getLecturersForCourseAssignment(
+            @RequestParam(required = false) String keyword,
+            @RequestParam(defaultValue = "fullName") String sortBy,
+            @RequestParam(defaultValue = "asc") String sortDirection,
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size
+    ) {
+        Sort.Direction direction = "desc".equalsIgnoreCase(sortDirection)
+                ? Sort.Direction.DESC
+                : Sort.Direction.ASC;
+        Pageable pageable = PageRequest.of(page, size, Sort.by(direction, sortBy));
+        return ResponseEntity.ok(courseService.getLecturersForCourseAssignment(keyword, pageable));
     }
 
     @GetMapping("/{courseId}/students")
