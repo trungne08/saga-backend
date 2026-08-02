@@ -1,0 +1,12 @@
+unit: course-controller
+source_loc: src/main/java/com/saga/be/controller/CourseController.java:1
+bindings:
+  framework:
+    - Spring MVC controller
+    - Spring Security authorization
+  runtime_config:
+    - session-backed principal context
+    - provider-specific callback or webhook route
+  must_appear_in_target:
+    - same public route family
+    - same auth requirement contract

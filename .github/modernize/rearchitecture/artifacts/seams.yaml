@@ -1,0 +1,34 @@
+seams:
+  - name: personal-vs-project-provider-boundary
+    source: declared
+    frozen_side: personal-identity-verified-link
+    frozen_side_rule: keep current student-driven personal identity mapping logic unchanged while project-level integration adapts to it
+    protocols:
+      - oauth2-browser-redirect
+      - provider-account-link
+    bridge_points:
+      - name: provider-account-identity
+        mapping_rule: use stable external account identifiers from provider metadata and do not accept user-entered username/email as the unique key
+        edge_cases:
+          - identity already linked to a different student
+        idempotency_retry: none
+        fallback: reject with conflict response
+    frozen_contract:
+      must_preserve:
+        - provider identity must remain stable per external account ID
+        - local profile ownership is checked before link/update
+  - name: webhook-durable-receipt
+    source: inferred
+    frozen_side: external-provider-delivery-queue
+    frozen_side_rule: the public webhook endpoint remains the only ingress path; the worker consumes the durable receipt after commit
+    protocols:
+      - webhook-signature
+      - after-commit-event
+    bridge_points:
+      - name: receipt-event->sync-worker
+        mapping_rule: store a unique delivery ID and publish a receipt-created event only after the receipt transaction commits
+        edge_cases:
+          - duplicate delivery
+          - worker timeout
+        idempotency_retry: retry up to five attempts
+        fallback: mark receiver as duplicate or partial failure and preserve receipt payload until a later retry

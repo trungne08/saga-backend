@@ -1,6 +1,7 @@
 package com.saga.be.controller;
 
 import com.saga.be.dto.request.CourseRequest;
+import com.saga.be.dto.response.CourseStudentRosterResponse;
 import com.saga.be.entity.Course;
 import com.saga.be.service.CourseService;
 import com.saga.be.service.ExcelImportService;
@@ -49,9 +50,33 @@ public class CourseController {
             @RequestParam(required = false) UUID instructorId,
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "10") @Min(1) @Max(100) int size) {
-        
+         
         Pageable pageable = PageRequest.of(page, size);
         return ResponseEntity.ok(courseService.getCoursesWithFilters(subjectId, semesterId, instructorId, pageable));
+    }
+
+    @GetMapping("/{courseId}/students")
+    @PreAuthorize("hasAnyRole('ADMIN', 'LECTURER')")
+    public ResponseEntity<CourseStudentRosterResponse> getCourseStudents(
+            @AuthenticationPrincipal SagaPrincipal principal,
+            @PathVariable UUID courseId,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(defaultValue = "all") String hasTeam,
+            @RequestParam(defaultValue = "studentCode") String sortBy,
+            @RequestParam(defaultValue = "asc") String sortDirection,
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size
+    ) {
+        Pageable pageable = PageRequest.of(page, size);
+        return ResponseEntity.ok(courseService.getCourseRoster(
+                principal,
+                courseId,
+                keyword,
+                hasTeam,
+                sortBy,
+                sortDirection,
+                pageable
+        ));
     }
 
     @PostMapping(value = "/{courseId}/import-students", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)

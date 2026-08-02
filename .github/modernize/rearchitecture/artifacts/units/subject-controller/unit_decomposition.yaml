@@ -1,0 +1,9 @@
+unit: subject-controller
+source_loc: src/main/java/com/saga/be/controller/SubjectController.java:1
+commit: false
+candidate_splits:
+  - name: move controller-facing validation into a narrower request service
+    drivers:
+      - route-thinness
+      - auth-guard separation
+    rationale: keep externally visible route semantics stable while detangling orchestration and persistence.

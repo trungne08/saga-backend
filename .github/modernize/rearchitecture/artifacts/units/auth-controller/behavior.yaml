@@ -1,0 +1,19 @@
+unit: auth-controller
+source_loc: src/main/java/com/saga/be/controller/AuthController.java:1
+behavior:
+  side_effects:
+    - name: durable persistence in the JPA repository layer
+      must_preserve: true
+      notes: Authentication session and security context boundaries
+  branches:
+    - branch: successful request path
+      must_preserve: true
+    - branch: validation conflict or missing ownership
+      must_preserve: true
+  error_paths:
+    - contract: 404 / 409 / 403 style response
+      must_preserve: true
+  concurrency:
+    model: spring-transaction-boundary
+    tx_boundary: service method transaction
+    must_preserve: true

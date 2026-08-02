@@ -1,0 +1,42 @@
+shared_modules:
+  - name: src/main/java/com/saga/be/security/SagaPrincipal.java
+    kind: identity-context
+    used_by_units:
+      - auth-controller
+      - project-integration-controller
+      - personal-integration-controller
+      - identity-mapping-review-controller
+    fields:
+      - applicationRole
+      - localProfileId
+      - cognitoSub
+    split_candidate: false
+    migration_strategy: preserve as an auth identity contract across API entrypoints
+
+  - name: src/main/java/com/saga/be/entity/Project.java
+    kind: project-root-aggregate
+    used_by_units:
+      - project-integration-controller
+      - team-project-controller
+      - webhook-controller
+    fields:
+      - id
+      - name
+      - team
+      - jiraBoard
+      - gitRepos
+    split_candidate: true
+    migration_strategy: keep aggregate root and separate provider-linking side effects out into integration-owned components
+
+  - name: src/main/java/com/saga/be/entity/Student.java
+    kind: profile-aggregate
+    used_by_units:
+      - auth-controller
+      - personal-integration-controller
+      - identity-mapping-review-controller
+    fields:
+      - id
+      - providerLinks
+      - profileMetadata
+    split_candidate: false
+    migration_strategy: preserve identity relation and move review-only logic to a narrower integration service

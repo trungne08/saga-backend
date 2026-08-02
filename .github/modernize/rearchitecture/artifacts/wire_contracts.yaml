@@ -1,0 +1,46 @@
+contracts:
+  - name: spring-rest-api
+    source: internal
+    direction: outbound
+    stability: frozen
+    target_contract:
+      path: /api/*
+      method: REST
+      notes: Public API surface is controller-driven with JSON request/response DTOs.
+  - name: github-app-webhook
+    source: external
+    direction: inbound
+    stability: frozen
+    target_contract:
+      path: /api/webhooks/github
+      method: POST
+      notes: GitHub raw-body HMAC verification with payload event validation.
+  - name: jira-webhook
+    source: external
+    direction: inbound
+    stability: frozen
+    target_contract:
+      path: /api/webhooks/jira
+      method: POST
+      notes: JWT signature verification using provider secret and connection-scoped payload handling.
+  - name: oidc-cognito
+    source: external
+    direction: outbound
+    stability: frozen
+    target_contract:
+      path: /oauth2/** and /login/**
+      method: browser redirect
+      notes: Spring Security OAuth2 client and Cognito authorities mapping.
+  - name: mysql-and-mongo-persistence
+    source: internal
+    direction: outbound
+    stability: frozen
+    target_contract:
+      path: repository layer
+      method: JPA/Mongo data access
+      notes: Domain entity persistence is still a long-lived data contract.
+semantic_divergence:
+  - interface: github-app-webhook
+    divergence: The raw webhook payload is validated before persistence; provider event routing occurs after durable receipt.
+  - interface: jira-webhook
+    divergence: Journaled secret lookup and webhook authentication are decoupled from client-provided project selection.
