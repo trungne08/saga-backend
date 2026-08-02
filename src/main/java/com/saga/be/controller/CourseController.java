@@ -3,6 +3,7 @@ package com.saga.be.controller;
 import com.saga.be.dto.request.CourseRequest;
 import com.saga.be.entity.Course;
 import com.saga.be.service.CourseService;
+import com.saga.be.service.ExcelImportService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -11,6 +12,8 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.http.MediaType;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Page;
@@ -24,6 +27,7 @@ import java.util.UUID;
 public class CourseController {
 
     private final CourseService courseService;
+    private final ExcelImportService excelImportService;
 
     @GetMapping("/{id}")
     public ResponseEntity<Course> getCourseById(@PathVariable UUID id) {
@@ -46,5 +50,19 @@ public class CourseController {
         
         Pageable pageable = PageRequest.of(page, size);
         return ResponseEntity.ok(courseService.getCoursesWithFilters(subjectId, semesterId, instructorId, pageable));
+    }
+
+    @PostMapping(value = "/{courseId}/import-students", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<String> importStudents(
+            @PathVariable UUID courseId,
+            @RequestParam("file") MultipartFile file) {
+        
+        // Kiểm tra định dạng file
+        if (file.isEmpty() || !file.getOriginalFilename().endsWith(".xlsx")) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Vui lòng tải lên file Excel (.xlsx) hợp lệ");
+        }
+
+        excelImportService.importStudentsToCourse(courseId, file);
+        return ResponseEntity.ok("Import danh sách sinh viên thành công!");
     }
 }
