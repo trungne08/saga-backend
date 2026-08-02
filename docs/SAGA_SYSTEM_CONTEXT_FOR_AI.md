@@ -7,9 +7,9 @@
 | Mục | Giá trị |
 |---|---|
 | Branch | `main` |
-| Commit | `d400162` (`sửa lại các số liệu`); authorization import nằm ở ancestor `d855313` |
+| Commit | `90b1852` (`sửa lại lấy token vào api swagger`) |
 | Thời điểm audit | 2026-08-02 (Asia/Saigon, UTC+07:00) |
-| Working tree | Có thay đổi chưa commit cho identity provisioning, invitation outbox, migration, test và tài liệu; không commit/push trong task này. |
+| Working tree | Chỉ sáu tài liệu checkpoint đang thay đổi chưa commit; application code và test sạch tại HEAD; không commit/push trong task này. |
 | Java / Spring Boot | Java 17 / Spring Boot 4.1.0 |
 | Profile tìm thấy | mặc định, `local`, `prod`, `test` |
 | Phạm vi | `src/main`, `src/test`, `pom.xml`, cấu hình, Railway, Lambda Cognito, scripts và docs hiện hữu |
@@ -53,7 +53,7 @@ flowchart LR
 |---|---|---|---|
 | `config` | security, CORS, OpenAPI, property binding, Mongo health, local seed | `SecurityConfig`, `CorsConfig`, `IntegrationPublicUrlValidator` | CONFIRMED |
 | `security`, `auth`, `service` | OIDC claims, role, local profile, session/login/logout | `CognitoAuthenticationSuccessHandler`, `AuthenticatedProfileService` | CONFIRMED |
-| `controller` | HTTP API | 12 REST controllers có HTTP mapping (40 methods) và 1 `@RestControllerAdvice` không endpoint | CONFIRMED |
+| `controller` | HTTP API | 13 REST controllers có 41 HTTP methods và 1 `@RestControllerAdvice` không endpoint | CONFIRMED |
 | `entity`, `repository` | JPA/MySQL domain và Mongo audit | `Student`, `Team`, `Project`, `SystemAuditLog` | CONFIRMED |
 | `integration/identity` | personal identity mapping/review | `IdentityMappingService`, `IdentityMappingReviewService` | CONFIRMED |
 | `integration/project` | team project, Jira/GitHub link flow | `ProjectIntegrationService`, `TeamProjectService` | CONFIRMED |
@@ -125,13 +125,13 @@ Application role khác team role. Một Student có thể là `LEADER`; điều 
 - **CONFIRMED:** method security bật: 5 `@PreAuthorize`, 0 `@Secured`. Create Class/Course/Subject/Semester là ADMIN-only; import student chặn role tổng quát ADMIN/LECTURER, sau đó service kiểm tra course scope. Evidence: controller master data, `CourseController#importStudents`, `CourseImportAuthorizationService`.
 - **CONFIRMED:** team/project integration dùng service-level ownership: ADMIN, lecturer là `Course.instructor`, hoặc student là Team LEADER. Evidence: `ProjectIntegrationAuthorizationService#requireTeamManager`.
 - **CONFIRMED:** identity mapping reviewer là ADMIN, hoặc LECTURER có membership/couse instructor relationship. Evidence: `IdentityMappingReviewService#requireReviewer`.
-- **CONFIRMED:** CSRF áp dụng cho HTTP unsafe; chỉ `/api/webhooks/**` bị exempt. Evidence: `SecurityConfig#securityFilterChain`.
+- **CONFIRMED:** CSRF áp dụng cho HTTP unsafe; chỉ `POST /api/webhooks/github` và `POST /api/webhooks/jira` bị exempt. Evidence: `SecurityConfig#securityFilterChain`.
 - **CONFIRMED:** không phải toàn bộ CRUD chỉ dành cho Lecturer. Các GET master data chỉ authenticated; import Excel cho ADMIN mọi Course hoặc LECTURER là instructor của Course; STUDENT bị từ chối. Evidence: `CourseImportAuthorizationService#requireImportAccess`.
 - **TBD:** account status không được SecurityConfig hay authorization services kiểm tra để chặn API; không suy ra status policy.
 
 ## 6. API endpoint matrix
 
-Có 40 HTTP methods được khai báo trực tiếp trong 12 REST controllers. `GlobalExceptionHandler` là 1 `@RestControllerAdvice`, không khai báo endpoint. Bảng còn ghi riêng các route framework/Actuator/OpenAPI quan trọng nên tổng số dòng route là 46. Mặc định `Auth` nghĩa authenticated session theo SecurityConfig. CSRF: `Có` cho POST/PUT/PATCH/DELETE, `Không áp dụng` cho GET, `Miễn` chỉ webhook.
+Có 41 HTTP methods được khai báo trực tiếp trong 13 REST controllers. `GlobalExceptionHandler` là 1 `@RestControllerAdvice`, không khai báo endpoint. `POST /api/auth/logout` là endpoint framework-managed, không phải controller method. Mặc định `Auth` nghĩa authenticated session theo SecurityConfig. CSRF: `Có` cho POST/PUT/PATCH/DELETE, `Không áp dụng` cho GET, `Miễn` chỉ hai webhook POST.
 
 | Method | Path | Controller#Method | Public/Auth | Role/scope | CSRF | Request → Response | Evidence |
 |---|---|---|---|---|---|---|---|
@@ -145,6 +145,7 @@ Có 40 HTTP methods được khai báo trực tiếp trong 12 REST controllers. 
 | POST | `/api/v1/courses` | `#createCourse` | Auth | ADMIN | Có | `CourseRequest` → `Course` | controller |
 | GET | `/api/v1/courses` | `#getCourses` | Auth | — | Không | query → `Page<Course>` | controller |
 | POST | `/api/v1/courses/{courseId}/import-students` | `#importStudents` | Auth | ADMIN mọi Course; LECTURER phải là instructor; STUDENT bị chặn | Có | multipart `file` → String | controller + `CourseImportAuthorizationService` |
+| GET | `/api/v1/courses/{courseId}/teams/{teamId}/members` | `TeamRosterController#getMembers` | Auth | ADMIN mọi Team; Lecturer chỉ Course mình dạy; Student phải thuộc đúng Team, LEADER và MEMBER đều được | Không | page/size → `Page<TeamMemberResponse>` (không email/cognitoSub/version) | controller + `TeamRosterService` |
 | GET | `/api/v1/subjects/{id}` | `SubjectController#getSubjectById` | Auth | — | Không | → `Subject` | controller |
 | POST | `/api/v1/subjects` | `#createSubject` | Auth | ADMIN | Có | `SubjectRequest` → `Subject` | controller |
 | GET | `/api/v1/subjects` | `#getSubjects` | Auth | — | Không | query → `Page<Subject>` | controller |
@@ -182,11 +183,11 @@ Có 40 HTTP methods được khai báo trực tiếp trong 12 REST controllers. 
 | GET | `/v3/api-docs/**` | Springdoc | Public khi flag bật | — | Không | → OpenAPI JSON | `SecurityConfig`; `OpenApiConfig` |
 | GET | `/swagger-ui/**`, `/swagger-ui.html` | Springdoc | Public khi flag bật | — | Không | → Swagger UI/assets | `SecurityConfig`; `OpenApiConfig` |
 
-Static GET `/`, `/index.html`, `/favicon.ico`, `/assets/**`, `/css/**`, `/js/**`, `/images/**` cũng public theo `SecurityConfig`; đây là resource mappings, không tính vào 40 controller methods. Swagger/OpenAPI public chỉ khi corresponding enable flag bật.
+Static GET `/`, `/index.html`, `/favicon.ico`, `/assets/**`, `/css/**`, `/js/**`, `/images/**` cũng public theo `SecurityConfig`; đây là resource mappings, không tính vào 41 controller methods. Swagger/OpenAPI public chỉ khi corresponding enable flag bật.
 
 ### Frontend integration contract
 
-**CONFIRMED:** dùng browser navigation cho login/authorization redirect, `fetch`/Axios có `credentials: "include"` cho API, không dùng `Authorization: Bearer`, không đọc/lưu OAuth JWT/token trong localStorage. Sau login gọi `/api/auth/me`, lấy CSRF qua cookie hoặc `GET /api/auth/csrf`; mutation gửi `X-XSRF-TOKEN`. 401/403 trả JSON error, frontend phải xử lý theo status. Logout gọi `POST /api/auth/logout` có CSRF và browser nhận redirect Cognito. Evidence: `AuthController`, `SecurityConfig`, `CognitoLogoutSuccessHandler`, `docs/FRONTEND_API_INTEGRATION.md` (tài liệu chỉ bổ trợ, không mạnh hơn source).
+**CONFIRMED:** dùng browser navigation cho login/authorization redirect, `fetch`/Axios có `credentials: "include"` cho API, không dùng `Authorization: Bearer`, không đọc/lưu OAuth JWT/token trong localStorage. Sau login gọi `/api/auth/me`, lấy CSRF qua cookie hoặc `GET /api/auth/csrf`; mutation gửi `X-XSRF-TOKEN`. Swagger UI cùng origin dùng global interceptor để bootstrap/read cookie và chỉ gắn header cho unsafe method. 401/403 trả JSON error, frontend phải xử lý theo status. Logout gọi `POST /api/auth/logout` có CSRF và browser nhận redirect Cognito. Evidence: `AuthController`, `SecurityConfig`, `SwaggerUiCsrfConfiguration`, `CognitoLogoutSuccessHandler`, `docs/FRONTEND_API_INTEGRATION.md`.
 
 **RUNTIME FACT DO NGƯỜI DÙNG CUNG CẤP:** frontend dev `http://localhost:3000`; production backend `https://saga-backend-production-3951.up.railway.app`; FE success route dự kiến `/auth/callback`; OIDC callback vẫn backend. Các giá trị chỉ hoạt động nếu environment `FRONTEND_ORIGINS`, `AUTH_SUCCESS_REDIRECT_URI`, cookie settings triển khai tương ứng.
 
@@ -287,7 +288,7 @@ Key classes: `ProjectIntegrationService#beginGitHubInstallation/#linkGitHubRepos
 
 ### Test hiện có
 
-Có 49 test source classes: 48 file khớp `*Test.java` và `BeApplicationTests.java`; gồm `CourseImportSecurityIntegrationTest` với 13 case cho anonymous, CSRF, ADMIN, Lecturer owner/non-owner, Student, missing Course, rollback, import lặp và provider failure không rollback import. **CONFIRMED:** full `./mvnw.cmd test` pass 214 tests, 0 failures, 0 errors, 0 skipped. Provisioning và invitation tests mới bao phủ reuse/imported Student, conflict, membership/role preservation, competitive bind, outbox dedup/template/failure/retry, concurrent claim và stale recovery. `SecurityIntegrationTest` còn xác nhận logout framework-managed trả 302 với CSRF hợp lệ (kể cả anonymous) và 403 khi CSRF thiếu/sai. `CourseImportSecurityIntegrationTest` dùng `@DirtiesContext(AFTER_CLASS)` để không rò CSRF mock state sang security integration test. Maven dùng Java runtime 21.0.7 trên máy audit, trong khi project compile target Java 17. `npm.cmd test` Lambda đã pass 23 tests ở audit trước.
+Có 54 test source classes. **CONFIRMED:** full `./mvnw.cmd test` trên source HEAD pass 52 suites / 232 tests / 0 failures / 0 errors / 0 skipped. Checkpoint trước Swagger-CSRF commit là 51 suites / 228 tests / 0 failures / 0 errors / 0 skipped. Provisioning/invitation tests bao phủ reuse imported Student, conflict, membership/role preservation, competitive bind, outbox dedup/template/failure/retry, concurrent claim và stale recovery. `SecurityIntegrationTest` xác nhận logout framework-managed trả 302 với CSRF hợp lệ (kể cả anonymous) và 403 khi CSRF thiếu/sai. `CsrfMutationMethodIntegrationTest`, `CourseImportSecurityIntegrationTest` và `SwaggerUiCsrfIntegrationTest` xác nhận header/cookie thực tế, multipart và generated Swagger initializer. Maven dùng Java runtime 21.0.7 trên máy audit, trong khi project compile target Java 17.
 
 Evidence: `src/test/java/**`, `infra/lambda/cognito-account-linking/test/index.test.mjs`.
 
@@ -301,7 +302,7 @@ Evidence: `src/test/java/**`, `infra/lambda/cognito-account-linking/test/index.t
 | Medium | API master-data trả JPA entities trực tiếp | Class/Course/Subject/Semester controllers | tạo response DTO ổn định trước FE lớn |
 | Medium | Error format không thống nhất cho validation/ResponseStatusException/uncaught runtime | `GlobalExceptionHandler` | thêm error advice chung |
 | Medium | Cross-site cookie/CSRF giữa localhost và Railway phụ thuộc browser third-party cookie policy | CORS/security/prod profile | E2E browser test và chiến lược same-site |
-| Medium | Swagger session cookie mô tả nhưng CSRF mutation UX không tự chứng minh hoạt động | `OpenApiConfig`, SecurityConfig | kiểm thử Swagger unsafe calls |
+| Low | Swagger interceptor chỉ đọc được cookie backend khi Swagger UI cùng origin API; browser E2E cross-site frontend vẫn phải kiểm chứng riêng | `SwaggerUiCsrfConfiguration`, `AuthController#csrf` | dùng `/api/auth/csrf` cho FE khác origin và chạy browser E2E |
 | Low | `AccountStatus` có thể null cho Admin/Lecturer và `AuthMeResponse` có null | profile service/DTO | xác định UI contract, không render string `"null"` |
 
 ### Việc cần làm tiếp theo
@@ -352,19 +353,22 @@ INTEGRATIONS: Jira OAuth/webhook/sync; GitHub App/OAuth/webhook/backfill.
 DEPLOYMENT: Railway config exists; runtime dashboard/state TBD.
 KNOWN ISSUES: Excel import identity/validation contract is incomplete; cookie cross-site risk; inconsistent error DTOs.
 CURRENT NEXT STEP: Complete import validation/provider delivery and browser E2E CORS/CSRF/session testing.
+```
 
 ## Update 2026-08-02 — Imported Student provisioning and invitation outbox
 
 - **CONFIRMED:** Import normalizes email (trim/lowercase) and student code (trim/uppercase). Existing data is reused only when both values identify the same Student; a partial or split match is a 409 conflict.
 - **CONFIRMED:** A STUDENT login first looks up `cognitoSub`. If absent, verified Cognito email plus the existing `StudentCodeExtractor` result must both identify one unlinked Student. The bind uses a transaction and pessimistic row lock; it writes only `cognitoSub` and changes `PENDING` to `ACTIVE`. It never creates/replaces TeamMember, Team, Course, email or student code.
 - **CONFIRMED:** `ACTIVE` remains active; `INACTIVE` and `SUSPENDED` are not auto-activated. Admin/Lecturer provisioning retains its former path.
-- **CONFIRMED:** Import creates a deduplicated `student_course_invitation` outbox record after a TeamMember exists. AFTER_COMMIT processing records `SENT` or `FAILED` and retries pending/failed work up to five attempts. Delivery failure never rolls back import.
+- **CONFIRMED:** Import creates a deduplicated `student_course_invitation` outbox record after a TeamMember exists. V6 stores the outbox unique key; V7 supplies the Student optimistic-lock version/backfill required before Hibernate validate. AFTER_COMMIT processing records `SENT` or `FAILED`, retries pending/failed work up to five attempts, and only reclaims stale `PROCESSING` claims after configurable timeout. Delivery failure never rolls back import; delivery semantics are at-least-once.
 - **PARTIAL:** The default adapter deliberately reports delivery unavailable. No production email provider/dependency/configuration exists in this repository, so production delivery is **TBD**.
 - **TBD:** Spreadsheet header/schema validation, preview, row-level error DTO, a database unique constraint for `team_member(team_id, student_id)`, and deployed Cognito self-sign-up configuration.
 - **CONFIRMED:** Login URL is configuration-driven by `STUDENT_INVITATION_LOGIN_URL` through `app.student-invitation.login-url`; no localhost/Railway URL or callback route is hard-coded.
-- **Verification:** full `./mvnw.cmd test` passed 49 suites / 214 tests / 0 failures / 0 errors / 0 skipped.
+- **CONFIRMED:** Logout is Spring Security framework-managed: `POST /api/auth/logout` needs `X-XSRF-TOKEN`, returns 302 to Cognito with valid CSRF and 403 otherwise. Swagger fetch can show `Failed to fetch` for the cross-origin Cognito redirect; browser clients use top-level form/navigation.
+- **CONFIRMED:** Team roster is paged and never serializes Student email, Cognito subject or version. Its 401/403/404 contract is covered by integration tests.
+- **Runtime fact (user-provided):** a Railway deployment failed because `student.version` was absent. V6/V7 must run before Hibernate validate; no production migration log is in this repository, therefore production migration state remains TBD.
+- **Verification:** full `./mvnw.cmd test` on the current working tree passed 52 suites / 232 tests / 0 failures / 0 errors / 0 skipped. The prior checkpoint was 51 suites / 228 tests.
 DO NOT ASSUME: FE implementation, infrastructure wiring, deployment variables, User Pool trigger setup, session scaling, or unimplemented assessment APIs.
-```
 
 ### Traceability index
 

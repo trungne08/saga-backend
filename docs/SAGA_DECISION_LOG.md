@@ -2,7 +2,7 @@
 
 Tài liệu ghi lại quyết định đã được code/runtime fact chứng minh và các đề xuất còn mở. `ACCEPTED` không có nghĩa production đã được kiểm chứng; evidence của từng quyết định xác định phạm vi xác nhận.
 
-> Metadata audit: branch `main`, HEAD thực tế `d400162` (`sửa lại các số liệu`); authorization import application code ở ancestor `d855313`. Working tree hiện có thay đổi chưa commit cho provisioning/invitation/migration/test/docs. Full Maven suite sau logout-contract audit: 49 Surefire suites, 214 tests pass, 0 failures/errors/skips.
+> Metadata audit: branch `main`, HEAD thực tế `90b1852` (`sửa lại lấy token vào api swagger`). Application code/test sạch tại HEAD; chỉ sáu tài liệu checkpoint chưa commit. Full Maven suite trên source hiện tại: 52 suites, 232 tests pass, 0 failures/errors/skips. Checkpoint trước Swagger-CSRF commit: 51 suites, 228 tests pass.
 
 ## DEC-001 — Dùng Spring Security OAuth2/OIDC và server-side session
 
@@ -105,7 +105,7 @@ Tài liệu ghi lại quyết định đã được code/runtime fact chứng mi
 - Ngày: 2026-08-02
 - Trạng thái: ACCEPTED
 - Bối cảnh: Jira/GitHub không có browser session/CSRF cookie.
-- Quyết định: `/api/webhooks/**` public ở URL security và được miễn CSRF; service xác thực provider token/JWT/signature.
+- Quyết định: chỉ `POST /api/webhooks/github` và `POST /api/webhooks/jira` public ở URL security và được miễn CSRF; service xác thực provider token/JWT/signature. Không exempt wildcard `/api/webhooks/**`.
 - Lý do: Provider-to-server request dùng authenticity mechanism riêng.
 - Hệ quả: Không được permit webhook mà bỏ verification service.
 - Rủi ro: Misconfiguration secret/public URL làm ingest fail hoặc mất an toàn.
@@ -199,7 +199,7 @@ Tài liệu ghi lại quyết định đã được code/runtime fact chứng mi
 ## DEC-017 — Policy phân quyền import sinh viên theo Course
 
 - Ngày: 2026-08-02
-- Trạng thái: ACCEPTED (đã commit trong `d855313`; HEAD audit hiện là `d400162`)
+- Trạng thái: ACCEPTED (authorization import đã commit trong lịch sử; HEAD audit hiện là `90b1852`)
 - Bối cảnh: Import sinh viên là mutation có thể tạo Student, Team và TeamMember nên không đủ an toàn nếu chỉ yêu cầu authenticated session.
 - Quyết định: ADMIN được import mọi Course; LECTURER chỉ import khi `SagaPrincipal.localProfileId` bằng `Course.instructor.id`; STUDENT bị từ chối. Method security chặn role tổng quát, service chịu trách nhiệm ownership và 404 Course.
 - Lý do: Tái sử dụng model `SagaPrincipal`/authority session và pattern ownership hiện có; không đọc Cognito token hoặc raw group trong controller.
@@ -222,7 +222,32 @@ Không có secret hoặc thông tin đăng nhập thật trong decision log này
 
 - Ngày: 2026-08-02
 - Trạng thái: PARTIAL (working tree, chưa commit)
-- Quyết định: Import tạo outbox `student_course_invitation`, dedup theo Student/Course/type, phát event AFTER_COMMIT. Processor claim/lock record, delivery qua adapter, ghi `SENT`/`FAILED` và retry tối đa năm lần; email failure không rollback membership.
+- Quyết định: Import tạo outbox `student_course_invitation`, dedup theo Student/Course/type, phát event AFTER_COMMIT. V6 tạo outbox/unique key; V7 thêm optimistic `Student.version` với default/backfill. Processor claim/lock record, delivery qua adapter, ghi `SENT`/`FAILED`, retry tối đa năm lần và chỉ reclaim `PROCESSING` stale theo timeout cấu hình; email failure không rollback membership.
 - Hệ quả: Linked Student nhận wording sign-in; Student chưa bind nhận wording sign-in/register bằng đúng email và Google nếu deployment Cognito hỗ trợ. Login URL lấy từ `STUDENT_INVITATION_LOGIN_URL`.
 - TBD: Chưa chọn/configure provider production; default adapter báo unavailable an toàn, không claim mail production hoạt động.
 - Evidence: `StudentInvitationOutboxService`, `StudentInvitationProcessor`, V6 migration, invitation tests.
+
+## DEC-020 — Swagger UI dùng CSRF interceptor cùng origin
+
+- Ngày: 2026-08-02
+- Trạng thái: ACCEPTED (working tree, chưa commit)
+- Quyết định: Swagger UI giữ `withCredentials`, bootstrap/read cookie `XSRF-TOKEN` qua cùng origin và gắn `X-XSRF-TOKEN` chỉ cho POST/PUT/PATCH/DELETE cùng origin. Không thêm Bearer scheme hay header lặp trên từng controller.
+- Hệ quả: Mutation đầu tiên chờ `GET /api/auth/csrf` nếu cookie chưa có; GET/HEAD/OPTIONS không gắn header. Swagger cùng origin mới đọc được cookie; FE khác origin vẫn dùng contract JSON `/api/auth/csrf`.
+- Logout: `POST /api/auth/logout` vẫn do Spring Security quản lý; CSRF hợp lệ trả 302 Cognito, thiếu/sai trả 403. Swagger fetch có thể hiện `Failed to fetch` khi theo redirect Cognito cross-origin; client browser dùng top-level form/navigation.
+- Evidence: `SwaggerUiCsrfConfiguration`, `application.properties`, `OpenApiConfig`, `SwaggerUiCsrfIntegrationTest`, `SecurityIntegrationTest`.
+
+## DEC-021 — Team roster authorization không dùng rule Project LEADER-only
+
+- Ngày: 2026-08-02
+- Trạng thái: ACCEPTED (có tại HEAD `90b1852`)
+- Quyết định: `GET /api/v1/courses/{courseId}/teams/{teamId}/members` trả `Page<TeamMemberResponse>` sau khi kiểm tra Team thuộc Course URL. ADMIN xem mọi Team; Lecturer chỉ Course mình dạy; Student chỉ Team mình có TeamMember, bất kể LEADER hay MEMBER.
+- Hệ quả: mismatch Course/Team hoặc Team không tồn tại là 404; anonymous 401; session hợp lệ nhưng không đủ scope 403. Response không chứa email, `cognitoSub` hay version.
+- Evidence: `TeamRosterController`, `TeamRosterService`, `TeamRosterSecurityIntegrationTest`.
+
+## DEC-022 — Railway migration fact được giữ ở mức runtime TBD
+
+- Ngày: 2026-08-02
+- Trạng thái: TBD
+- Runtime fact do người dùng cung cấp: deployment Railway từng fail vì schema thiếu `student.version`.
+- Quyết định: V6/V7 phải chạy trước Hibernate `ddl-auto=validate`; không ghi trạng thái production migration là CONFIRMED khi repository không chứa dashboard/log production.
+- Evidence: V6/V7 source migrations và `Student.version`; production log không có trong repository.

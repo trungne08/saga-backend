@@ -1,6 +1,6 @@
 # Student import, invitation, and first-login provisioning
 
-Status: **PARTIAL** — implemented in the working tree on `main`, audited from HEAD `d400162`; not committed or pushed. Source/config/test are the evidence. No secret is recorded here.
+Status: **PARTIAL** — implemented on `main`, audited from HEAD `90b1852`; application code/test are clean and the working tree only has six uncommitted checkpoint documents. Source/config/test are the evidence. No secret is recorded here.
 
 ## Import and access flow
 
@@ -39,7 +39,7 @@ The pessimistic lock plus existing identity uniqueness constraints prevents two 
 
 ## Invitation outbox and email text
 
-`student_course_invitation` (V6) is an outbox record with a unique key of `student_id + course_id + invitation_type`, state `PENDING/PROCESSING/SENT/FAILED`, attempt count, claim timestamp (`processing_started_at`), timestamps, failure code and optimistic version.
+V6 creates `student_course_invitation` with the database unique key `student_id + course_id + invitation_type`, state `PENDING/PROCESSING/SENT/FAILED`, attempt count, claim timestamp (`processing_started_at`), timestamps, failure code and optimistic version. V7 adds `Student.version` with an existing-row-safe default/backfill for the Student optimistic-lock mapping.
 
 After commit, the processor claims and locks a record, builds a message and invokes `StudentInvitationDeliveryAdapter`.
 
@@ -63,10 +63,20 @@ For a linked Student, the message says they were added to Course/Team and asks t
 
 No URL is hard-coded; `/auth/callback` is not used to begin login. The repository does not contain a mail SDK, mail provider configuration or production adapter. Its default adapter marks delivery unavailable safely. Choosing/configuring a production provider is **TBD** and does not alter the transaction contract.
 
+## Migration and deployment status
+
+**CONFIRMED from source:** Flyway V6 and V7 must run before production Hibernate
+`ddl-auto=validate`; V7 is required by the mapped non-null `Student.version`.
+
+**Runtime fact (user-provided):** a Railway deployment previously failed because
+the database lacked `student.version`. This repository contains no Railway log or
+dashboard evidence that production has since applied V6/V7, so production
+migration status is **TBD**, not CONFIRMED.
+
 ## Limits and verification
 
 **CONFIRMED:** provisioning keeps multi-course memberships and their per-Team LEADER/MEMBER roles intact; a leader's project permission remains scoped to that Team through existing authorization services.
 
 **PARTIAL/TBD:** Excel header/schema validation, preview, row-error DTO, production Cognito self-sign-up evidence, and a database unique constraint for `team_member(team_id, student_id)` are not implemented. The business rule for multiple Teams in one Course is unchanged and remains TBD.
 
-Tests cover matching/conflicts/status/idempotency, competitive bind, multi-course role preservation, import rollback/dedup, outbox template/dedup, concurrent claims, stale recovery, retry and delivery failure. The final full-suite count is recorded in the repository state documents after the complete Maven run.
+Tests cover matching/conflicts/status/idempotency, competitive bind, multi-course role preservation, import rollback/dedup, outbox template/dedup, concurrent claims, stale recovery, retry and delivery failure. The current source-HEAD `./mvnw.cmd test` result is **52 suites / 232 tests / 0 failures / 0 errors / 0 skipped**. The checkpoint before the Swagger-CSRF commit was **51 suites / 228 tests / 0 failures / 0 errors / 0 skipped**.

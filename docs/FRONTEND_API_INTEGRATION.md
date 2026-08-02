@@ -59,7 +59,7 @@ fetch(`${API_BASE_URL}/api/auth/me`, { credentials: "include" });
 | GET | `/api/auth/login` | Public | `302 Found` đến `/oauth2/authorization/cognito`. |
 | GET | `/api/auth/me` | Session | `200` với `AuthMeResponse`; endpoint này vẫn chạm CSRF token để browser nhận cookie CSRF. |
 | GET | `/api/auth/csrf` | Session | `200` với token CSRF JSON cho frontend khác domain; không trả session id hay OAuth token. |
-| POST | `/api/auth/logout` | Session + CSRF | Spring Security logout endpoint; hủy session/cookies rồi `302` đến Cognito `/logout` với `logout_uri` cấu hình. |
+| POST | `/api/auth/logout` | Framework-managed + CSRF | CSRF hợp lệ trả `302` đến Cognito `/logout`; session hiện có bị hủy. Thiếu/sai CSRF trả `403`. |
 
 Khởi tạo login bằng **browser navigation**, không dùng `fetch`:
 
@@ -76,10 +76,13 @@ tuyệt đối.
 
 Không dùng `GET /api/auth/logout` và không dùng `fetch`/Axios để mong browser
 tự theo redirect logout. Backend dùng Spring Security `LogoutFilter` cho
-`POST /api/auth/logout`: request cần session và CSRF hợp lệ, sau đó backend
+`POST /api/auth/logout`: request cần CSRF hợp lệ; nếu có session thì backend
 invalidate session, clear authentication, xoá `JSESSIONID`/`XSRF-TOKEN`, rồi
 redirect browser đến Cognito `/logout` với `client_id` và logout URI đã cấu hình.
 Không có Cognito token, session id hay cookie nào được đưa vào redirect URL.
+Swagger UI dùng fetch nên có thể báo `Failed to fetch` khi browser theo redirect
+cross-origin đến Cognito; đó không phải bằng chứng logout thất bại. Dùng form
+POST/top-level navigation như dưới đây cho browser client.
 
 Từ FE, lấy CSRF token rồi submit form POST để đây là top-level navigation:
 
@@ -153,7 +156,7 @@ CSRF đang được bật toàn hệ thống bằng `CookieCsrfTokenRepository`:
 | Cookie HttpOnly | `false`; browser có thể gửi cookie, nhưng JavaScript ở domain FE khác không thể đọc cookie domain backend |
 | Cookie path | `/` |
 | Endpoint lấy contract token cho FE | `GET /api/auth/csrf` |
-| Endpoint được miễn CSRF | `/api/webhooks/**` |
+| Endpoint được miễn CSRF | Chỉ `POST /api/webhooks/github` và `POST /api/webhooks/jira` |
 
 Theo default CSRF matcher của Spring Security, các request unsafe cần header
 CSRF: `POST`, `PUT`, `PATCH`, `DELETE`. Các webhook bị miễn là endpoint dành
@@ -180,6 +183,19 @@ Với `POST`, `PUT`, `PATCH`, `DELETE`, gửi `credentials: "include"` và heade
 `localStorage` nếu không cần. Nếu response 403 do CSRF/session thay đổi, gọi lại
 `GET /api/auth/csrf` đúng một lần rồi retry mutation tối đa một lần; không retry
 vô hạn.
+
+### Swagger UI CSRF
+
+Swagger UI cùng origin backend được cấu hình `withCredentials` để giữ
+`JSESSIONID`. Interceptor toàn cục đọc/bootstraps cookie `XSRF-TOKEN`, decode giá
+trị và gắn `X-XSRF-TOKEN` chỉ cho `POST`, `PUT`, `PATCH`, `DELETE` cùng origin.
+Nó không gắn header cho `GET`, `HEAD`, `OPTIONS`, không thay `Content-Type` nên
+không làm hỏng multipart import, và không gửi token sang origin khác. Swagger
+không dùng Bearer token và không cần khai báo CSRF header từng endpoint.
+
+Nếu cookie chưa có, interceptor gọi cùng origin `GET /api/auth/csrf` trước
+mutation. Frontend khác origin không đọc được cookie backend; tiếp tục dùng
+response JSON từ endpoint CSRF theo flow ở trên.
 
 ### TypeScript fetch utility
 
@@ -485,6 +501,16 @@ Swagger của môi trường đang chạy hiển thị, thay vì tự tạo mộ
 ---
 
 ## 7. Team Project và identity mapping review
+
+### Danh sách thành viên Team
+
+| Method | Path | Auth/authorization | Response |
+| --- | --- | --- | --- |
+| GET | `/api/v1/courses/{courseId}/teams/{teamId}/members?page=0&size=20` | ADMIN mọi Team; LECTURER chỉ Course mình dạy; STUDENT chỉ đúng Team mình là member, cả LEADER và MEMBER | `200 Page<TeamMemberResponse>`; `401` anonymous; `403` không đủ scope; `404` Team không có hoặc không thuộc Course URL |
+
+`TeamMemberResponse` chỉ có `studentId`, `fullName`, `studentCode`, `roleInTeam`.
+Không hiển thị email, `cognitoSub` hay version. UI phải gửi `courseId` và `teamId`
+đúng quan hệ; endpoint là read-only nên không cần CSRF.
 
 ### Tạo Project cho team
 

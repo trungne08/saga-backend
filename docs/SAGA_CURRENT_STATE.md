@@ -5,10 +5,10 @@
 | Mục | Giá trị |
 |---|---|
 | Branch được audit | `main` |
-| Commit được audit | `d400162` (`sửa lại các số liệu`); authorization import application code ở ancestor `d855313` |
+| Commit được audit | `90b1852` (`sửa lại lấy token vào api swagger`) |
 | Ngày cập nhật | 2026-08-02 (Asia/Saigon, UTC+07:00) |
-| Working tree hiện tại | Có thay đổi chưa commit cho provisioning, invitation outbox, migration, test và tài liệu; không commit/push |
-| Phạm vi thay đổi của task | Cập nhật metadata/trạng thái sau khi authorization import và regression tests đã được commit vào HEAD |
+| Working tree hiện tại | Chỉ sáu tài liệu checkpoint đang thay đổi chưa commit; application code và test sạch tại HEAD; không commit/push |
+| Phạm vi thay đổi của task | Source/config/test ở HEAD và working tree là bằng chứng mạnh nhất |
 
 ## 2. Đã hoàn thành
 
@@ -26,8 +26,9 @@
 |---|---|---|
 | Import authorization integration test | `-Dtest=CourseImportSecurityIntegrationTest test` | 13 tests, 0 failures/errors/skips; `BUILD SUCCESS` |
 | Existing Security integration test | `-Dtest=SecurityIntegrationTest test` (three repeated runs) | 13 tests/run, all pass |
-| Maven test suite | `./mvnw.cmd test` sau logout-contract audit | 214 tests, 0 failures, 0 errors, 0 skipped; `BUILD SUCCESS` |
-| Source/test audit count | quét `src/main` và `src/test` | 12 REST controllers có mapping; 1 `@RestControllerAdvice`; 40 controller HTTP methods; 5 `@PreAuthorize`; 0 `@Secured`; 49 test source classes (48 `*Test.java` + `BeApplicationTests.java`) |
+| Maven test suite (source HEAD hiện tại) | `./mvnw.cmd test` | 52 suites, 232 tests, 0 failures, 0 errors, 0 skipped; `BUILD SUCCESS` |
+| Checkpoint trước Swagger-CSRF commit | mốc audit trước đó | 51 suites, 228 tests, 0 failures, 0 errors, 0 skipped; không phải số liệu hiện tại |
+| Source/test audit count | quét `src/main` và `src/test` | 13 REST controllers; 1 `@RestControllerAdvice`; 41 controller HTTP methods; 5 `@PreAuthorize`; 0 `@Secured`; 54 test source classes |
 | Compile | Maven compile trong test lifecycle | 229 main source files và 44 test source files compile thành công |
 | Security/CSRF/CORS | `SecurityIntegrationTest` | 16 tests pass, gồm anonymous 401 cho protected API, role 403, CSRF, preflight và logout framework-managed |
 | Profile/OIDC | `AuthenticatedProfileServiceTest`, `OidcIdentityServiceTest`, security tests | pass trong Maven suite |
@@ -92,12 +93,17 @@ CHƯA LÀM: Import production-ready validation/provider delivery; browser E2E lo
 VẤN ĐỀ ĐANG MỞ: Import validation/identity; third-party cookie; error contract; session store; hạ tầng Cognito/Railway còn TBD.
 BƯỚC TIẾP THEO: Chốt parser/error DTO và provider email, chạy E2E cookie/CSRF.
 HEAD ĐÃ BAO GỒM: CourseController, ExcelImportService, CourseImportAuthorizationService và CourseImportSecurityIntegrationTest. WORKING TREE HIỆN CÓ: thay đổi chưa commit cho provisioning, invitation outbox, migration, test và docs.
+```
 
-## 10. Update — provisioning và invitation (chưa commit)
+## 10. Update — provisioning, invitation, roster và Swagger CSRF
 
 - **CONFIRMED:** ADMIN import mọi Course; LECTURER chỉ import Course mình là instructor; STUDENT bị từ chối; mutation vẫn cần JSESSIONID và CSRF.
 - **CONFIRMED:** Imported Student `PENDING` được bind bằng subject, hoặc bằng cặp email verified + studentCode cùng trỏ tới đúng một record unlinked. Bind giữ nguyên Course/Team/RoleInTeam, không tạo Student/TeamMember mới và chuyển chỉ `PENDING` sang `ACTIVE`.
 - **CONFIRMED:** Outbox `student_course_invitation` có dedup `studentId + courseId + invitationType`, gửi sau commit, ghi `SENT`/`FAILED`, retry tối đa năm lần. Nội dung email không chứa password, token, session hoặc CSRF.
+- **CONFIRMED:** V6 tạo outbox với unique database key Student/Course/type; V7 bổ sung/backfill `student.version` an toàn để Hibernate `validate` có thể chạy sau migration. Worker chỉ reclaim `PROCESSING` stale theo timeout cấu hình, không gửi lại `SENT`; semantics là at-least-once.
+- **CONFIRMED:** `POST /api/auth/logout` là Spring Security framework-managed, cần `X-XSRF-TOKEN`; CSRF hợp lệ trả 302 Cognito logout, thiếu/sai trả 403. Swagger fetch có thể báo `Failed to fetch` khi theo cross-origin redirect; browser dùng top-level form/navigation.
+- **CONFIRMED:** Swagger dùng `withCredentials`, cookie `XSRF-TOKEN` và interceptor same-origin chỉ cho POST/PUT/PATCH/DELETE; không có Bearer application API.
+- **CONFIRMED:** `GET /api/v1/courses/{courseId}/teams/{teamId}/members` trả `Page<TeamMemberResponse>`; ADMIN mọi Team, Lecturer Course mình dạy, Student đúng Team (LEADER/MEMBER), 401/403/404; response không có email/cognitoSub/version.
 - **PARTIAL/TBD:** Không có production mail provider trong `pom.xml` hay source; adapter mặc định đánh dấu failed an toàn. Parser/preview/error DTO, Cognito self-sign-up deployed và unique database constraint TeamMember còn mở.
-- **Verification mới:** full Maven suite: **214 tests, 0 failures, 0 errors, 0 skipped**; 49 Surefire suites. Không thay đổi Jira, GitHub, OAuth callback, role priority, session hay import authorization.
-```
+- **Railway runtime fact (user-provided):** deployment từng fail vì database thiếu `student.version`; V6/V7 phải migrate trước Hibernate `validate`. Repository không có production log, nên trạng thái migration production là **TBD**, không CONFIRMED.
+- **Verification mới:** full Maven suite trên source HEAD: **52 suites, 232 tests, 0 failures, 0 errors, 0 skipped**. Mốc trước Swagger-CSRF commit là **51 suites, 228 tests**. Không thay đổi Jira, GitHub, OAuth callback, role priority, session hay import authorization.

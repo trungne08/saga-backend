@@ -1,6 +1,6 @@
 # SAGA Backend — Yêu cầu, Dependency, Phân quyền và Ràng buộc
 
-> **Trạng thái audit:** CONFIRMED = được code hiện tại chứng minh; PARTIAL = mới có một phần code/mô hình; TBD = repository không đủ bằng chứng; RECOMMENDED = đề xuất, không phải hành vi hiện tại. Audit dựa trên branch `main`, HEAD thực tế `d400162` (`sửa lại các số liệu`) ngày 2026-08-02; authorization import application code ở ancestor `d855313`. Working tree hiện có thay đổi chưa commit cho provisioning/invitation/migration/test/docs. Không dùng tài liệu cũ làm bằng chứng chính và không chép giá trị bí mật.
+> **Trạng thái audit:** CONFIRMED = được code hiện tại chứng minh; PARTIAL = mới có một phần code/mô hình; TBD = repository không đủ bằng chứng; RECOMMENDED = đề xuất, không phải hành vi hiện tại. Audit dựa trên branch `main`, HEAD thực tế `90b1852` (`sửa lại lấy token vào api swagger`) ngày 2026-08-02. Application code/test sạch tại HEAD; working tree chỉ có sáu tài liệu checkpoint chưa commit. Không dùng tài liệu cũ làm bằng chứng chính và không chép giá trị bí mật.
 
 ## 1. Mục đích tài liệu
 
@@ -60,7 +60,7 @@ Bằng chứng: `AuthController.java:L17-L39`; `SecurityConfig.java:securityFilt
 | Service-level | Personal mapping bắt buộc Student; identity review là ADMIN hoặc Lecturer scoped; project manager là ADMIN, Lecturer owner hoặc Student LEADER; import dùng Course scope riêng. |
 | Ownership/membership | Mapping dùng local profile id; Lecturer dùng Course instructor id; Student manager dùng truy vấn TeamMember exact. |
 | Account status | `AccountStatus` được lưu/trả/audit nhưng không có check ACTIVE/INACTIVE/SUSPENDED/PENDING trước khi cấp API permission. |
-| CSRF | Cookie CSRF áp dụng mutation; chỉ `/api/webhooks/**` được miễn. |
+| CSRF | Cookie CSRF áp dụng mutation; chỉ `POST /api/webhooks/github` và `POST /api/webhooks/jira` được miễn. |
 
 Phân biệt lỗi: route protected chưa đăng nhập → 401; URL/method role denial → 403; có role nhưng không owner/member/leader → `IntegrationException` 403; resource không có thường 404 hoặc integration validation 400; conflict 409; OIDC identity invalid 422; provider/profile failure 502; CSRF thiếu/sai bị Spring Security từ chối trước controller (403).
 
@@ -87,6 +87,7 @@ Quy ước: `AUTHENTICATED` = chỉ cần session; `SCOPED` = phụ thuộc owne
 | POST | `/api/v1/courses` | `createCourse` | AUTHENTICATED | YES | NO | NO | `@PreAuthorize(ADMIN)` | — | YES | `CourseRequest` | `Course` | 201,400,403,404,409 | `CourseController.java:L33-L36` |
 | GET | `/api/v1/courses` | `getCourses` | AUTHENTICATED | YES | YES | YES | filter không phải permission scope | — | NO | query | `Page<Course>` | 200 | `CourseController.java:L39-L51` |
 | POST | `/api/v1/courses/{courseId}/import-students` | `importStudents` | AUTHENTICATED | YES | SCOPED | NO | ADMIN mọi Course; LECTURER phải có `localProfileId == course.instructor.id`; Course thiếu 404 | — | YES | multipart `file` | `String` | 200,401,403,404,500 | `CourseController#importStudents`; `CourseImportAuthorizationService#requireImportAccess` |
+| GET | `/api/v1/courses/{courseId}/teams/{teamId}/members` | `TeamRosterController.getMembers` | AUTHENTICATED | YES | SCOPED | SCOPED | Team phải thuộc Course URL; Lecturer là instructor; Student có TeamMember đúng Team (LEADER/MEMBER đều được) | không dùng LEADER-only project rule | NO | `page`, `size` | `Page<TeamMemberResponse>` không email/cognitoSub/version | 200,401,403,404 | `TeamRosterController`; `TeamRosterService` |
 | GET | `/api/integrations/identity-mappings` | `mappings` | AUTHENTICATED | YES | SCOPED | NO | Lecturer dạy Course có Student target | — | NO | `studentId` | `IdentityConnectionResponse[]` | 200,403 | `IdentityMappingReviewController.java:L32-L38`; `IdentityMappingReviewService#requireReviewer` |
 | PATCH | `/api/integrations/identity-mappings/{mappingId}` | `review` | AUTHENTICATED | YES | SCOPED | NO | review/correction đều recheck reviewer | — | YES | `IdentityMappingReviewRequest` | `IdentityConnectionResponse` | 200,400,403,409 | `IdentityMappingReviewController.java:L40-L51`; `IdentityMappingReviewService#review` |
 | GET | `/api/me/integrations` | `connections` | AUTHENTICATED | NO | NO | YES | chỉ mapping của Student hiện tại | — | NO | — | `PersonalIntegrationsResponse` | 200,403 | `PersonalIntegrationController.java:L36-L40`; `IdentityMappingService#getOwnConnections` |
@@ -115,7 +116,7 @@ Quy ước: `AUTHENTICATED` = chỉ cần session; `SCOPED` = phụ thuộc owne
 | ALL | `/login/**` | Spring Security | PUBLIC | YES | YES | YES | OAuth infrastructure route | — | theo method | — | redirect/TBD | TBD | `SecurityConfig.java:L88-L92` |
 | ALL | `/error` | Spring Boot/Security | PUBLIC | YES | YES | YES | error dispatch | — | theo method | — | error | TBD | `SecurityConfig.java:L88-L92` |
 | GET | `/`, `/index.html`, `/favicon.ico`, `/assets/**`, `/css/**`, `/js/**`, `/images/**` | static resource | PUBLIC | YES | YES | YES | static matcher | — | NO | — | static content | 200,404 | `SecurityConfig.java:L93-L104` |
-| POST | `/api/auth/logout` | Spring Security logout | AUTHENTICATED | YES | YES | YES | session hiện tại | — | YES | — | redirect | 302,403 | `SecurityConfig.java:L143-L153` |
+| POST | `/api/auth/logout` | Spring Security logout | FRAMEWORK/CSRF-GATED | YES | YES | YES | valid CSRF redirects even without a current session; authenticated session is invalidated when present | — | YES | `X-XSRF-TOKEN` or `_csrf` | redirect | 302,403 | `SecurityConfig`; `CognitoLogoutSuccessHandler`; `SecurityIntegrationTest` |
 | GET | `/actuator/health`, `/actuator/health/**` | Actuator | PUBLIC | YES | YES | YES | — | — | NO | — | health | 200 | `SecurityConfig.java:L93-L104`; `application.properties:L25-L27` |
 | GET | `/v3/api-docs/**`, `/swagger-ui/**`, `/swagger-ui.html` | Springdoc | PUBLIC khi enabled | YES | YES | YES | feature flag | — | NO | — | OpenAPI/UI | 200,404 | `SecurityConfig.java:L112-L117`; `OpenApiConfig.java` |
 | ALL | `/api/admin/**` | Không có controller hiện tại | AUTHENTICATED | YES | NO | NO | URL matcher | — | theo method | TBD | TBD | 401,403,404 | `SecurityConfig.java:L118`; controller scan |
@@ -440,7 +441,7 @@ Gửi `JSESSIONID` qua `credentials: "include"`; lấy cookie `XSRF-TOKEN` và g
 | MEDIUM | Import duplicate guard theo application check, chưa thấy database unique constraint team+student. | Concurrent requests vẫn cần kiểm chứng. | `ExcelImportService`; `TeamMemberRepository` | RECOMMENDED: cân nhắc unique constraint và concurrency test. |
 | MEDIUM | Master-data GET mở cho mọi authenticated Student. | Có thể lộ dữ liệu ngoài scope nếu policy muốn hạn chế. | `SecurityConfig:L119`; controller GET | RECOMMENDED: xác nhận scope nghiệp vụ. |
 | MEDIUM | Project integration dựa service checks, không annotation. | Endpoint mới có thể bypass nếu gọi service sai. | `ProjectIntegrationController`; permission service | RECOMMENDED: bổ sung negative tests/guard pattern. |
-| MEDIUM | Swagger session cookie không tự xử lý CSRF. | Mutation test khó và dễ nhầm 403. | `OpenApiConfig`; `SecurityConfig` | RECOMMENDED: hướng dẫn/CSRF support cho QA. |
+| LOW | Swagger UI CSRF interceptor chỉ hoạt động cùng API origin; browser FE cross-site vẫn phụ thuộc cookie policy. | Swagger mutation không còn cần nhập header thủ công; frontend cross-site vẫn cần `/api/auth/csrf` và E2E. | `SwaggerUiCsrfConfiguration`; `AuthController#csrf` | browser E2E production-like. |
 | MEDIUM | Session/token cache in-memory. | Mất session/cache sau redeploy, không chứng minh horizontal scale safe. | `SecurityConfig`; `GitHubProviderClientImpl#tokenCache` | RECOMMENDED: persistent session nếu scale. |
 | LOW | `/api/admin/**` matcher không có controller. | Rule không bảo vệ API hiện có. | `SecurityConfig:L118`; scan controller | RECOMMENDED: giữ đồng bộ hoặc xóa rule thừa. |
 | LOW | Error/response shape không đồng nhất. | FE phải xử lý nhiều error format. | `GlobalExceptionHandler`; `ResponseStatusException` services | RECOMMENDED: chuẩn hoá contract. |
@@ -474,11 +475,11 @@ Không có bằng chứng ADMIN thiếu override: `requireTeamManager` chứng m
 
 ## Biên bản kiểm tra sau khi tạo file
 
-- Quét lại: **12 REST controller có HTTP mapping, 40 endpoint/controller HTTP methods**; thêm 1 `@RestControllerAdvice` (`GlobalExceptionHandler`) không có endpoint. Ma trận có thêm 8 route/matcher Security-managed (OAuth/login/error/static, logout, health, Springdoc, admin) để QA không bỏ sót.
+- Quét lại: **13 REST controller có HTTP mapping, 41 controller HTTP methods**; thêm 1 `@RestControllerAdvice` (`GlobalExceptionHandler`) không có endpoint. `POST /api/auth/logout` là framework-managed ngoài controller scan.
 - `@PreAuthorize`: **5**; `@Secured`: **0**. Permission check chính: `CourseImportAuthorizationService#requireImportAccess`, `IdentityMappingService#requireStudent`, `IdentityMappingReviewService#requireReviewer`, `ProjectIntegrationAuthorizationService#requireTeamManager`, `ProjectIntegrationService#requireInstallationOwner`.
 - Đối chiếu `pom.xml`, package Lambda và bảng dependency; có 16 dependency Maven application/test, 2 dependency Flyway plugin và 1 Node Lambda dependency.
 - Đối chiếu properties/placeholders với bảng configuration; không copy password, token, private key hoặc client secret vào tài liệu.
-- Test class source: **49** (48 `*Test.java` và `BeApplicationTests.java`); Surefire có 49 test suites. Maven report hiện có: `./mvnw.cmd test` — **214 tests, 0 failures, 0 errors, 0 skipped**.
+- Test class source: **54**; full Maven source HEAD: 52 Surefire suites, **232 tests, 0 failures, 0 errors, 0 skipped**. Checkpoint trước Swagger-CSRF commit: 51 suites, 228 tests, 0 failures/errors/skipped.
 - Task hiện tại sửa application code/test/migration và năm file Markdown; không commit/push.
 
 ## Update 2026-08-02 — Student provisioning và invitation outbox (working tree)
@@ -489,10 +490,15 @@ Không có bằng chứng ADMIN thiếu override: `requireTeamManager` chứng m
 | Bind imported Student | CONFIRMED | Cần email + student code cùng chỉ một Student, subject null, role STUDENT; row lock + transaction; conflict 409 an toàn. |
 | Status | CONFIRMED | Chỉ `PENDING → ACTIVE` khi bind; ACTIVE giữ nguyên; INACTIVE/SUSPENDED không tự kích hoạt. |
 | Course/Team access | CONFIRMED | Student global; access giữ bởi TeamMember hiện hữu. Bind không tạo/xoá/sửa TeamMember hay RoleInTeam. |
-| Invitation | CONFIRMED | Outbox sau import commit, dedup Student/Course/type, claim/FAILED/SENT/retry; không rollback import khi delivery lỗi. |
+| Invitation | CONFIRMED | V6 outbox unique Student/Course/type sau import commit; claim/FAILED/SENT/retry tối đa 5; stale `PROCESSING` chỉ reclaim sau timeout cấu hình; không rollback import khi delivery lỗi; at-least-once. |
 | Email provider | TBD | Adapter abstraction/fake test có; không có provider/dependency production trong source. |
 | Import parser/DB uniqueness | PARTIAL | Header/schema, preview, error DTO từng dòng và unique TeamMember ở DB chưa có. |
+| Swagger CSRF | CONFIRMED | `withCredentials`; cookie `XSRF-TOKEN`; global same-origin interceptor chỉ POST/PUT/PATCH/DELETE gắn `X-XSRF-TOKEN`; không Bearer. |
+| Logout | CONFIRMED | Framework-managed `POST /api/auth/logout`; valid CSRF 302 Cognito, missing/invalid 403; Swagger fetch có thể `Failed to fetch` khi redirect cross-origin. |
+| Team roster | CONFIRMED | Paged TeamMemberResponse, ADMIN/Lecturer owner/Student exact-Team policy; 401/403/404 và không email/cognitoSub/version. |
 
-Configuration mới: `app.student-invitation.login-url` lấy từ `STUDENT_INVITATION_LOGIN_URL` (phải là absolute HTTP(S)); `app.student-invitation.retry-delay-ms` có thể lấy từ `STUDENT_INVITATION_RETRY_DELAY_MS`. Không hard-code localhost/Railway, không dùng callback URL làm điểm bắt đầu login và không lưu secret.
+Configuration mới: `app.student-invitation.login-url` lấy từ `STUDENT_INVITATION_LOGIN_URL` (phải là absolute HTTP(S)); `app.student-invitation.retry-delay-ms` từ `STUDENT_INVITATION_RETRY_DELAY_MS`; `app.student-invitation.processing-timeout-ms` từ `STUDENT_INVITATION_PROCESSING_TIMEOUT_MS`. Không hard-code localhost/Railway, không dùng callback URL làm điểm bắt đầu login và không lưu secret.
 
-Full `./mvnw.cmd test` sau logout-contract audit: **49 suites, 214 tests, 0 failures, 0 errors, 0 skipped**. Jira/GitHub/webhook, session/CSRF/OIDC callback, master-data authorization và import authorization không bị sửa trong task này.
+Runtime fact do người dùng cung cấp: Railway từng fail vì DB thiếu `student.version`. V6/V7 phải chạy trước Hibernate `validate`; repository không có production log/dashboard nên migration production vẫn **TBD**, không CONFIRMED.
+
+Full `./mvnw.cmd test` trên source HEAD: **52 suites, 232 tests, 0 failures, 0 errors, 0 skipped**. Checkpoint trước Swagger-CSRF commit: 51 suites, 228 tests. Jira/GitHub/webhook, session/CSRF/OIDC callback, master-data authorization và import authorization không bị thay đổi.
