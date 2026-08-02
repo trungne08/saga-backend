@@ -1,6 +1,6 @@
 # SAGA Backend — Yêu cầu, Dependency, Phân quyền và Ràng buộc
 
-> **Trạng thái audit:** CONFIRMED = được code hiện tại chứng minh; PARTIAL = mới có một phần code/mô hình; TBD = repository không đủ bằng chứng; RECOMMENDED = đề xuất, không phải hành vi hiện tại. Audit dựa trên branch `main`, HEAD thực tế `702855a` (`cập nhật doc của hệ thống saga`) ngày 2026-08-02; authorization application code ở ancestor `d855313` (`sửa lỗi phân quyền`). Application code sạch khi bắt đầu audit và task hiện tại chỉ thay đổi bốn tài liệu audit. Không dùng tài liệu cũ làm bằng chứng chính và không chép giá trị bí mật.
+> **Trạng thái audit:** CONFIRMED = được code hiện tại chứng minh; PARTIAL = mới có một phần code/mô hình; TBD = repository không đủ bằng chứng; RECOMMENDED = đề xuất, không phải hành vi hiện tại. Audit dựa trên branch `main`, HEAD thực tế `d400162` (`sửa lại các số liệu`) ngày 2026-08-02; authorization import application code ở ancestor `d855313`. Working tree hiện có thay đổi chưa commit cho provisioning/invitation/migration/test/docs. Không dùng tài liệu cũ làm bằng chứng chính và không chép giá trị bí mật.
 
 ## 1. Mục đích tài liệu
 
@@ -205,8 +205,8 @@ Master-data GET cho mọi authenticated user; `AccountStatus` không được en
 | Preconditions | Authenticated `SagaPrincipal`, CSRF hợp lệ, Course tồn tại, file spreadsheet hợp lệ theo parser hiện tại |
 | Main behavior | Tạo/reuse Student theo student code, Team `Group n` và TeamMember; import lặp không tạo duplicate membership theo team+student |
 | Authorization | ADMIN mọi Course; LECTURER có `localProfileId == Course.instructor.id`; STUDENT bị 403 |
-| Validation / failure | Anonymous 401; thiếu CSRF/không đủ scope 403; Course thiếu 404; exception trong transaction rollback. Header/schema/identity provisioning còn PARTIAL |
-| Implementation status / evidence | PARTIAL — `CourseImportAuthorizationService`, `ExcelImportService`, `CourseImportSecurityIntegrationTest` (12 cases pass) |
+| Validation / failure | Anonymous 401; thiếu CSRF/không đủ scope 403; Course thiếu 404; exception trong transaction rollback. Header/schema còn PARTIAL; identity binding đã có contract an toàn. |
+| Implementation status / evidence | PARTIAL — `CourseImportAuthorizationService`, `ExcelImportService`, `CourseImportSecurityIntegrationTest` (13 cases pass) |
 
 | Thuộc tính | FR-TEAM-001 / FR-PROJECT-001 |
 | --- | --- |
@@ -436,7 +436,7 @@ Gửi `JSESSIONID` qua `credentials: "include"`; lấy cookie `XSRF-TOKEN` và g
 | --- | --- | --- | --- | --- |
 | HIGH | AccountStatus không enforce permission. | PENDING/INACTIVE/SUSPENDED vẫn không bị chặn bởi inspected authorization code. | `AuthenticatedProfileService:L209-L211,L261`; account-status search | RECOMMENDED: xác định và enforce policy status. |
 | HIGH | Master data CRUD không hoàn chỉnh, Create ADMIN-only. | Sai nếu kỳ vọng CRUD Lecturer-only. | bốn controller master data | RECOMMENDED: chốt policy rồi bổ sung/update quyền. |
-| HIGH | Import tạo Student `PENDING` không có Cognito subject; validation spreadsheet còn dựa magic columns. | Có thể conflict identity hoặc nhận dữ liệu không đúng contract. | `ExcelImportService` | RECOMMENDED: chốt provisioning/validation contract trước production. |
+| HIGH | Validation spreadsheet còn dựa magic columns; production email provider chưa có. | Có thể nhận dữ liệu không đúng contract hoặc không gửi được invitation. | `ExcelImportService`; invitation adapter | RECOMMENDED: header/schema/error DTO và provider configuration trước production. |
 | MEDIUM | Import duplicate guard theo application check, chưa thấy database unique constraint team+student. | Concurrent requests vẫn cần kiểm chứng. | `ExcelImportService`; `TeamMemberRepository` | RECOMMENDED: cân nhắc unique constraint và concurrency test. |
 | MEDIUM | Master-data GET mở cho mọi authenticated Student. | Có thể lộ dữ liệu ngoài scope nếu policy muốn hạn chế. | `SecurityConfig:L119`; controller GET | RECOMMENDED: xác nhận scope nghiệp vụ. |
 | MEDIUM | Project integration dựa service checks, không annotation. | Endpoint mới có thể bypass nếu gọi service sai. | `ProjectIntegrationController`; permission service | RECOMMENDED: bổ sung negative tests/guard pattern. |
@@ -478,5 +478,21 @@ Không có bằng chứng ADMIN thiếu override: `requireTeamManager` chứng m
 - `@PreAuthorize`: **5**; `@Secured`: **0**. Permission check chính: `CourseImportAuthorizationService#requireImportAccess`, `IdentityMappingService#requireStudent`, `IdentityMappingReviewService#requireReviewer`, `ProjectIntegrationAuthorizationService#requireTeamManager`, `ProjectIntegrationService#requireInstallationOwner`.
 - Đối chiếu `pom.xml`, package Lambda và bảng dependency; có 16 dependency Maven application/test, 2 dependency Flyway plugin và 1 Node Lambda dependency.
 - Đối chiếu properties/placeholders với bảng configuration; không copy password, token, private key hoặc client secret vào tài liệu.
-- Test class source: **43** (42 `*Test.java` và `BeApplicationTests.java`); Surefire có 43 test suites. Maven report hiện có: `./mvnw.cmd test` — **186 tests, 0 failures, 0 errors, 0 skipped**.
-- Không sửa application code hoặc test; task này chỉ cập nhật bốn file Markdown audit.
+- Test class source: **49** (48 `*Test.java` và `BeApplicationTests.java`); Surefire có 49 test suites. Maven report hiện có: `./mvnw.cmd test` — **214 tests, 0 failures, 0 errors, 0 skipped**.
+- Task hiện tại sửa application code/test/migration và năm file Markdown; không commit/push.
+
+## Update 2026-08-02 — Student provisioning và invitation outbox (working tree)
+
+| Hạng mục | Trạng thái | Evidence/ràng buộc |
+|---|---|---|
+| Identity normalization | CONFIRMED | Import và OIDC dùng email trim/lowercase; student code trim/uppercase / extractor hiện có. |
+| Bind imported Student | CONFIRMED | Cần email + student code cùng chỉ một Student, subject null, role STUDENT; row lock + transaction; conflict 409 an toàn. |
+| Status | CONFIRMED | Chỉ `PENDING → ACTIVE` khi bind; ACTIVE giữ nguyên; INACTIVE/SUSPENDED không tự kích hoạt. |
+| Course/Team access | CONFIRMED | Student global; access giữ bởi TeamMember hiện hữu. Bind không tạo/xoá/sửa TeamMember hay RoleInTeam. |
+| Invitation | CONFIRMED | Outbox sau import commit, dedup Student/Course/type, claim/FAILED/SENT/retry; không rollback import khi delivery lỗi. |
+| Email provider | TBD | Adapter abstraction/fake test có; không có provider/dependency production trong source. |
+| Import parser/DB uniqueness | PARTIAL | Header/schema, preview, error DTO từng dòng và unique TeamMember ở DB chưa có. |
+
+Configuration mới: `app.student-invitation.login-url` lấy từ `STUDENT_INVITATION_LOGIN_URL` (phải là absolute HTTP(S)); `app.student-invitation.retry-delay-ms` có thể lấy từ `STUDENT_INVITATION_RETRY_DELAY_MS`. Không hard-code localhost/Railway, không dùng callback URL làm điểm bắt đầu login và không lưu secret.
+
+Full `./mvnw.cmd test` sau logout-contract audit: **49 suites, 214 tests, 0 failures, 0 errors, 0 skipped**. Jira/GitHub/webhook, session/CSRF/OIDC callback, master-data authorization và import authorization không bị sửa trong task này.

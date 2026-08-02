@@ -6,6 +6,8 @@ import com.saga.be.entity.Team;
 import com.saga.be.entity.TeamMember;
 import com.saga.be.entity.enums.AccountStatus;
 import com.saga.be.entity.enums.RoleInTeam;
+import com.saga.be.exception.IdentityConflictException;
+import com.saga.be.helper.StudentIdentityNormalizer;
 import com.saga.be.repository.StudentRepository;
 import com.saga.be.repository.TeamMemberRepository;
 import com.saga.be.repository.TeamRepository;
@@ -31,6 +33,8 @@ public class ExcelImportService {
     private final StudentRepository studentRepository;
     private final TeamRepository teamRepository;
     private final TeamMemberRepository teamMemberRepository;
+    private final StudentIdentityNormalizer identityNormalizer;
+    private final StudentInvitationOutboxService invitationOutboxService;
 
     @Transactional
     public void importStudentsToCourse(
@@ -50,8 +54,12 @@ public class ExcelImportService {
                 if (row == null) continue;
 
                 // 1. Đọc dữ liệu từng cột theo mẫu file
-                String rollNumber = formatter.formatCellValue(row.getCell(1)).trim();
-                String email = formatter.formatCellValue(row.getCell(2)).trim();
+                String rollNumber = identityNormalizer.normalizeStudentCode(
+                        formatter.formatCellValue(row.getCell(1))
+                );
+                String email = identityNormalizer.normalizeEmail(
+                        formatter.formatCellValue(row.getCell(2))
+                );
                 String fullName = formatter.formatCellValue(row.getCell(4)).trim();
                 String groupIndex = formatter.formatCellValue(row.getCell(5)).trim();
                 String leaderMark = formatter.formatCellValue(row.getCell(6)).trim();
@@ -59,16 +67,7 @@ public class ExcelImportService {
                 if (rollNumber.isEmpty() || email.isEmpty()) continue;
 
                 // 2. Tìm hoặc Tạo mới Student
-                Student student = studentRepository.findByStudentCode(rollNumber)
-                        .orElseGet(() -> {
-                            Student newStudent = Student.builder()
-                                    .studentCode(rollNumber)
-                                    .email(email)
-                                    .fullName(fullName)
-                                    .accountStatus(AccountStatus.PENDING)
-                                    .build();
-                            return studentRepository.save(newStudent);
-                        });
+                Student student = resolveImportedStudent(rollNumber, email, fullName);
 
                 // 3. Xử lý Team (Nhóm)
                 if (!groupIndex.isEmpty()) {
@@ -97,10 +96,34 @@ public class ExcelImportService {
                                 .build();
                         teamMemberRepository.save(teamMember);
                     }
+                    invitationOutboxService.enqueueForCourse(student, course);
                 }
             }
         } catch (Exception e) {
             throw new RuntimeException("Lỗi khi đọc file Excel: " + e.getMessage());
         }
+    }
+
+    private Student resolveImportedStudent(String studentCode, String email, String fullName) {
+        Student studentByCode = studentRepository.findByStudentCodeIgnoreCase(studentCode)
+                .orElse(null);
+        Student studentByEmail = studentRepository.findByEmailIgnoreCase(email).orElse(null);
+
+        if (studentByCode == null && studentByEmail == null) {
+            Student newStudent = Student.builder()
+                    .studentCode(studentCode)
+                    .email(email)
+                    .fullName(fullName)
+                    .accountStatus(AccountStatus.PENDING)
+                    .build();
+            return studentRepository.save(newStudent);
+        }
+        if (studentByCode == null || studentByEmail == null
+                || !studentByCode.getId().equals(studentByEmail.getId())) {
+            throw new IdentityConflictException(
+                    "Imported student email and student code do not identify the same Student"
+            );
+        }
+        return studentByCode;
     }
 }

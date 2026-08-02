@@ -2,7 +2,7 @@
 
 Tài liệu ghi lại quyết định đã được code/runtime fact chứng minh và các đề xuất còn mở. `ACCEPTED` không có nghĩa production đã được kiểm chứng; evidence của từng quyết định xác định phạm vi xác nhận.
 
-> Metadata audit: branch `main`, HEAD thực tế `702855a` (`cập nhật doc của hệ thống saga`); authorization application code ở `d855313` (`sửa lỗi phân quyền`). Application code sạch khi bắt đầu audit; task hiện tại chỉ thay đổi bốn tài liệu audit. Quét source/test: 12 REST controllers có mapping + 1 `@RestControllerAdvice`, 40 controller HTTP methods, 5 `@PreAuthorize`, 0 `@Secured`, 43 test source classes (42 `*Test.java` + `BeApplicationTests.java`); Maven report 186 tests pass.
+> Metadata audit: branch `main`, HEAD thực tế `d400162` (`sửa lại các số liệu`); authorization import application code ở ancestor `d855313`. Working tree hiện có thay đổi chưa commit cho provisioning/invitation/migration/test/docs. Full Maven suite sau logout-contract audit: 49 Surefire suites, 214 tests pass, 0 failures/errors/skips.
 
 ## DEC-001 — Dùng Spring Security OAuth2/OIDC và server-side session
 
@@ -192,20 +192,37 @@ Tài liệu ghi lại quyết định đã được code/runtime fact chứng mi
 - Quyết định: Giữ implementation hiện tại ở mức PARTIAL; chưa quảng bá là hoàn chỉnh cho production.
 - Lý do: Đã chặn unauthorized import và duplicate membership theo application check, nhưng vẫn còn identity conflict và input contract.
 - Hệ quả: FE chưa nên tích hợp contract hiện tại như API ổn định.
-- Rủi ro: Identity provisioning, malformed spreadsheet và concurrent duplicate vẫn chưa được harden đầy đủ.
+- Rủi ro: Malformed spreadsheet và concurrent TeamMember duplicate vẫn chưa được harden đầy đủ; identity bind đã có contract.
 - Evidence: `CourseController#importStudents`, `CourseImportAuthorizationService#requireImportAccess`, `ExcelImportService#importStudentsToCourse`, `CourseImportSecurityIntegrationTest`.
-- Việc cần theo dõi: Chốt Student identity provisioning, validation/error DTO và database/concurrency safeguards.
+- Việc cần theo dõi: Chốt validation/error DTO, provider email và database/concurrency safeguards.
 
 ## DEC-017 — Policy phân quyền import sinh viên theo Course
 
 - Ngày: 2026-08-02
-- Trạng thái: ACCEPTED (đã commit trong `d855313`; HEAD hiện tại là `702855a` chỉ cập nhật tài liệu)
+- Trạng thái: ACCEPTED (đã commit trong `d855313`; HEAD audit hiện là `d400162`)
 - Bối cảnh: Import sinh viên là mutation có thể tạo Student, Team và TeamMember nên không đủ an toàn nếu chỉ yêu cầu authenticated session.
 - Quyết định: ADMIN được import mọi Course; LECTURER chỉ import khi `SagaPrincipal.localProfileId` bằng `Course.instructor.id`; STUDENT bị từ chối. Method security chặn role tổng quát, service chịu trách nhiệm ownership và 404 Course.
 - Lý do: Tái sử dụng model `SagaPrincipal`/authority session và pattern ownership hiện có; không đọc Cognito token hoặc raw group trong controller.
 - Hệ quả: Browser vẫn dùng JSESSIONID + CSRF; master-data endpoints không đổi quyền. Import service chỉ chạy sau authorization.
-- Rủi ro: Account status chưa được enforce; identity provisioning và validation spreadsheet vẫn là PARTIAL.
+- Rủi ro: Account status chưa được enforce toàn hệ thống; validation spreadsheet và production email provider vẫn PARTIAL.
 - Evidence: `CourseController#importStudents`, `CourseImportAuthorizationService#requireImportAccess`, `CourseImportSecurityIntegrationTest`.
 - Việc cần theo dõi: Chốt policy identity/concurrency; full Maven suite đã pass 186/186 sau khi test context được cách ly.
 
 Không có secret hoặc thông tin đăng nhập thật trong decision log này.
+
+## DEC-018 — Bind Imported Student theo cặp email và student code
+
+- Ngày: 2026-08-02
+- Trạng thái: ACCEPTED (working tree, chưa commit)
+- Quyết định: Với role STUDENT, ưu tiên `cognitoSub`; nếu không có, chỉ bind khi email verified đã normalize và student code từ rule hiện có cùng định danh một Student chưa có subject. Partial/split match, subject/profile khác, subject cũ khác, INACTIVE/SUSPENDED đều conflict 409.
+- Hệ quả: Bind dùng transaction + pessimistic row lock, chỉ ghi subject và `PENDING → ACTIVE`; không đổi email/code, không đụng TeamMember/Team/Course/RoleInTeam. Không có partial match thì giữ behavior tạo Student mới của flow cũ.
+- Evidence: `AuthenticatedProfileService`, `StudentRepository#findForIdentityBindingById`, `ImportedStudentProvisioningIntegrationTest`.
+
+## DEC-019 — Invitation email qua transactional outbox
+
+- Ngày: 2026-08-02
+- Trạng thái: PARTIAL (working tree, chưa commit)
+- Quyết định: Import tạo outbox `student_course_invitation`, dedup theo Student/Course/type, phát event AFTER_COMMIT. Processor claim/lock record, delivery qua adapter, ghi `SENT`/`FAILED` và retry tối đa năm lần; email failure không rollback membership.
+- Hệ quả: Linked Student nhận wording sign-in; Student chưa bind nhận wording sign-in/register bằng đúng email và Google nếu deployment Cognito hỗ trợ. Login URL lấy từ `STUDENT_INVITATION_LOGIN_URL`.
+- TBD: Chưa chọn/configure provider production; default adapter báo unavailable an toàn, không claim mail production hoạt động.
+- Evidence: `StudentInvitationOutboxService`, `StudentInvitationProcessor`, V6 migration, invitation tests.

@@ -319,6 +319,66 @@ class SecurityIntegrationTest {
     }
 
     @Test
+    void logoutRejectsInvalidCsrfWithoutInvalidatingTheSession() throws Exception {
+        MockHttpSession session = new MockHttpSession();
+        Authentication student = authenticationFor(ApplicationRole.STUDENT);
+        MvcResult csrfResult = mockMvc.perform(get("/api/auth/csrf")
+                        .session(session)
+                        .with(authentication(student)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.headerName").value("X-XSRF-TOKEN"))
+                .andReturn();
+        Cookie csrfCookie = csrfResult.getResponse().getCookie("XSRF-TOKEN");
+        assertNotNull(csrfCookie);
+
+        mockMvc.perform(post("/api/auth/logout")
+                        .session(session)
+                        .with(authentication(student))
+                        .cookie(csrfCookie)
+                        .header("X-XSRF-TOKEN", "invalid-csrf-token"))
+                .andExpect(status().isForbidden());
+
+        assertFalse(session.isInvalid());
+    }
+
+    @Test
+    void anonymousLogoutWithValidCsrfUsesFrameworkLogout() throws Exception {
+        Authentication student = authenticationFor(ApplicationRole.STUDENT);
+        MvcResult csrfResult = mockMvc.perform(get("/api/auth/csrf")
+                        .with(authentication(student)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.headerName").value("X-XSRF-TOKEN"))
+                .andReturn();
+        Cookie csrfCookie = csrfResult.getResponse().getCookie("XSRF-TOKEN");
+        assertNotNull(csrfCookie);
+
+        mockMvc.perform(post("/api/auth/logout")
+                        .cookie(csrfCookie)
+                        .header("X-XSRF-TOKEN", csrfCookie.getValue()))
+                .andExpect(status().isFound())
+                .andExpect(header().string("Location", containsString("https://cognito.test/logout?")));
+    }
+
+    @Test
+    void anonymousLogoutWithMissingOrInvalidCsrfIsForbidden() throws Exception {
+        mockMvc.perform(post("/api/auth/logout"))
+                .andExpect(status().isForbidden());
+
+        Authentication student = authenticationFor(ApplicationRole.STUDENT);
+        MvcResult csrfResult = mockMvc.perform(get("/api/auth/csrf")
+                        .with(authentication(student)))
+                .andExpect(status().isOk())
+                .andReturn();
+        Cookie csrfCookie = csrfResult.getResponse().getCookie("XSRF-TOKEN");
+        assertNotNull(csrfCookie);
+
+        mockMvc.perform(post("/api/auth/logout")
+                        .cookie(csrfCookie)
+                        .header("X-XSRF-TOKEN", "invalid-csrf-token"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
     void getLogoutDoesNotInvalidateTheSession() throws Exception {
         MockHttpSession session = new MockHttpSession();
         Authentication student = authenticationFor(ApplicationRole.STUDENT);

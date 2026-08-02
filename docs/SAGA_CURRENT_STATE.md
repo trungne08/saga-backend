@@ -5,9 +5,9 @@
 | Mục | Giá trị |
 |---|---|
 | Branch được audit | `main` |
-| Commit được audit | `702855a` (`cập nhật doc của hệ thống saga`); authorization application code ở `d855313` (`sửa lỗi phân quyền`) |
+| Commit được audit | `d400162` (`sửa lại các số liệu`); authorization import application code ở ancestor `d855313` |
 | Ngày cập nhật | 2026-08-02 (Asia/Saigon, UTC+07:00) |
-| Working tree hiện tại | Application code sạch khi bắt đầu audit; task hiện tại chỉ thay đổi bốn tài liệu audit |
+| Working tree hiện tại | Có thay đổi chưa commit cho provisioning, invitation outbox, migration, test và tài liệu; không commit/push |
 | Phạm vi thay đổi của task | Cập nhật metadata/trạng thái sau khi authorization import và regression tests đã được commit vào HEAD |
 
 ## 2. Đã hoàn thành
@@ -18,18 +18,18 @@
 - **CONFIRMED:** master-data Class/Course/Subject/Semester có API read/create; create được bảo vệ bằng ADMIN. Evidence: bốn controller master-data và `@PreAuthorize`.
 - **CONFIRMED:** Jira và GitHub có code OAuth/App, linking, webhook, sync/backfill, reconciliation và encrypted secret handling. Evidence: `integration/callback`, `integration/project`, `integration/provider`, `integration/webhook`, `integration/sync`, `IntegrationSecretCipher`.
 - **CONFIRMED:** MySQL/JPA là store domain chính; MongoDB lưu `SystemAuditLog`. Evidence: `application.properties`, entities/repositories.
-- **PARTIAL:** import Excel sinh viên có authorization course scope, transaction rollback và duplicate membership guard; validation và identity provisioning chưa hoàn chỉnh. Evidence: `CourseController#importStudents`, `CourseImportAuthorizationService`, `ExcelImportService#importStudentsToCourse`.
+- **PARTIAL:** import Excel sinh viên có authorization course scope, transaction rollback, duplicate membership guard, identity bind an toàn và invitation outbox. Parser/header-preview/error DTO và database uniqueness/concurrency còn chưa hoàn chỉnh. Evidence: `CourseController#importStudents`, `CourseImportAuthorizationService`, `ExcelImportService#importStudentsToCourse`, `AuthenticatedProfileService`, `StudentInvitationOutboxService`.
 
 ## 3. Đã kiểm chứng
 
 | Hạng mục | Cách kiểm chứng | Kết quả |
 |---|---|---|
-| Import authorization integration test | `-Dtest=CourseImportSecurityIntegrationTest test` | 12 tests, 0 failures/errors/skips; `BUILD SUCCESS` |
+| Import authorization integration test | `-Dtest=CourseImportSecurityIntegrationTest test` | 13 tests, 0 failures/errors/skips; `BUILD SUCCESS` |
 | Existing Security integration test | `-Dtest=SecurityIntegrationTest test` (three repeated runs) | 13 tests/run, all pass |
-| Maven test suite | `./mvnw.cmd test` sau thay đổi | 186 tests, 0 failures, 0 errors, 0 skipped; `BUILD SUCCESS` |
-| Source/test audit count | quét `src/main` và `src/test` | 12 REST controllers có mapping; 1 `@RestControllerAdvice`; 40 controller HTTP methods; 5 `@PreAuthorize`; 0 `@Secured`; 43 test source classes (42 `*Test.java` + `BeApplicationTests.java`) |
+| Maven test suite | `./mvnw.cmd test` sau logout-contract audit | 214 tests, 0 failures, 0 errors, 0 skipped; `BUILD SUCCESS` |
+| Source/test audit count | quét `src/main` và `src/test` | 12 REST controllers có mapping; 1 `@RestControllerAdvice`; 40 controller HTTP methods; 5 `@PreAuthorize`; 0 `@Secured`; 49 test source classes (48 `*Test.java` + `BeApplicationTests.java`) |
 | Compile | Maven compile trong test lifecycle | 229 main source files và 44 test source files compile thành công |
-| Security/CSRF/CORS | `SecurityIntegrationTest` | 13 tests pass, gồm anonymous 401, role 403, CSRF và preflight |
+| Security/CSRF/CORS | `SecurityIntegrationTest` | 16 tests pass, gồm anonymous 401 cho protected API, role 403, CSRF, preflight và logout framework-managed |
 | Profile/OIDC | `AuthenticatedProfileServiceTest`, `OidcIdentityServiceTest`, security tests | pass trong Maven suite |
 | Jira/GitHub/webhook/sync | các unit/integration tests trong `src/test/java/com/saga/be/integration/**` | pass trong Maven suite |
 | Cognito account-linking Lambda | `npm.cmd test` trong `infra/lambda/cognito-account-linking` | 23 tests pass, 0 fail/skipped/cancelled |
@@ -38,11 +38,11 @@
 ## 4. Đang thực hiện
 
 - Chuẩn hóa ba tài liệu làm checkpoint/source-of-truth kỹ thuật cho các lượt tiếp theo.
-- Import Excel ở trạng thái **PARTIAL**: scope authorization đã hoàn thành; contract validation/provisioning vẫn chưa production-ready.
+- Import Excel ở trạng thái **PARTIAL**: scope authorization, identity binding và outbox đã hoàn thành; validation/parser và production email delivery chưa production-ready.
 
 ## 5. Chưa hoàn thành
 
-- Import Excel chưa có download template, preview, validation toàn file/nhóm, DTO lỗi theo dòng và identity provisioning rule an toàn. Authorization ADMIN/lecturer ownership, rollback và import idempotency đã có test.
+- Import Excel chưa có download template, preview, validation toàn file/nhóm và DTO lỗi theo dòng. Authorization ADMIN/lecturer ownership, rollback, identity binding và invitation dedup đã có test.
 - Chưa có application API đầy đủ cho nhiều entity assessment/risk/meeting/notification/AI dù entity đã tồn tại.
 - Chưa chứng minh session persistence qua Railway redeploy hoặc horizontal scaling.
 - Chưa có runtime E2E browser test cho localhost frontend → Railway backend với third-party cookie/CSRF.
@@ -50,7 +50,7 @@
 
 ## 6. Known issues
 
-1. **High:** import tạo Student `PENDING` không có `cognitoSub`, trong khi login provisioning dùng Cognito subject và kiểm tra identity conflict. Evidence: `ExcelImportService#importStudentsToCourse`, `AuthenticatedProfileService#synchronize`.
+1. **Medium:** import tạo Student `PENDING` không có `cognitoSub` cho tới login đầu tiên; source không chứng minh deployed Cognito self-sign-up/Google configuration. Evidence: `ExcelImportService#importStudentsToCourse`, `AuthenticatedProfileService#synchronize`.
 2. **High:** parser chỉ dựa extension, sheet đầu tiên và index cột; thiếu header, identity, group-leader, row-limit và formula validation. Evidence: `ExcelImportService`.
 3. **Medium:** localhost và Railway khác site; browser có thể block credential cookie. FE không đọc được cookie backend bằng `document.cookie`; `/api/auth/csrf` JSON là cơ chế hiện có nhưng vẫn cần E2E browser test. Evidence: `CorsConfig`, `SecurityConfig#csrfTokenRepository`, `AuthController#csrf`.
 4. **Medium:** session mặc định không có shared store trong code; restart/multi-instance có nguy cơ mất hoặc lệch session. Evidence: `SecurityConfig#securityContextRepository`, không thấy Spring Session dependency/config.
@@ -61,8 +61,8 @@
 
 | Ưu tiên | Việc cần làm | Lý do | File liên quan | Cách kiểm chứng |
 |---|---|---|---|---|
-| P0 | Hoàn thiện import Excel validation/provisioning | Scope authorization, rollback và idempotency đã có; validation/identity vẫn thiếu | `ExcelImportService`, profile service, repositories | validation, provisioning, concurrency tests |
-| P0 | Chốt mapping Student provisioning và Course scope | Không được tự tạo Cognito subject hoặc đoán identity | `Student`, `AuthenticatedProfileService`, import service | identity conflict/reuse/new-student contract tests |
+| P0 | Hoàn thiện import Excel validation/preview/error DTO | Scope authorization, rollback, idempotency và identity bind đã có; parser contract vẫn thiếu | `ExcelImportService`, DTO | validation/preview/row-error tests |
+| P0 | Chọn và cấu hình mail provider production | Outbox/adapter đã có nhưng delivery thật vẫn TBD | adapter/config/deployment | provider sandbox and retry verification |
 | P0 | Browser E2E cookie/CORS/CSRF | localhost→Railway có third-party-cookie risk | `CorsConfig`, `SecurityConfig`, profiles | login→me→csrf→mutation trên browser thật |
 | P1 | Chuẩn hóa error response | FE cần contract ổn định | `GlobalExceptionHandler`, DTO | MockMvc contract tests cho 400/404/409/500 |
 | P1 | Xác minh session deployment topology | Tránh mất session khi redeploy/scale | Railway config và session config | restart/replica test trên môi trường staging |
@@ -86,10 +86,18 @@ Không lưu username, password, token hoặc secret của tài khoản test tron
 
 ```text
 ĐÃ HOÀN THÀNH: OIDC/session/profile/roles; master data; team authorization; Jira/GitHub integration; CSRF/CORS; health/OpenAPI configuration.
-ĐÃ KIỂM CHỨNG: Import authorization test 12/12 pass; SecurityIntegrationTest 13/13 pass khi chạy độc lập; Lambda Node 23 tests pass ở audit trước.
+ĐÃ KIỂM CHỨNG: Import authorization test 13/13 pass; SecurityIntegrationTest 16/16 pass khi chạy độc lập; Lambda Node 23 tests pass ở audit trước.
 ĐANG LÀM: Cập nhật tài liệu sau khi secure import.
-CHƯA LÀM: Import production-ready validation/provisioning; browser E2E localhost→Railway; session scaling/redeploy verification.
+CHƯA LÀM: Import production-ready validation/provider delivery; browser E2E localhost→Railway; session scaling/redeploy verification.
 VẤN ĐỀ ĐANG MỞ: Import validation/identity; third-party cookie; error contract; session store; hạ tầng Cognito/Railway còn TBD.
-BƯỚC TIẾP THEO: Chốt identity provisioning, chạy E2E cookie/CSRF.
-HEAD ĐÃ BAO GỒM: CourseController, ExcelImportService, CourseImportAuthorizationService và CourseImportSecurityIntegrationTest. WORKING TREE CHỈ CÒN: bốn docs audit.
+BƯỚC TIẾP THEO: Chốt parser/error DTO và provider email, chạy E2E cookie/CSRF.
+HEAD ĐÃ BAO GỒM: CourseController, ExcelImportService, CourseImportAuthorizationService và CourseImportSecurityIntegrationTest. WORKING TREE HIỆN CÓ: thay đổi chưa commit cho provisioning, invitation outbox, migration, test và docs.
+
+## 10. Update — provisioning và invitation (chưa commit)
+
+- **CONFIRMED:** ADMIN import mọi Course; LECTURER chỉ import Course mình là instructor; STUDENT bị từ chối; mutation vẫn cần JSESSIONID và CSRF.
+- **CONFIRMED:** Imported Student `PENDING` được bind bằng subject, hoặc bằng cặp email verified + studentCode cùng trỏ tới đúng một record unlinked. Bind giữ nguyên Course/Team/RoleInTeam, không tạo Student/TeamMember mới và chuyển chỉ `PENDING` sang `ACTIVE`.
+- **CONFIRMED:** Outbox `student_course_invitation` có dedup `studentId + courseId + invitationType`, gửi sau commit, ghi `SENT`/`FAILED`, retry tối đa năm lần. Nội dung email không chứa password, token, session hoặc CSRF.
+- **PARTIAL/TBD:** Không có production mail provider trong `pom.xml` hay source; adapter mặc định đánh dấu failed an toàn. Parser/preview/error DTO, Cognito self-sign-up deployed và unique database constraint TeamMember còn mở.
+- **Verification mới:** full Maven suite: **214 tests, 0 failures, 0 errors, 0 skipped**; 49 Surefire suites. Không thay đổi Jira, GitHub, OAuth callback, role priority, session hay import authorization.
 ```

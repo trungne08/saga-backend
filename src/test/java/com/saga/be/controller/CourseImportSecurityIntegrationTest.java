@@ -13,14 +13,18 @@ import com.saga.be.entity.Course;
 import com.saga.be.entity.Lecturer;
 import com.saga.be.entity.enums.AccountStatus;
 import com.saga.be.entity.enums.RoleInTeam;
+import com.saga.be.config.StudentInvitationProperties;
 import com.saga.be.repository.CourseRepository;
 import com.saga.be.repository.LecturerRepository;
 import com.saga.be.repository.StudentRepository;
+import com.saga.be.repository.StudentCourseInvitationRepository;
 import com.saga.be.repository.TeamMemberRepository;
 import com.saga.be.repository.TeamRepository;
 import com.saga.be.security.ApplicationRole;
 import com.saga.be.security.SagaPrincipal;
 import com.saga.be.service.ExcelImportService;
+import com.saga.be.service.StudentInvitationClaimService;
+import com.saga.be.service.StudentInvitationProcessor;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.List;
@@ -66,6 +70,15 @@ class CourseImportSecurityIntegrationTest {
     private StudentRepository studentRepository;
 
     @Autowired
+    private StudentCourseInvitationRepository invitationRepository;
+
+    @Autowired
+    private StudentInvitationClaimService invitationClaimService;
+
+    @Autowired
+    private StudentInvitationProperties invitationProperties;
+
+    @Autowired
     private TeamRepository teamRepository;
 
     @Autowired
@@ -73,6 +86,7 @@ class CourseImportSecurityIntegrationTest {
 
     @AfterEach
     void cleanUp() {
+        invitationRepository.deleteAll();
         teamMemberRepository.deleteAll();
         teamRepository.deleteAll();
         studentRepository.deleteAll();
@@ -236,6 +250,7 @@ class CourseImportSecurityIntegrationTest {
         assertEquals(0, studentRepository.count());
         assertEquals(0, teamRepository.count());
         assertEquals(0, teamMemberRepository.count());
+        assertEquals(0, invitationRepository.count());
     }
 
     @Test
@@ -253,6 +268,38 @@ class CourseImportSecurityIntegrationTest {
         assertEquals(1, studentRepository.count());
         assertEquals(1, teamRepository.count());
         assertEquals(1, teamMemberRepository.count());
+        assertEquals(1, invitationRepository.count());
+    }
+
+    @Test
+    void providerFailureDoesNotRollBackCompletedImport() throws Exception {
+        Course course = createCourse(createLecturer());
+        SagaPrincipal admin = (SagaPrincipal) authenticationFor(
+                ApplicationRole.ADMIN,
+                UUID.randomUUID()
+        ).getPrincipal();
+        importService.importStudentsToCourse(
+                admin,
+                course.getId(),
+                workbook(row("SE000013", "failure@example.test", "1", "x"))
+        );
+
+        new StudentInvitationProcessor(
+                invitationRepository,
+                invitationClaimService,
+                message -> {
+                    throw new IllegalStateException("test provider failure");
+                },
+                invitationProperties
+        ).process(invitationRepository.findAll().get(0).getId());
+
+        assertEquals(1, studentRepository.count());
+        assertEquals(1, teamRepository.count());
+        assertEquals(1, teamMemberRepository.count());
+        assertEquals(
+                com.saga.be.entity.enums.StudentInvitationStatus.FAILED,
+                invitationRepository.findAll().get(0).getInvitationStatus()
+        );
     }
 
     @Test

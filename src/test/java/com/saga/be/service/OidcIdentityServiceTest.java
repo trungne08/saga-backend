@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.saga.be.auth.AuthenticatedIdentity;
 import com.saga.be.exception.InvalidIdentityException;
+import com.saga.be.helper.StudentIdentityNormalizer;
 import com.saga.be.security.ApplicationRole;
 import com.saga.be.security.CognitoRoleResolver;
 import java.time.Instant;
@@ -20,7 +21,8 @@ import org.springframework.security.oauth2.core.oidc.user.OidcUser;
 class OidcIdentityServiceTest {
 
     private final OidcIdentityService identityService = new OidcIdentityService(
-            new CognitoRoleResolver()
+            new CognitoRoleResolver(),
+            new StudentIdentityNormalizer()
     );
 
     @Test

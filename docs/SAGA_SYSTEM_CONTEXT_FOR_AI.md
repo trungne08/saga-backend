@@ -7,9 +7,9 @@
 | Mục | Giá trị |
 |---|---|
 | Branch | `main` |
-| Commit | `702855a` (`cập nhật doc của hệ thống saga`); application authorization nằm ở ancestor `d855313` (`sửa lỗi phân quyền`) |
+| Commit | `d400162` (`sửa lại các số liệu`); authorization import nằm ở ancestor `d855313` |
 | Thời điểm audit | 2026-08-02 (Asia/Saigon, UTC+07:00) |
-| Working tree | Application code sạch khi bắt đầu audit này; task hiện tại chỉ thay đổi bốn tài liệu audit. Authorization import và test integration đã nằm trong commit `d855313`. |
+| Working tree | Có thay đổi chưa commit cho identity provisioning, invitation outbox, migration, test và tài liệu; không commit/push trong task này. |
 | Java / Spring Boot | Java 17 / Spring Boot 4.1.0 |
 | Profile tìm thấy | mặc định, `local`, `prod`, `test` |
 | Phạm vi | `src/main`, `src/test`, `pom.xml`, cấu hình, Railway, Lambda Cognito, scripts và docs hiện hữu |
@@ -27,7 +27,7 @@ Evidence: `pom.xml`; `src/main/resources/application*.properties`; `railway.json
 | Team project và authorization theo team | CONFIRMED |
 | Jira/GitHub OAuth, webhook, sync/backfill | CONFIRMED, có feature flag/config bắt buộc |
 | Đánh giá/AI/risk/meeting/notification domain | PARTIAL: entity/repository tồn tại nhưng không có controller/service API tương ứng trong source audit |
-| Import Excel sinh viên | PARTIAL: authorization course scope, transaction rollback và duplicate membership guard đã có; validation/identity provisioning contract chưa hoàn chỉnh |
+| Import Excel sinh viên | PARTIAL: authorization course scope, transaction rollback, identity bind an toàn và invitation outbox đã có; parser/preview/error DTO/DB uniqueness vẫn chưa hoàn chỉnh |
 | Frontend application | TBD: không nằm trong repository này |
 
 ## 3. Kiến trúc tổng thể
@@ -287,7 +287,7 @@ Key classes: `ProjectIntegrationService#beginGitHubInstallation/#linkGitHubRepos
 
 ### Test hiện có
 
-Có 43 test source classes: 42 file khớp `*Test.java` và `BeApplicationTests.java`; gồm `CourseImportSecurityIntegrationTest` với 12 case cho anonymous, CSRF, ADMIN, Lecturer owner/non-owner, Student, missing Course, rollback và import lặp. **CONFIRMED:** test riêng pass 12/12; suite gồm import và security pass 25/25; full `./mvnw.cmd test` pass 186 tests, 0 failures, 0 errors, 0 skipped. `CourseImportSecurityIntegrationTest` dùng `@DirtiesContext(AFTER_CLASS)` để không rò CSRF mock state sang security integration test. Maven dùng Java runtime 21.0.7 trên máy audit, trong khi project compile target Java 17. `npm.cmd test` Lambda đã pass 23 tests ở audit trước.
+Có 49 test source classes: 48 file khớp `*Test.java` và `BeApplicationTests.java`; gồm `CourseImportSecurityIntegrationTest` với 13 case cho anonymous, CSRF, ADMIN, Lecturer owner/non-owner, Student, missing Course, rollback, import lặp và provider failure không rollback import. **CONFIRMED:** full `./mvnw.cmd test` pass 214 tests, 0 failures, 0 errors, 0 skipped. Provisioning và invitation tests mới bao phủ reuse/imported Student, conflict, membership/role preservation, competitive bind, outbox dedup/template/failure/retry, concurrent claim và stale recovery. `SecurityIntegrationTest` còn xác nhận logout framework-managed trả 302 với CSRF hợp lệ (kể cả anonymous) và 403 khi CSRF thiếu/sai. `CourseImportSecurityIntegrationTest` dùng `@DirtiesContext(AFTER_CLASS)` để không rò CSRF mock state sang security integration test. Maven dùng Java runtime 21.0.7 trên máy audit, trong khi project compile target Java 17. `npm.cmd test` Lambda đã pass 23 tests ở audit trước.
 
 Evidence: `src/test/java/**`, `infra/lambda/cognito-account-linking/test/index.test.mjs`.
 
@@ -295,7 +295,7 @@ Evidence: `src/test/java/**`, `infra/lambda/cognito-account-linking/test/index.t
 
 | Severity | Vấn đề | Evidence | Khuyến nghị |
 |---|---|---|---|
-| High | Import tạo Student `PENDING` không có Cognito sub; identity provisioning contract chưa chốt | `ExcelImportService#importStudentsToCourse`, `AuthenticatedProfileService#synchronize` | chốt reuse/provisioning/identity-conflict policy |
+| Medium | Import tạo Student `PENDING` không có Cognito sub cho tới lần login đầu; binding contract đã có nhưng deployed Cognito self-sign-up vẫn TBD | `ExcelImportService#importStudentsToCourse`, `AuthenticatedProfileService#synchronize` | E2E với Cognito deployment thật |
 | High | Import chỉ check tên `.xlsx`, sheet đầu tiên, magic indexes; không header/email/group/leader/duplicate validation | `ExcelImportService` | không deploy như import production |
 | Medium | Import duplicate guard ở application level theo team+student, chưa thấy database unique constraint tương ứng | `ExcelImportService`, `TeamMemberRepository#findByTeamIdAndStudentId` | RECOMMENDED: cân nhắc unique constraint và concurrency test |
 | Medium | API master-data trả JPA entities trực tiếp | Class/Course/Subject/Semester controllers | tạo response DTO ổn định trước FE lớn |
@@ -308,7 +308,7 @@ Evidence: `src/test/java/**`, `infra/lambda/cognito-account-linking/test/index.t
 
 ### Bắt buộc trước khi FE tích hợp
 
-1. Hoàn thiện import Excel: preview, validation/error DTO, identity provisioning policy và concurrency hardening. Permission ADMIN/lecturer scope, auth/CSRF/rollback/idempotency tests đã có. Xác minh: contract tests cho validation và provisioning.
+1. Hoàn thiện import Excel: preview, validation/error DTO, production email provider và concurrency hardening. Permission ADMIN/lecturer scope, auth/CSRF/rollback/idempotency/identity-binding tests đã có.
 2. Chốt FE cookie topology và test browser cross-origin. Rủi ro: login/API mutation không giữ session. Xác minh: `me`, `csrf`, POST từ origin FE thật.
 3. Chuẩn hóa error contract cho validation/404/runtime. Rủi ro: FE không parse được lỗi. Xác minh: contract tests.
 
@@ -351,7 +351,18 @@ DATABASES: MySQL for JPA; MongoDB system_audit_log only.
 INTEGRATIONS: Jira OAuth/webhook/sync; GitHub App/OAuth/webhook/backfill.
 DEPLOYMENT: Railway config exists; runtime dashboard/state TBD.
 KNOWN ISSUES: Excel import identity/validation contract is incomplete; cookie cross-site risk; inconsistent error DTOs.
-CURRENT NEXT STEP: Complete import validation/provisioning and browser E2E CORS/CSRF/session testing.
+CURRENT NEXT STEP: Complete import validation/provider delivery and browser E2E CORS/CSRF/session testing.
+
+## Update 2026-08-02 — Imported Student provisioning and invitation outbox
+
+- **CONFIRMED:** Import normalizes email (trim/lowercase) and student code (trim/uppercase). Existing data is reused only when both values identify the same Student; a partial or split match is a 409 conflict.
+- **CONFIRMED:** A STUDENT login first looks up `cognitoSub`. If absent, verified Cognito email plus the existing `StudentCodeExtractor` result must both identify one unlinked Student. The bind uses a transaction and pessimistic row lock; it writes only `cognitoSub` and changes `PENDING` to `ACTIVE`. It never creates/replaces TeamMember, Team, Course, email or student code.
+- **CONFIRMED:** `ACTIVE` remains active; `INACTIVE` and `SUSPENDED` are not auto-activated. Admin/Lecturer provisioning retains its former path.
+- **CONFIRMED:** Import creates a deduplicated `student_course_invitation` outbox record after a TeamMember exists. AFTER_COMMIT processing records `SENT` or `FAILED` and retries pending/failed work up to five attempts. Delivery failure never rolls back import.
+- **PARTIAL:** The default adapter deliberately reports delivery unavailable. No production email provider/dependency/configuration exists in this repository, so production delivery is **TBD**.
+- **TBD:** Spreadsheet header/schema validation, preview, row-level error DTO, a database unique constraint for `team_member(team_id, student_id)`, and deployed Cognito self-sign-up configuration.
+- **CONFIRMED:** Login URL is configuration-driven by `STUDENT_INVITATION_LOGIN_URL` through `app.student-invitation.login-url`; no localhost/Railway URL or callback route is hard-coded.
+- **Verification:** full `./mvnw.cmd test` passed 49 suites / 214 tests / 0 failures / 0 errors / 0 skipped.
 DO NOT ASSUME: FE implementation, infrastructure wiring, deployment variables, User Pool trigger setup, session scaling, or unimplemented assessment APIs.
 ```
 
