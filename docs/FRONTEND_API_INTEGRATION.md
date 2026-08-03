@@ -1,5 +1,19 @@
 # SAGA Frontend API Integration Guide
 
+## Contribution and Jira task-data status (2026-08-04)
+
+- **CONFIRMED:** Jira sync keeps internal Task snapshots for labels, components
+  (`id`/`name`) and a canonical plain-text description. Missing/null collection
+  fields become empty and each sync replaces the prior snapshot.
+- **PARTIAL:** There is no Task or Contribution HTTP endpoint. The frontend must
+  not request or expect Jira descriptions/components/labels or contribution data
+  yet, and no provider payload, token, or credential is exposed.
+- **TBD:** Product Owner must define Contribution actors/authorization, persisted
+  override policy, peer-config precedence, rounding residuals and zero-base final
+  distribution before an API contract is published.
+- **RECOMMENDED:** add a separate read-only Contribution contract only after those
+  decisions; do not infer it from assessment endpoints.
+
 Tài liệu này được đối chiếu với controller, DTO, Security, CORS, exception
 handler và integration service hiện tại của backend. Không coi tài liệu này là
 nơi lưu credentials: frontend **không** cần và không được nhận OAuth token,
@@ -22,6 +36,13 @@ biết bất kỳ biến môi trường bí mật nào của backend.
 `GET /` là landing page công khai. `GET /actuator/health` là health check công
 khai. Mọi API nghiệp vụ dưới đây đều cần session, trừ các endpoint được ghi rõ
 là public.
+
+`GET {PUBLIC_BASE_URL}/privacy` is a public HTML UTF-8 Privacy Policy page. It
+does not require a browser session, Bearer token, or CSRF token, and it must not
+be constructed from the Railway example URL above. Frontend may link to it
+directly; it is not an OAuth callback or integration flow. The SAGA operator
+must configure `PRIVACY_CONTACT_URL` to a real public contact URL before deploy;
+the backend validates that it is an absolute `http` or `https` URL.
 
 ---
 
@@ -796,3 +817,12 @@ và LEADER đều xem được team của mình; quyền tạo Project vẫn là
 dữ liệu legacy không hợp lệ có nhiều Team cho cùng Student/Course; FE không tự chọn
 một Team để retry. Response và từng member không có email, `cognitoSub`, version,
 session, CSRF, token hay credential.
+
+### Jira labels status
+
+Jira labels are fetched and stored only as an internal Task snapshot. There is
+currently no Task read endpoint, no labels field exposed to frontend, and no
+SAGA API that creates or updates Jira tasks. Therefore FE label display and
+filtering remain **PARTIAL** until a separately authorized Task read contract is
+implemented. Labels are classification data, not the Jira issue id/key used to
+identify a Task.

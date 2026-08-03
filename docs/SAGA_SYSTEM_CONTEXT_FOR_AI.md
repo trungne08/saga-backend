@@ -7,14 +7,43 @@
 | Mục | Giá trị |
 |---|---|
 | Branch | `main` |
-| Commit | `c351ae9` (`cập nhật docs`) |
+| Commit | `07ffa38` (`thêm trang privacy`) |
 | Thời điểm audit | 2026-08-03 (Asia/Saigon, UTC+07:00) |
-| Working tree | Có endpoint self-scoped Student, DTO, service reuse, integration test và sáu tài liệu chưa commit; không commit/push trong task này. |
+| Working tree | Có Jira issue labels snapshot (provider, Task persistence, migration, tests) và sáu tài liệu chưa commit; không commit/push trong task này. |
 | Java / Spring Boot | Java 17 / Spring Boot 4.1.0 |
 | Profile tìm thấy | mặc định, `local`, `prod`, `test` |
 | Phạm vi | `src/main`, `src/test`, `pom.xml`, cấu hình, Railway, Lambda Cognito, scripts và docs hiện hữu |
 
 Evidence: `pom.xml`; `src/main/resources/application*.properties`; `railway.json`.
+
+### Privacy Policy public (2026-08-03)
+
+- **CONFIRMED:** `GET /privacy` là public, anonymous và mọi role đều nhận HTML UTF-8; route dùng matcher chính xác cho `GET /privacy`, không dùng wildcard, không redirect/login và không phụ thuộc feature flag integration. Evidence: `PrivacyPolicyController#getPrivacyPolicy`, `SecurityConfig#securityFilterChain`, `PrivacyPolicyIntegrationTest`.
+- **CONFIRMED:** policy được render từ `static/privacy.html`; URL liên hệ công khai lấy từ `app.privacy.contact-url` / `PRIVACY_CONTACT_URL`, chỉ chấp nhận URL absolute `http`/`https` không userinfo. Deploy phải cấu hình URL contact thực trước khi public route phục vụ 200; test dùng `https://support.example.test/saga`. Không có secret/provider credential trong HTML hoặc response.
+- **CONFIRMED:** OAuth callback, provider scope, session, CORS, CSRF configuration và hai webhook CSRF exemptions không thay đổi. `POST /privacy` không có mapping và tiếp tục bị CSRF/security từ chối.
+
+### Contribution data foundation and Jira raw task snapshot (2026-08-04)
+
+- **CONFIRMED:** `Task` now persists Jira labels, components (`id`/`name`) and a
+  canonical plain-text description; missing/null components are empty and upsert
+  replaces the full snapshot. V9 adds nullable `description` and
+  `components_json` for existing rows.
+- **CONFIRMED:** `ContributionCalculationService` is a read-only internal service.
+  It aggregates mapped GitHub commits, SAGA Documents by type, DONE Jira tasks
+  (null story point = 1) and peer reviews scoped to the Project/Team.
+- **PARTIAL/TBD:** Jira story-point/sprint fields are currently tenant-specific
+  ids in `JiraProviderClientImpl`; no discovery/configuration exists. Peer-review
+  config precedence and a persistent contribution-override model are absent.
+- **TBD:** final-distribution policy for invalid per-student overrides,
+  all-overridden remainder, positive remainder with zero base and rounding.
+- **RECOMMENDED:** classifier stays deferred; raw Jira fields are available for a
+  later deterministic classifier after category rules are approved.
+
+### Jira issue labels snapshot (2026-08-04)
+
+- **CONFIRMED:** Jira enhanced search request thêm `labels`; `JiraIssueSnapshot.labels` là immutable `List<String>`. Missing/null/empty array thành empty list; non-array hoặc phần tử không phải string bị xử lý như provider response invalid, không stringify im lặng. Labels không thay thế `issue.id`/`issue.key` làm định danh Task.
+- **CONFIRMED:** `Task.labels` lưu JSON array trong cột `task.labels_json` kiểu `TEXT` qua `StringListJsonConverter`; getter/setter dùng defensive immutable copy. V8 chỉ thêm cột nullable nên Task hiện hữu đọc thành empty list. `JiraIssueUpsertService` replace toàn bộ snapshot labels; empty snapshot xóa labels local, không merge/append.
+- **CONFIRMED:** Jira webhook vẫn chỉ trigger shared `reconcileJira`; không parse labels webhook riêng. Backfill và reconciliation cùng đi qua provider → snapshot → upsert. Không có normalized Label entity, Task HTTP API, Jira task create/update API, hay labels response cho frontend.
 
 ## 2. Tóm tắt nhanh hệ thống
 
@@ -131,10 +160,11 @@ Application role khác team role. Một Student có thể là `LEADER`; điều 
 
 ## 6. API endpoint matrix
 
-Có 44 HTTP methods được khai báo trực tiếp trong 14 REST controllers trên working tree. `GlobalExceptionHandler` là 1 `@RestControllerAdvice`, không khai báo endpoint. `POST /api/auth/logout` là endpoint framework-managed, không phải controller method. Mặc định `Auth` nghĩa authenticated session theo SecurityConfig. CSRF: `Có` cho POST/PUT/PATCH/DELETE, `Không áp dụng` cho GET, `Miễn` chỉ hai webhook POST.
+Có 45 HTTP methods được khai báo trực tiếp trong 15 REST controllers trên working tree. `GlobalExceptionHandler` là 1 `@RestControllerAdvice`, không khai báo endpoint. `POST /api/auth/logout` là endpoint framework-managed, không phải controller method. Mặc định `Auth` nghĩa authenticated session theo SecurityConfig. CSRF: `Có` cho POST/PUT/PATCH/DELETE, `Không áp dụng` cho GET, `Miễn` chỉ hai webhook POST.
 
 | Method | Path | Controller#Method | Public/Auth | Role/scope | CSRF | Request → Response | Evidence |
 |---|---|---|---|---|---|---|---|
+| GET | `/privacy` | `PrivacyPolicyController#getPrivacyPolicy` | Public | anonymous/ADMIN/LECTURER/STUDENT | Không | → public HTML UTF-8 | controller + `SecurityConfig` |
 | GET | `/api/auth/login` | `AuthController#login` | Public | — | Không | → 302 | controller |
 | GET | `/api/auth/me` | `#me` | Auth | principal | Không | → `AuthMeResponse` | controller |
 | GET | `/api/auth/csrf` | `#csrf` | Auth | principal | Không | → `CsrfTokenResponse` | controller |
@@ -186,7 +216,7 @@ Có 44 HTTP methods được khai báo trực tiếp trong 14 REST controllers t
 | GET | `/v3/api-docs/**` | Springdoc | Public khi flag bật | — | Không | → OpenAPI JSON | `SecurityConfig`; `OpenApiConfig` |
 | GET | `/swagger-ui/**`, `/swagger-ui.html` | Springdoc | Public khi flag bật | — | Không | → Swagger UI/assets | `SecurityConfig`; `OpenApiConfig` |
 
-Static GET `/`, `/index.html`, `/favicon.ico`, `/assets/**`, `/css/**`, `/js/**`, `/images/**` cũng public theo `SecurityConfig`; đây là resource mappings, không tính vào 44 controller methods. Swagger/OpenAPI public chỉ khi corresponding enable flag bật.
+Static GET `/`, `/index.html`, `/favicon.ico`, `/assets/**`, `/css/**`, `/js/**`, `/images/**` cũng public theo `SecurityConfig`; `GET /privacy` là controller mapping public exact riêng, không phải wildcard static mapping. Swagger/OpenAPI public chỉ khi corresponding enable flag bật.
 
 ### Frontend integration contract
 
@@ -291,7 +321,7 @@ Key classes: `ProjectIntegrationService#beginGitHubInstallation/#linkGitHubRepos
 
 ### Test hiện có
 
-Có 57 test source classes. **CONFIRMED trên working tree:** full `./mvnw.cmd test` pass 55 suites / 257 tests / 0 failures / 0 errors / 0 skipped. `MyCourseTeamMembersIntegrationTest` bao phủ Student self-scope, 401/403/404/409, project nullable, privacy, pagination/400, multi-Course và OpenAPI. `CourseRosterAndLecturerOptionsIntegrationTest` bao phủ authorization, filter/sort/pagination, invalid query, email exposure và legacy invalid data nhiều Team không crash. `CourseTeamMembershipGuardIntegrationTest` bao phủ idempotency, conflict 409, role độc lập khác Course và hai transaction cạnh tranh. Provisioning/invitation tests bao phủ reuse imported Student, conflict, membership/role preservation, competitive bind, outbox dedup/template/failure/retry, concurrent claim và stale recovery. Maven dùng Java runtime 21.0.7 trên máy audit, trong khi project compile target Java 17.
+Có 62 test source classes. **CONFIRMED trên working tree:** full `./mvnw.cmd test` pass 60 suites / 278 tests / 0 failures / 0 errors / 0 skipped. `JiraProviderClientImplTest` bao phủ field request, labels/components missing/null/empty/multiple, ADF description và invalid provider shape; `JiraIssueUpsertServiceTest` bao phủ replace-all Task snapshots; `TaskLabelsPersistenceTest` bao phủ H2 round-trip và legacy null. `ContributionAggregationRepositoryTest` bao phủ Project/Student scoping và null story point = 1; `ContributionCalculationServiceTest` bao phủ formulas, no-review default, configured multiplier, valid overrides, deterministic result và precedence ambiguity fail-closed. `PrivacyPolicyIntegrationTest` bao phủ anonymous, tất cả application roles, HTML UTF-8, absence của literal test credential, POST không có route public và protected API vẫn 401; `PrivacyPolicyControllerTest` bao phủ URL contact thiếu/sai trả 503 có kiểm soát. `MyCourseTeamMembersIntegrationTest` bao phủ Student self-scope, 401/403/404/409, project nullable, privacy, pagination/400, multi-Course và OpenAPI. `CourseRosterAndLecturerOptionsIntegrationTest` bao phủ authorization, filter/sort/pagination, invalid query, email exposure và legacy invalid data nhiều Team không crash. `CourseTeamMembershipGuardIntegrationTest` bao phủ idempotency, conflict 409, role độc lập khác Course và hai transaction cạnh tranh. Provisioning/invitation tests bao phủ reuse imported Student, conflict, membership/role preservation, competitive bind, outbox dedup/template/failure/retry, concurrent claim và stale recovery. Maven dùng Java runtime 21.0.7 trên máy audit, trong khi project compile target Java 17.
 
 Evidence: `src/test/java/**`, `infra/lambda/cognito-account-linking/test/index.test.mjs`.
 

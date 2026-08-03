@@ -1,10 +1,26 @@
 # SAGA Backend — Yêu cầu, Dependency, Phân quyền và Ràng buộc
 
-> **Trạng thái audit:** CONFIRMED = được code hiện tại chứng minh; PARTIAL = mới có một phần code/mô hình; TBD = repository không đủ bằng chứng; RECOMMENDED = đề xuất, không phải hành vi hiện tại. Audit dựa trên branch `main`, HEAD thực tế `c351ae9` (`cập nhật docs`) ngày 2026-08-03. Working tree có endpoint Student self-scoped, DTO, service reuse, integration test và sáu tài liệu chưa commit. Không dùng tài liệu cũ làm bằng chứng chính và không chép giá trị bí mật.
+> **Trạng thái audit:** CONFIRMED = được code hiện tại chứng minh; PARTIAL = mới có một phần code/mô hình; TBD = repository không đủ bằng chứng; RECOMMENDED = đề xuất, không phải hành vi hiện tại. Audit dựa trên branch `main`, HEAD thực tế `07ffa38` (`thêm trang privacy`) ngày 2026-08-04. Working tree có Jira labels snapshot, Task persistence/migration, integration test và sáu tài liệu chưa commit. Không dùng tài liệu cũ làm bằng chứng chính và không chép giá trị bí mật.
 
 ## 1. Mục đích tài liệu
 
 Tài liệu này dành cho Backend, Frontend và QA để truy vết yêu cầu thực tế về code, dependency, API, phân quyền và vận hành. Phạm vi là toàn bộ source hiện có: Spring Boot, Lambda, cấu hình, migration, test và Railway. Mọi kết luận chỉ xuất phát từ executable code/config/test; khi code không chứng minh được, tài liệu ghi TBD thay vì suy đoán.
+
+## Contribution calculation constraints (2026-08-04)
+
+- **CONFIRMED:** source-of-truth is mapped `CommitData` by Project/Student,
+  SAGA `Document` split by `DocumentType.DESIGN`, DONE Jira-synced `Task` by
+  Project/Sprint/assignee, and received `PeerReview` records. Aggregates are
+  repository/database queries; unmapped external identities are not attributed.
+- **CONFIRMED:** final arithmetic uses `BigDecimal`; raw weight is 40% code and
+  60% adjusted task score. Document/design percentages are returned in the
+  internal breakdown but do not alter that weight.
+- **TBD:** default-versus-Subject `PeerReviewConfig` precedence; Contribution
+  override storage/authorization; invalid override values, all-override remainder,
+  positive remaining budget with zero base, and rounding residual policy.
+- **RECOMMENDED:** configure/discover Jira story-point and sprint fields instead
+  of relying on the current tenant-specific field ids. Do not add a normalized
+  Jira Component or Label model without a query requirement.
 
 ## 2. Tổng quan hệ thống
 
@@ -72,6 +88,7 @@ Quy ước: `AUTHENTICATED` = chỉ cần session; `SCOPED` = phụ thuộc owne
 
 | HTTP Method | Path | Controller Method | Public/Auth Required | ADMIN | LECTURER | STUDENT | Ownership/Membership Rule | Team Role Rule | CSRF Required | Request DTO | Response DTO | Status Codes | Bằng chứng |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| GET | `/privacy` | `PrivacyPolicyController.getPrivacyPolicy` | PUBLIC | YES | YES | YES | exact public URL matcher; independent of integration flags | — | NO | — | HTML UTF-8 | 200; invalid/missing contact config controlled 503 | `PrivacyPolicyController`; `SecurityConfig`; `PrivacyPolicyIntegrationTest` |
 | GET | `/api/auth/login` | `AuthController.login` | PUBLIC | YES | YES | YES | — | — | NO | — | redirect | 302 | `AuthController.java:L20-L25` |
 | GET | `/api/auth/me` | `AuthController.me` | AUTHENTICATED | YES | YES | YES | principal session | — | NO | — | `AuthMeResponse` | 200,401 | `AuthController.java:L28-L39` |
 | GET | `/api/v1/subjects/{id}` | `getSubjectById` | AUTHENTICATED | YES | YES | YES | — | — | NO | — | `Subject` | 200,404 | `SubjectController.java:L28-L30` |
@@ -118,7 +135,7 @@ Quy ước: `AUTHENTICATED` = chỉ cần session; `SCOPED` = phụ thuộc owne
 | ALL | `/oauth2/**` | Spring Security | PUBLIC | YES | YES | YES | OAuth infrastructure route | — | theo method | — | redirect/TBD | TBD | `SecurityConfig.java:L88-L92` |
 | ALL | `/login/**` | Spring Security | PUBLIC | YES | YES | YES | OAuth infrastructure route | — | theo method | — | redirect/TBD | TBD | `SecurityConfig.java:L88-L92` |
 | ALL | `/error` | Spring Boot/Security | PUBLIC | YES | YES | YES | error dispatch | — | theo method | — | error | TBD | `SecurityConfig.java:L88-L92` |
-| GET | `/`, `/index.html`, `/favicon.ico`, `/assets/**`, `/css/**`, `/js/**`, `/images/**` | static resource | PUBLIC | YES | YES | YES | static matcher | — | NO | — | static content | 200,404 | `SecurityConfig.java:L93-L104` |
+| GET | `/`, `/index.html`, `/favicon.ico`, `/assets/**`, `/css/**`, `/js/**`, `/images/**` | static resource | PUBLIC | YES | YES | YES | static matcher | — | NO | — | static content | 200,404 | `SecurityConfig` |
 | POST | `/api/auth/logout` | Spring Security logout | FRAMEWORK/CSRF-GATED | YES | YES | YES | valid CSRF redirects even without a current session; authenticated session is invalidated when present | — | YES | `X-XSRF-TOKEN` or `_csrf` | redirect | 302,403 | `SecurityConfig`; `CognitoLogoutSuccessHandler`; `SecurityIntegrationTest` |
 | GET | `/actuator/health`, `/actuator/health/**` | Actuator | PUBLIC | YES | YES | YES | — | — | NO | — | health | 200 | `SecurityConfig.java:L93-L104`; `application.properties:L25-L27` |
 | GET | `/v3/api-docs/**`, `/swagger-ui/**`, `/swagger-ui.html` | Springdoc | PUBLIC khi enabled | YES | YES | YES | feature flag | — | NO | — | OpenAPI/UI | 200,404 | `SecurityConfig.java:L112-L117`; `OpenApiConfig.java` |
@@ -276,7 +293,7 @@ Master-data GET cho mọi authenticated user; `AccountStatus` không được en
 - OAuth state random 32 bytes, lưu hash trong session, one-time, TTL mặc định PT10M và bind sub/profile/flow/target. `OAuthStateService`.
 - Secret integration AES-256-GCM, nonce 12 bytes, AAD theo purpose, key version/rotation. `IntegrationSecretCipher`.
 - Webhook receipt encrypted, deduplicate `(provider, delivery_id)`. `WebhookIngestionService#persist`; migration V2.
-- Jira sync dùng overlap/cursor và time zone config; GitHub/Jira external id hỗ trợ idempotent upsert. `JiraSyncWindow`; `GitHubDataUpsertService`; migration V2.
+- Jira sync dùng overlap/cursor và time zone config; GitHub/Jira external id hỗ trợ idempotent upsert. Jira labels là `Task` snapshot `labels_json` JSON-in-TEXT, provider request/parse `List<String>` và upsert replace-all; V8 nullable bảo toàn Task cũ. Không có normalized Label entity hoặc Task HTTP API. `JiraSyncWindow`; `JiraIssueUpsertService`; V2/V8.
 - Không tìm thấy soft delete; DELETE integration đổi trạng thái/disconnect thay vì xoá record. Hard delete behavior các entity khác: TBD.
 
 ## 9. Dependency
@@ -507,4 +524,4 @@ Configuration mới: `app.student-invitation.login-url` lấy từ `STUDENT_INVI
 
 Runtime fact do người dùng cung cấp: Railway từng fail vì DB thiếu `student.version`. V6/V7 phải chạy trước Hibernate `validate`; repository không có production log/dashboard nên migration production vẫn **TBD**, không CONFIRMED.
 
-Full `./mvnw.cmd test` trên working tree: **55 suites, 257 tests, 0 failures, 0 errors, 0 skipped**. Đây là checkpoint sau endpoint Student self-scoped; Jira/GitHub/webhook, session/CSRF/OIDC callback, master-data authorization và import authorization không bị thay đổi.
+Full `./mvnw.cmd test` trên working tree: **60 suites, 278 tests, 0 failures, 0 errors, 0 skipped**. Jira labels/components/description provider/upsert/persistence, Contribution aggregation/calculation, Jira/GitHub/webhook, session/CSRF/OIDC callback, master-data authorization và import authorization đều pass.

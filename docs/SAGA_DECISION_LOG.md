@@ -2,7 +2,27 @@
 
 Tài liệu ghi lại quyết định đã được code/runtime fact chứng minh và các đề xuất còn mở. `ACCEPTED` không có nghĩa production đã được kiểm chứng; evidence của từng quyết định xác định phạm vi xác nhận.
 
-> Metadata audit: branch `main`, HEAD thực tế `c351ae9` (`cập nhật docs`). Working tree có endpoint Student self-scoped, DTO, service reuse, integration test và sáu tài liệu chưa commit. Full Maven suite trong working tree hiện tại: 55 suites, 257 tests pass, 0 failures/errors/skips.
+> Metadata audit: branch `main`, HEAD thực tế `07ffa38` (`thêm trang privacy`). Working tree có Jira labels snapshot, Task persistence/migration, tests và sáu tài liệu chưa commit. Full Maven suite trong working tree hiện tại: 60 suites, 278 tests pass, 0 failures/errors/skips.
+
+## DEC-028 — Contribution calculation reads source-of-truth; unresolved policies fail closed
+
+- Date: 2026-08-04
+- Status: ACCEPTED (working tree, not committed)
+- **CONFIRMED:** the read-only calculation service uses project-scoped commit and
+  document aggregates, DONE Jira task story points (null is one), and peer-review
+  multipliers from `PeerReviewConfig`. All arithmetic is `BigDecimal`; no result
+  snapshot is persisted and no HTTP API is introduced.
+- **CONFIRMED:** Jira Task snapshots now include canonical plain-text description
+  and replace-all component snapshots (`id`, `name`); V9 adds nullable
+  `description` and `components_json` columns.
+- **TBD/PARTIAL:** the source contains both Subject-null and Subject-specific
+  peer-review configs without precedence evidence. Ambiguity or a missing
+  multiplier is rejected instead of silently selecting a value. There is no
+  persisted Contribution override model. Per-value negative or above-100
+  overrides, all-overridden remainder, positive remaining budget with zero base,
+  and rounding residuals remain Product Owner policy decisions.
+- **RECOMMENDED:** replace the tenant-specific Jira story-point/sprint field ids
+  with configured discovery before treating Jira field coverage as portable.
 
 ## DEC-001 — Dùng Spring Security OAuth2/OIDC và server-side session
 
@@ -281,3 +301,20 @@ Không có secret hoặc thông tin đăng nhập thật trong decision log này
 - Reuse: endpoint gọi logic page members dùng chung trong `TeamRosterService`; endpoint roster cũ giữ nguyên contract ADMIN/LECTURER/STUDENT exact-Team. Project authorization LEADER/MEMBER không thay đổi.
 - Privacy: response không có email, `cognitoSub`, Student.version, session/CSRF/provider token hay credential. teamId được trả để FE đi tiếp flow Project/integration.
 - Evidence: `MyCourseTeamController`, `TeamRosterService#getCurrentStudentTeamMembers`, `TeamMemberRepository#findByStudentIdAndTeamCourseId`, `MyCourseTeamMembersIntegrationTest`, `TeamRosterSecurityIntegrationTest`.
+
+## DEC-026 — Privacy Policy public là HTML route độc lập với OAuth integration
+
+- Ngày: 2026-08-03
+- Trạng thái: ACCEPTED (working tree chưa commit)
+- Quyết định: thêm đúng `GET /privacy`, public cho anonymous và mọi application role, trả HTML UTF-8 từ `static/privacy.html`. Không dùng redirect/login, wildcard matcher hay feature flag integration. `POST /privacy` không có controller mapping và không được CSRF exempt.
+- Contact: policy thay `{{CONTACT_URL}}` bằng `app.privacy.contact-url` (`PRIVACY_CONTACT_URL`) sau khi validate URL absolute `http`/`https`, host không rỗng và không có userinfo. Thiếu/sai cấu hình trả lỗi controlled 503; phải cấu hình URL contact thật trước deploy. Test chỉ dùng URL example domain.
+- Hệ quả: không sửa OAuth callback, scope, credential/encryption, `SagaPrincipal`, JSESSIONID, CORS, CSRF hoặc hai webhook exemptions. Policy nêu data/use/sharing/retention/choices/security/children/changes nhưng không hiển thị secret, token hay credential.
+- Evidence: `PrivacyPolicyController#getPrivacyPolicy`, `static/privacy.html`, `SecurityConfig#securityFilterChain`, `PrivacyPolicyIntegrationTest`, `PrivacyPolicyControllerTest`, `SecurityIntegrationTest`, `SwaggerUiCsrfIntegrationTest`.
+
+## DEC-027 — Jira labels là Task snapshot replace-all, không phải Label domain riêng
+
+- Ngày: 2026-08-04
+- Trạng thái: ACCEPTED (working tree chưa commit)
+- Quyết định: Jira search yêu cầu `labels`; provider parse `List<String>` immutable, missing/null/empty thành empty và invalid type trả provider response invalid. `Task.labels_json` là TEXT chứa JSON array, ánh xạ bằng converter defensive; V8 thêm cột nullable nên Task cũ đọc empty.
+- Hệ quả: Jira upsert replace toàn bộ labels mỗi snapshot, empty snapshot clear local và sync cùng snapshot không duplicate. Jira webhook giữ semantics chỉ trigger shared reconciliation; không thêm payload parser labels riêng. Không tạo Label entity/bảng normalized, Task HTTP API, frontend labels response hoặc API tạo/cập nhật Jira task.
+- Evidence: `JiraProviderClientImpl#searchIssues/#toIssue`, `JiraIssueSnapshot`, `JiraIssueUpsertService#upsert`, `Task`, `StringListJsonConverter`, `V8__add_task_jira_labels_snapshot.sql`, labels tests.

@@ -1,6 +1,19 @@
 # Student import, invitation, and first-login provisioning
 
-Status: **PARTIAL** — HEAD là `c351ae9` (`cập nhật docs`); working tree có endpoint Student self-scoped, DTO, reuse service, integration test và sáu Markdown chưa commit. Source/config/test là evidence. No secret is recorded here.
+## Contribution isolation update (2026-08-04)
+
+- **CONFIRMED:** Contribution reads `CommitData`, SAGA `Document`, Jira-synced
+  `Task` and `PeerReview` data only; it does not write Student, TeamMember,
+  invitation outbox or identity mappings.
+- **CONFIRMED:** Invitation outbox remains delivery-only and is not a source of
+  Project membership or Contribution enrollment.
+- **TBD:** A persisted Contribution override model is not present. Existing
+  `PolicyOverrideRequest` is not reused because it is not a per-Student/per-Project
+  Contribution override.
+
+Status: **PARTIAL** — HEAD là `07ffa38` (`thêm trang privacy`); working tree có Jira labels snapshot, Task persistence/migration, integration test và sáu Markdown chưa commit. Source/config/test là evidence. No secret is recorded here.
+
+`GET /privacy` is a separate public HTML policy route. It does not change imported Student provisioning, invitation outbox, membership rules, OAuth, browser session, or CSRF behavior. Its public contact link is deployment configuration (`PRIVACY_CONTACT_URL`), not invitation data.
 
 ## Import and access flow
 
@@ -90,4 +103,6 @@ single valid membership returns its resolved teamId, Team/Project summary and pa
 `TeamMemberResponse`; it does not create membership and does not use the invitation
 outbox as enrollment. GET uses the existing browser session and needs no CSRF.
 
-Tests cover matching/conflicts/status/idempotency, competitive bind, multi-course role preservation, import rollback/dedup, outbox template/dedup, concurrent claims, stale recovery, retry and delivery failure. `CourseTeamMembershipGuardIntegrationTest` also covers same-Team idempotency/role preservation, same-Course conflict 409, independent roles in different Courses, HTTP conflict and two independent competing transactions with a fresh final query. `MyCourseTeamMembersIntegrationTest` covers Student self-scope, no membership/legacy data, project nullable, privacy, pagination and OpenAPI. The current working-tree `./mvnw.cmd test` result is **55 suites / 257 tests / 0 failures / 0 errors / 0 skipped**.
+Jira label snapshot persistence is separate from import/provisioning: it does not create, delete or change Student, TeamMember, invitation or identity data. Labels remain internal Task classification data; no Task HTTP API or Jira task creation API is introduced.
+
+Tests cover matching/conflicts/status/idempotency, competitive bind, multi-course role preservation, import rollback/dedup, outbox template/dedup, concurrent claims, stale recovery, retry and delivery failure. `CourseTeamMembershipGuardIntegrationTest` also covers same-Team idempotency/role preservation, same-Course conflict 409, independent roles in different Courses, HTTP conflict and two independent competing transactions with a fresh final query. `MyCourseTeamMembersIntegrationTest` covers Student self-scope, no membership/legacy data, project nullable, privacy, pagination and OpenAPI. The current working-tree `./mvnw.cmd test` result is **60 suites / 278 tests / 0 failures / 0 errors / 0 skipped**.

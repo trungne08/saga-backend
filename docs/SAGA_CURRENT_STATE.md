@@ -5,10 +5,28 @@
 | Mục | Giá trị |
 |---|---|
 | Branch được audit | `main` |
-| Commit được audit | `c351ae9` (`cập nhật docs`) |
-| Ngày cập nhật | 2026-08-03 (Asia/Saigon, UTC+07:00) |
-| Working tree hiện tại | Có endpoint Student self-scoped, DTO, reuse service, integration test và sáu tài liệu chưa commit; không commit/push |
+| Commit được audit | `07ffa38` (`thêm trang privacy`) |
+| Ngày cập nhật | 2026-08-04 (Asia/Saigon, UTC+07:00) |
+| Working tree hiện tại | Có Jira labels snapshot, Task persistence/migration, provider/upsert/persistence tests và sáu tài liệu chưa commit; không commit/push |
 | Phạm vi thay đổi của task | Source/config/test ở HEAD và working tree là bằng chứng mạnh nhất |
+
+## Update 2026-08-04 — Contribution engine and Jira task snapshots
+
+- **CONFIRMED:** V9 stores a nullable canonical Jira description and JSON
+  component snapshot (`id`/`name`) on `Task`. Search requests these fields and
+  upsert replaces them; labels retain their existing V8 replace-all behavior.
+- **CONFIRMED:** internal read-only Contribution calculation implements scores
+  from mapped commits, Documents, DONE Tasks and PeerReview, with `BigDecimal`.
+  Null Task story point contributes one. Results are calculated on demand and
+  are not persisted.
+- **PARTIAL:** existing Jira story-point and sprint source fields are hard-coded
+  tenant ids. No configurable discovery was found, so portability is blocked.
+- **TBD:** peer config precedence, persisted contribution overrides, specified
+  final-distribution edge cases, classification rules and Contribution API actor
+  policy.
+- **Verification:** targeted Jira/persistence/repository/calculation tests pass:
+  5 suites, 33 tests, 0 failures/errors/skips. Full Maven working tree passes
+  60 suites, 278 tests, 0 failures, 0 errors and 0 skipped.
 
 ## 2. Đã hoàn thành
 
@@ -18,6 +36,8 @@
 - **CONFIRMED:** master-data Class/Course/Subject/Semester có API read/create; create được bảo vệ bằng ADMIN. Evidence: bốn controller master-data và `@PreAuthorize`.
 - **CONFIRMED:** Jira và GitHub có code OAuth/App, linking, webhook, sync/backfill, reconciliation và encrypted secret handling. Evidence: `integration/callback`, `integration/project`, `integration/provider`, `integration/webhook`, `integration/sync`, `IntegrationSecretCipher`.
 - **CONFIRMED:** MySQL/JPA là store domain chính; MongoDB lưu `SystemAuditLog`. Evidence: `application.properties`, entities/repositories.
+- **CONFIRMED:** `GET /privacy` public cho anonymous và mọi role, trả HTML UTF-8 từ `static/privacy.html`; exact matcher trong `SecurityConfig` không mở wildcard, không đổi OAuth/session/CSRF/CORS. Contact public được validate từ `app.privacy.contact-url` / `PRIVACY_CONTACT_URL`; deploy phải cấu hình URL contact thực. Evidence: `PrivacyPolicyController`, `SecurityConfig`, `PrivacyPolicyIntegrationTest`.
+- **CONFIRMED:** Jira issue labels được fetch/parse thành immutable snapshot, persist `Task.labels_json` TEXT JSON và replace-all khi Jira issue cập nhật; missing legacy DB value đọc thành empty list. Webhook vẫn dùng shared reconciliation. Không có Label entity, Task HTTP API, frontend labels API hay SAGA→Jira task create/update. Evidence: `JiraProviderClientImpl`, `JiraIssueSnapshot`, `JiraIssueUpsertService`, `Task`, V8, labels tests.
 - **PARTIAL:** import Excel sinh viên có authorization course scope, transaction rollback, identity bind an toàn, invitation outbox và application guard một Student/một Team/mỗi Course. Parser/header-preview/error DTO và database invariant trực tiếp Student+Course chưa hoàn chỉnh. Evidence: `CourseController#importStudents`, `CourseImportAuthorizationService`, `ExcelImportService#importStudentsToCourse`, `AuthenticatedProfileService`, `StudentInvitationOutboxService`.
 
 ## 3. Đã kiểm chứng
@@ -26,9 +46,11 @@
 |---|---|---|
 | Import authorization integration test | `-Dtest=CourseImportSecurityIntegrationTest test` | 13 tests, 0 failures/errors/skips; `BUILD SUCCESS` |
 | Existing Security integration test | `-Dtest=SecurityIntegrationTest test` (three repeated runs) | 13 tests/run, all pass |
-| Maven test suite (working tree hiện tại) | `./mvnw.cmd test` | 55 suites, 257 tests, 0 failures, 0 errors, 0 skipped; `BUILD SUCCESS` |
+| Maven test suite (working tree hiện tại) | `./mvnw.cmd test` | 60 suites, 278 tests, 0 failures, 0 errors, 0 skipped; `BUILD SUCCESS` |
+| Jira labels targeted regression | provider, upsert, H2 persistence, dispatcher, webhook processor | 37 tests, 0 failures/errors/skips; `BUILD SUCCESS` |
+| Privacy/security/integration regression | `PrivacyPolicyIntegrationTest`, `PrivacyPolicyControllerTest`, `SecurityIntegrationTest`, `SwaggerUiCsrfIntegrationTest`, Jira/GitHub callback/security tests | 32 tests, 0 failures/errors/skips; `BUILD SUCCESS` |
 | Checkpoint trước Swagger-CSRF commit | mốc audit trước đó | 51 suites, 228 tests, 0 failures, 0 errors, 0 skipped; không phải số liệu hiện tại |
-| Source/test audit count | quét `src/main` và `src/test` | 14 REST controllers; 1 `@RestControllerAdvice`; 44 controller HTTP methods; 6 `@PreAuthorize`; 0 `@Secured`; 57 test source classes |
+| Source/test audit count | quét `src/main` và `src/test` | 15 REST controllers; 1 `@RestControllerAdvice`; 45 controller HTTP methods; 6 `@PreAuthorize`; 0 `@Secured`; 60 test source classes |
 | Self-team/roster/security regression | targeted integration tests | 6 suites, 62 tests, 0 failures/errors/skips; gồm endpoint self-team, roster cũ, guard, project authorization, security và import |
 | Compile | Maven compile trong test lifecycle | 229 main source files và 44 test source files compile thành công |
 | Security/CSRF/CORS | `SecurityIntegrationTest` | 16 tests pass, gồm anonymous 401 cho protected API, role 403, CSRF, preflight và logout framework-managed |
