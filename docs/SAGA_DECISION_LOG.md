@@ -2,7 +2,7 @@
 
 Tài liệu ghi lại quyết định đã được code/runtime fact chứng minh và các đề xuất còn mở. `ACCEPTED` không có nghĩa production đã được kiểm chứng; evidence của từng quyết định xác định phạm vi xác nhận.
 
-> Metadata audit: branch `main`, HEAD thực tế `07ffa38` (`thêm trang privacy`). Working tree có Jira labels snapshot, Task persistence/migration, tests và sáu tài liệu chưa commit. Full Maven suite trong working tree hiện tại: 60 suites, 278 tests pass, 0 failures/errors/skips.
+> Metadata audit hiện tại: branch `main`, HEAD thực tế `200d866` (`cập nhật doc`). `07ffa38`, `90b1852` và `52a8c71` là checkpoint lịch sử; Jira labels/components/description, V8/V9 và Contribution đã được commit tại `b9968dc`. Full Maven checkpoint hiện tại: 60 suites, 278 tests pass, 0 failures/errors/skips.
 
 ## DEC-028 — Contribution calculation reads source-of-truth; unresolved policies fail closed
 
@@ -219,7 +219,7 @@ Tài liệu ghi lại quyết định đã được code/runtime fact chứng mi
 ## DEC-017 — Policy phân quyền import sinh viên theo Course
 
 - Ngày: 2026-08-02
-- Trạng thái: ACCEPTED (authorization import đã commit trong lịch sử; HEAD audit hiện là `90b1852`)
+- Trạng thái: ACCEPTED (authorization import đã có tại checkpoint lịch sử `90b1852`; vẫn có trong HEAD hiện tại `200d866`)
 - Bối cảnh: Import sinh viên là mutation có thể tạo Student, Team và TeamMember nên không đủ an toàn nếu chỉ yêu cầu authenticated session.
 - Quyết định: ADMIN được import mọi Course; LECTURER chỉ import khi `SagaPrincipal.localProfileId` bằng `Course.instructor.id`; STUDENT bị từ chối. Method security chặn role tổng quát, service chịu trách nhiệm ownership và 404 Course.
 - Lý do: Tái sử dụng model `SagaPrincipal`/authority session và pattern ownership hiện có; không đọc Cognito token hoặc raw group trong controller.
@@ -259,7 +259,7 @@ Không có secret hoặc thông tin đăng nhập thật trong decision log này
 ## DEC-021 — Team roster authorization không dùng rule Project LEADER-only
 
 - Ngày: 2026-08-02
-- Trạng thái: ACCEPTED (có tại HEAD `90b1852`)
+- Trạng thái: ACCEPTED (có tại checkpoint lịch sử `90b1852`; vẫn có trong HEAD hiện tại `200d866`)
 - Quyết định: `GET /api/v1/courses/{courseId}/teams/{teamId}/members` trả `Page<TeamMemberResponse>` sau khi kiểm tra Team thuộc Course URL. ADMIN xem mọi Team; Lecturer chỉ Course mình dạy; Student chỉ Team mình có TeamMember, bất kể LEADER hay MEMBER.
 - Hệ quả: mismatch Course/Team hoặc Team không tồn tại là 404; anonymous 401; session hợp lệ nhưng không đủ scope 403. Response không chứa email, `cognitoSub` hay version.
 - Evidence: `TeamRosterController`, `TeamRosterService`, `TeamRosterSecurityIntegrationTest`.
@@ -284,7 +284,7 @@ Không có secret hoặc thông tin đăng nhập thật trong decision log này
 ## DEC-024 — Một Student tối đa một Team trong mỗi Course
 
 - Ngày: 2026-08-03
-- Trạng thái: ACCEPTED (Product Owner; implementation tại HEAD `52a8c71`)
+- Trạng thái: ACCEPTED (Product Owner; implementation được đưa vào tại checkpoint lịch sử `52a8c71`, vẫn có trong HEAD hiện tại `200d866`)
 - Bối cảnh lịch sử: trước quyết định này, rule nhiều Team trong một Course là TBD. Dữ liệu legacy không hợp lệ có thể vẫn tồn tại và chỉ được đọc không crash; không được xem là business contract hợp lệ.
 - Quyết định: Student có thể thuộc nhiều Course, nhưng trong mỗi Course tối đa một Team. `RoleInTeam` độc lập theo Team/Course; Student có thể tham gia Project khác nhau ở Course khác. Một Course có thể có nhiều Team; mỗi Team tối đa một Project; nhiều Team/Project trong cùng Course hợp lệ khi mỗi Project thuộc Team khác.
 - Write-path behavior: `ExcelImportService` là production write path duy nhất tạo TeamMember. Service lấy `PESSIMISTIC_WRITE` trên đúng Student row, sau đó query membership Student+Course. Không có membership thì tạo; đúng Team thì idempotent, không duplicate/không tự đổi role; Team khác cùng Course trả conflict 409 và không move/delete/update membership cũ; Course khác hợp lệ. Local seed phải không tạo dữ liệu trái rule.
@@ -295,7 +295,7 @@ Không có secret hoặc thông tin đăng nhập thật trong decision log này
 ## DEC-025 — Student tự resolve Team trong Course qua endpoint self-scoped
 
 - Ngày: 2026-08-03
-- Trạng thái: ACCEPTED (Product Owner; implementation ở working tree chưa commit)
+- Trạng thái: ACCEPTED (Product Owner; implementation đã được commit tại `250f514`, vẫn có trong HEAD hiện tại `200d866`)
 - Quyết định: thêm `GET /api/me/courses/{courseId}/team/members` cho STUDENT, dùng browser session/SagaPrincipal và không nhận `studentId` hoặc `teamId`. Backend lấy Student từ `SagaPrincipal.localProfileId`, kiểm tra Course, rồi query tất cả TeamMember theo Student+Course.
 - Hệ quả: không có membership trả 404; đúng một membership trả teamId/teamName/role hiện tại, Project id/name nullable và `Page<TeamMemberResponse>`; legacy nhiều membership trả 409, không chọn Team đầu tiên hay sửa/xóa/merge dữ liệu. GET không cần CSRF. ADMIN/LECTURER 403, anonymous 401.
 - Reuse: endpoint gọi logic page members dùng chung trong `TeamRosterService`; endpoint roster cũ giữ nguyên contract ADMIN/LECTURER/STUDENT exact-Team. Project authorization LEADER/MEMBER không thay đổi.
@@ -305,7 +305,7 @@ Không có secret hoặc thông tin đăng nhập thật trong decision log này
 ## DEC-026 — Privacy Policy public là HTML route độc lập với OAuth integration
 
 - Ngày: 2026-08-03
-- Trạng thái: ACCEPTED (working tree chưa commit)
+- Trạng thái: ACCEPTED (được commit tại `07ffa38`; vẫn có trong HEAD hiện tại `200d866`)
 - Quyết định: thêm đúng `GET /privacy`, public cho anonymous và mọi application role, trả HTML UTF-8 từ `static/privacy.html`. Không dùng redirect/login, wildcard matcher hay feature flag integration. `POST /privacy` không có controller mapping và không được CSRF exempt.
 - Contact: policy thay `{{CONTACT_URL}}` bằng `app.privacy.contact-url` (`PRIVACY_CONTACT_URL`) sau khi validate URL absolute `http`/`https`, host không rỗng và không có userinfo. Thiếu/sai cấu hình trả lỗi controlled 503; phải cấu hình URL contact thật trước deploy. Test chỉ dùng URL example domain.
 - Hệ quả: không sửa OAuth callback, scope, credential/encryption, `SagaPrincipal`, JSESSIONID, CORS, CSRF hoặc hai webhook exemptions. Policy nêu data/use/sharing/retention/choices/security/children/changes nhưng không hiển thị secret, token hay credential.
@@ -314,7 +314,7 @@ Không có secret hoặc thông tin đăng nhập thật trong decision log này
 ## DEC-027 — Jira labels là Task snapshot replace-all, không phải Label domain riêng
 
 - Ngày: 2026-08-04
-- Trạng thái: ACCEPTED (working tree chưa commit)
+- Trạng thái: ACCEPTED (labels/components/description và Contribution được commit tại `b9968dc`; tài liệu liên quan được commit tại `200d866`)
 - Quyết định: Jira search yêu cầu `labels`; provider parse `List<String>` immutable, missing/null/empty thành empty và invalid type trả provider response invalid. `Task.labels_json` là TEXT chứa JSON array, ánh xạ bằng converter defensive; V8 thêm cột nullable nên Task cũ đọc empty.
 - Hệ quả: Jira upsert replace toàn bộ labels mỗi snapshot, empty snapshot clear local và sync cùng snapshot không duplicate. Jira webhook giữ semantics chỉ trigger shared reconciliation; không thêm payload parser labels riêng. Không tạo Label entity/bảng normalized, Task HTTP API, frontend labels response hoặc API tạo/cập nhật Jira task.
 - Evidence: `JiraProviderClientImpl#searchIssues/#toIssue`, `JiraIssueSnapshot`, `JiraIssueUpsertService#upsert`, `Task`, `StringListJsonConverter`, `V8__add_task_jira_labels_snapshot.sql`, labels tests.

@@ -151,7 +151,7 @@ type AuthMeResponse = {
   fullName: string;
   applicationRole: "ADMIN" | "LECTURER" | "STUDENT";
   localProfileId: string; // UUID
-  accountStatus: "ACTIVE" | "INACTIVE" | "SUSPENDED" | "PENDING";
+  accountStatus: "ACTIVE" | "INACTIVE" | "SUSPENDED" | "PENDING" | null;
 };
 ```
 
@@ -586,10 +586,10 @@ navigation vì trả `302` đến OAuth provider.
 | --- | --- | --- | --- |
 | GET | `/api/me/integrations` | 200 `PersonalIntegrationsResponse` | Danh sách kết nối của chính user. |
 | GET | `/api/me/integrations/jira/connect` | 302 | Dùng `window.location.assign`; bắt đầu Jira OAuth. |
-| GET | `/api/integrations/jira/callback` | 200 | Provider callback; giữ backend session/browser state. Không gọi thủ công. |
+| GET | `/api/integrations/jira/callback` | 200 JSON polymorphic | Provider callback; hiện trả JSON trực tiếp sau khi consume session state. Không gọi thủ công. |
 | DELETE | `/api/me/integrations/jira` | 204 | CSRF required. |
 | GET | `/api/me/integrations/github/connect` | 302 | Dùng browser navigation; bắt đầu GitHub OAuth. |
-| GET | `/api/me/integrations/github/callback` | 200 `IdentityConnectionResponse` | Provider callback, không gọi thủ công. |
+| GET | `/api/me/integrations/github/callback` | 200 `IdentityConnectionResponse` JSON | Provider callback, hiện trả JSON trực tiếp; không gọi thủ công. |
 | DELETE | `/api/me/integrations/github` | 204 | CSRF required. |
 
 ```ts
@@ -602,6 +602,12 @@ Jira callback có response phụ thuộc OAuth flow: personal flow trả
 `IdentityConnectionResponse`; project flow trả `JiraAuthorizationResponse`.
 FE không tự truyền `state`, `code` hoặc `error`: chúng là query parameters do
 provider redirect trả về và được backend kiểm tra bằng `HttpSession` state.
+
+**CONFIRMED:** Jira/GitHub completion callback hiện trả JSON trực tiếp sau khi
+backend consume state session; không redirect về frontend sau completion.
+**RECOMMENDED, chưa implemented:** redirect callback về FE và expose một
+read-once result đã được consume từ session qua API riêng. FE không được giả định
+flow này đã tồn tại.
 
 Nếu Jira hoặc GitHub bị tắt ở backend, endpoint connect trả `503` với code
 `INTEGRATION_NOT_CONFIGURED`. Consent bị từ chối/cancel trả `400`
@@ -625,7 +631,7 @@ CSRF utility.
 | DELETE | `/api/projects/{projectId}/jira` | 204 | CSRF required. |
 | GET | `/api/projects/{projectId}/github/install` | 302 | Bắt đầu GitHub App install. |
 | GET | `/api/projects/{projectId}/github/setup` | 302 | GitHub setup callback route; provider/browser flow. |
-| GET | `/api/projects/{projectId}/github/callback` | 200 `GitHubInstallationResponse` | GitHub OAuth callback. |
+| GET | `/api/projects/{projectId}/github/callback` | 200 `GitHubInstallationResponse` | GitHub OAuth callback; hiện trả JSON trực tiếp. |
 | POST | `/api/projects/{projectId}/github/repositories` | 200 `ProjectIntegrationsResponse` | Liên kết repository và yêu cầu initial backfill. |
 | DELETE | `/api/projects/{projectId}/github/repositories/{repositoryId}` | 204 | CSRF required. |
 | GET | `/api/projects/{projectId}/sync-status` | 200 `SyncStatusResponse` | Tối đa 20 job mới nhất của Jira/repository thuộc project. |
@@ -635,7 +641,7 @@ Provider callback aliases có cùng session flow:
 | Method | Path | Success |
 | --- | --- | --- |
 | GET | `/api/integrations/github/setup` | 302 |
-| GET | `/api/integrations/github/project/callback` | 200 `GitHubInstallationResponse` |
+| GET | `/api/integrations/github/project/callback` | 200 `GitHubInstallationResponse` | Hiện trả JSON trực tiếp. |
 
 ### Request/response bodies
 

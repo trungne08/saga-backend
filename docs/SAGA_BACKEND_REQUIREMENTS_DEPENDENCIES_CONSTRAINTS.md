@@ -1,6 +1,6 @@
 # SAGA Backend — Yêu cầu, Dependency, Phân quyền và Ràng buộc
 
-> **Trạng thái audit:** CONFIRMED = được code hiện tại chứng minh; PARTIAL = mới có một phần code/mô hình; TBD = repository không đủ bằng chứng; RECOMMENDED = đề xuất, không phải hành vi hiện tại. Audit dựa trên branch `main`, HEAD thực tế `07ffa38` (`thêm trang privacy`) ngày 2026-08-04. Working tree có Jira labels snapshot, Task persistence/migration, integration test và sáu tài liệu chưa commit. Không dùng tài liệu cũ làm bằng chứng chính và không chép giá trị bí mật.
+> **Trạng thái audit:** CONFIRMED = được code hiện tại chứng minh; PARTIAL = mới có một phần code/mô hình; TBD = repository không đủ bằng chứng; RECOMMENDED = đề xuất, không phải hành vi hiện tại. Audit dựa trên branch `main`, HEAD thực tế `200d866` (`cập nhật doc`) ngày 2026-08-04. `07ffa38`, `90b1852` và `52a8c71` được giữ là checkpoint lịch sử. Jira labels/components/description, V8/V9 và Contribution đã được commit tại `b9968dc`. Không dùng tài liệu cũ làm bằng chứng chính và không chép giá trị bí mật.
 
 ## 1. Mục đích tài liệu
 
@@ -106,7 +106,7 @@ Quy ước: `AUTHENTICATED` = chỉ cần session; `SCOPED` = phụ thuộc owne
 | GET | `/api/v1/courses/instructors` | `getLecturersForCourseAssignment` | AUTHENTICATED | YES | NO | NO | ADMIN-only | — | NO | `keyword` fullName/email; sortBy fullName/email; sortDirection asc/desc; page/size | `Page<LecturerOptionResponse>` | 200,400,401,403 | `CourseController`; `CourseService#getLecturersForCourseAssignment` |
 | GET | `/api/v1/courses/{courseId}/students` | `getCourseStudents` | AUTHENTICATED | YES | SCOPED | NO | ADMIN mọi Course; LECTURER là instructor; Course thiếu 404 | — | NO | keyword; hasTeam all/with/without; sortBy studentCode/fullName/email/teamName/projectName; sortDirection asc/desc; page/size | `CourseStudentRosterResponse` | 200,400,401,403,404 | `CourseController`; `CourseService#getCourseRoster` |
 | GET | `/api/me/courses/{courseId}/team/members` | `MyCourseTeamController.getMyCourseTeamMembers` | AUTHENTICATED | NO | NO | YES | Student self-scoped: `SagaPrincipal.localProfileId` + Student/Course memberships; no membership/Course thiếu 404, legacy nhiều Team 409 | LEADER và MEMBER đều được; không thay đổi project-manager rule | NO | `page`, `size` (0/20, max 100) | `MyCourseTeamMembersResponse` gồm resolved team/project nullable và `Page<TeamMemberResponse>` | 200,400,401,403,404,409 | `MyCourseTeamController`; `TeamRosterService#getCurrentStudentTeamMembers` |
-| POST | `/api/v1/courses/{courseId}/import-students` | `importStudents` | AUTHENTICATED | YES | SCOPED | NO | ADMIN mọi Course; LECTURER phải có `localProfileId == course.instructor.id`; Course thiếu 404 | — | YES | multipart `file` | `String` | 200,401,403,404,500 | `CourseController#importStudents`; `CourseImportAuthorizationService#requireImportAccess` |
+| POST | `/api/v1/courses/{courseId}/import-students` | `importStudents` | AUTHENTICATED | YES | SCOPED | NO | ADMIN mọi Course; LECTURER phải có `localProfileId == course.instructor.id`; Course thiếu 404; cùng Student vào Team khác của cùng Course là 409 | — | YES | multipart `file` | `String` | 200,401,403,404,409,500 | `CourseController#importStudents`; `CourseImportAuthorizationService#requireImportAccess`; `ExcelImportService#importStudentsToCourse` |
 | GET | `/api/v1/courses/{courseId}/teams/{teamId}/members` | `TeamRosterController.getMembers` | AUTHENTICATED | YES | SCOPED | SCOPED | Team phải thuộc Course URL; Lecturer là instructor; Student có TeamMember đúng Team (LEADER/MEMBER đều được) | không dùng LEADER-only project rule | NO | `page`, `size` | `Page<TeamMemberResponse>` không email/cognitoSub/version | 200,401,403,404 | `TeamRosterController`; `TeamRosterService` |
 | GET | `/api/integrations/identity-mappings` | `mappings` | AUTHENTICATED | YES | SCOPED | NO | Lecturer dạy Course có Student target | — | NO | `studentId` | `IdentityConnectionResponse[]` | 200,403 | `IdentityMappingReviewController.java:L32-L38`; `IdentityMappingReviewService#requireReviewer` |
 | PATCH | `/api/integrations/identity-mappings/{mappingId}` | `review` | AUTHENTICATED | YES | SCOPED | NO | review/correction đều recheck reviewer | — | YES | `IdentityMappingReviewRequest` | `IdentityConnectionResponse` | 200,400,403,409 | `IdentityMappingReviewController.java:L40-L51`; `IdentityMappingReviewService#review` |
@@ -495,11 +495,11 @@ Không có bằng chứng ADMIN thiếu override: `requireTeamManager` chứng m
 
 ## Biên bản kiểm tra sau khi tạo file
 
-- Quét lại working tree: **14 REST controller có HTTP mapping, 44 controller HTTP methods**; thêm 1 `@RestControllerAdvice` (`GlobalExceptionHandler`) không có endpoint. `POST /api/auth/logout` là framework-managed ngoài controller scan.
+- Quét lại HEAD `200d866`: **15 REST controller có HTTP mapping, 45 controller HTTP methods**; thêm 1 `@RestControllerAdvice` (`GlobalExceptionHandler`) không có endpoint. `POST /api/auth/logout` là framework-managed ngoài controller scan.
 - `@PreAuthorize`: **6**; `@Secured`: **0**. Endpoint mới dùng `hasRole('STUDENT')`; permission check chính còn lại không đổi.
 - Đối chiếu `pom.xml`, package Lambda và bảng dependency; có 16 dependency Maven application/test, 2 dependency Flyway plugin và 1 Node Lambda dependency.
 - Đối chiếu properties/placeholders với bảng configuration; không copy password, token, private key hoặc client secret vào tài liệu.
-- Test class source working tree: **57**; full Maven working tree: 55 Surefire suites, **257 tests, 0 failures, 0 errors, 0 skipped**.
+- Test source Java files/classes: **62**; full Maven checkpoint hiện tại: 60 Surefire suites, **278 tests, 0 failures, 0 errors, 0 skipped**.
 - Task documentation hiện tại chỉ sửa sáu file Markdown; không commit/push.
 
 ## Update 2026-08-02 — Student provisioning và invitation outbox (working tree)
@@ -524,4 +524,4 @@ Configuration mới: `app.student-invitation.login-url` lấy từ `STUDENT_INVI
 
 Runtime fact do người dùng cung cấp: Railway từng fail vì DB thiếu `student.version`. V6/V7 phải chạy trước Hibernate `validate`; repository không có production log/dashboard nên migration production vẫn **TBD**, không CONFIRMED.
 
-Full `./mvnw.cmd test` trên working tree: **60 suites, 278 tests, 0 failures, 0 errors, 0 skipped**. Jira labels/components/description provider/upsert/persistence, Contribution aggregation/calculation, Jira/GitHub/webhook, session/CSRF/OIDC callback, master-data authorization và import authorization đều pass.
+Full `./mvnw.cmd test` tại checkpoint hiện tại: **60 suites, 278 tests, 0 failures, 0 errors, 0 skipped**. Jira labels/components/description provider/upsert/persistence, Contribution aggregation/calculation, Jira/GitHub/webhook, session/CSRF/OIDC callback, master-data authorization và import authorization đều pass.

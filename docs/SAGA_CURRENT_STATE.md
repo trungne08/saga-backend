@@ -5,9 +5,9 @@
 | Mục | Giá trị |
 |---|---|
 | Branch được audit | `main` |
-| Commit được audit | `07ffa38` (`thêm trang privacy`) |
+| Commit được audit | `200d866` (`cập nhật doc`); `07ffa38` là checkpoint lịch sử Privacy |
 | Ngày cập nhật | 2026-08-04 (Asia/Saigon, UTC+07:00) |
-| Working tree hiện tại | Có Jira labels snapshot, Task persistence/migration, provider/upsert/persistence tests và sáu tài liệu chưa commit; không commit/push |
+| Working tree hiện tại | Sáu tài liệu đang được đồng bộ; Jira labels/components/description, V8/V9, Contribution engine và tests đã thuộc lịch sử Git (`b9968dc`/`200d866`) |
 | Phạm vi thay đổi của task | Source/config/test ở HEAD và working tree là bằng chứng mạnh nhất |
 
 ## Update 2026-08-04 — Contribution engine and Jira task snapshots
@@ -50,7 +50,7 @@
 | Jira labels targeted regression | provider, upsert, H2 persistence, dispatcher, webhook processor | 37 tests, 0 failures/errors/skips; `BUILD SUCCESS` |
 | Privacy/security/integration regression | `PrivacyPolicyIntegrationTest`, `PrivacyPolicyControllerTest`, `SecurityIntegrationTest`, `SwaggerUiCsrfIntegrationTest`, Jira/GitHub callback/security tests | 32 tests, 0 failures/errors/skips; `BUILD SUCCESS` |
 | Checkpoint trước Swagger-CSRF commit | mốc audit trước đó | 51 suites, 228 tests, 0 failures, 0 errors, 0 skipped; không phải số liệu hiện tại |
-| Source/test audit count | quét `src/main` và `src/test` | 15 REST controllers; 1 `@RestControllerAdvice`; 45 controller HTTP methods; 6 `@PreAuthorize`; 0 `@Secured`; 60 test source classes |
+| Source/test audit count | quét `src/main` và `src/test` | 15 REST controllers; 1 `@RestControllerAdvice`; 45 controller HTTP methods; 6 `@PreAuthorize`; 0 `@Secured`; 62 test source classes |
 | Self-team/roster/security regression | targeted integration tests | 6 suites, 62 tests, 0 failures/errors/skips; gồm endpoint self-team, roster cũ, guard, project authorization, security và import |
 | Compile | Maven compile trong test lifecycle | 229 main source files và 44 test source files compile thành công |
 | Security/CSRF/CORS | `SecurityIntegrationTest` | 16 tests pass, gồm anonymous 401 cho protected API, role 403, CSRF, preflight và logout framework-managed |
@@ -99,6 +99,9 @@
 - Frontend development origin: `http://localhost:3000`.
 - Backend production origin: `https://saga-backend-production-3951.up.railway.app`.
 - Frontend success route dự kiến: `http://localhost:3000/auth/callback`.
+- `/privacy` đã public thành công.
+- Atlassian Distribution đã ở trạng thái Sharing.
+- Privacy Policy URL đã được cấu hình. Giá trị URL không được lưu trong tài liệu.
 - Cognito OAuth callback thuộc Backend: `/login/oauth2/code/cognito` (đồng thời được code config chứng minh về path).
 - Tài khoản test ADMIN và LECTURER đã đăng nhập thành công.
 - `/api/auth/me` đã trả đúng `applicationRole` cho hai tài khoản trên.
@@ -110,12 +113,12 @@ Không lưu username, password, token hoặc secret của tài khoản test tron
 
 ```text
 ĐÃ HOÀN THÀNH: OIDC/session/profile/roles; master data; team authorization; Jira/GitHub integration; CSRF/CORS; health/OpenAPI configuration.
-ĐÃ KIỂM CHỨNG: full working tree Maven 55 suites / 257 tests / 0 failures / 0 errors / 0 skipped; targeted self-team/roster/security regression 62 tests pass.
+ĐÃ KIỂM CHỨNG: full Maven tại checkpoint hiện tại 60 suites / 278 tests / 0 failures / 0 errors / 0 skipped; targeted self-team/roster/security regression là checkpoint lịch sử.
 ĐANG LÀM: Cập nhật tài liệu checkpoint theo source/test tại HEAD.
 CHƯA LÀM: Import production-ready validation/provider delivery; browser E2E localhost→Railway; session scaling/redeploy verification.
 VẤN ĐỀ ĐANG MỞ: Import validation/identity; third-party cookie; error contract; session store; hạ tầng Cognito/Railway còn TBD.
 BƯỚC TIẾP THEO: Chốt parser/error DTO, policy email exposure và provider email, chạy E2E cookie/CSRF.
-BASE HEAD: `c351ae9`. WORKING TREE HIỆN CÓ: endpoint Student self-scoped, DTO, reuse service, integration test và sáu Markdown chưa commit.
+BASE HEAD: `200d866`. Endpoint Student self-scoped đã được commit tại `250f514`; không phải dirty working-tree state.
 ```
 
 ## 10. Update — provisioning, invitation, roster và Swagger CSRF
@@ -129,12 +132,12 @@ BASE HEAD: `c351ae9`. WORKING TREE HIỆN CÓ: endpoint Student self-scoped, DTO
 - **CONFIRMED:** `GET /api/v1/courses/{courseId}/teams/{teamId}/members` trả `Page<TeamMemberResponse>`; ADMIN mọi Team, Lecturer Course mình dạy, Student đúng Team (LEADER/MEMBER), 401/403/404; response không có email/cognitoSub/version.
 - **PARTIAL/TBD:** Không có production mail provider trong `pom.xml` hay source; adapter mặc định đánh dấu failed an toàn. Parser/preview/error DTO, Cognito self-sign-up deployed và database invariant trực tiếp `UNIQUE(student_id, course_id)` còn mở.
 - **Railway runtime fact (user-provided):** deployment từng fail vì database thiếu `student.version`; V6/V7 phải migrate trước Hibernate `validate`. Repository không có production log, nên trạng thái migration production là **TBD**, không CONFIRMED.
-- **CONFIRMED tại HEAD `52a8c71`:** Course roster lấy `TeamMember -> Team -> Course`, ADMIN mọi Course/LECTURER instructor, anonymous 401, STUDENT 403, Course thiếu 404; GET không cần CSRF. Filter/sort chạy trước pagination, metadata tính trên toàn tập sau filter và tie-break theo id. `hasTeam=all|with|without`; sortBy `studentCode|fullName|email|teamName|projectName`; direction `asc|desc`; query invalid 400.
+- **CONFIRMED:** Course roster được đưa vào tại checkpoint lịch sử `52a8c71` và vẫn có trong HEAD `200d866`: lấy `TeamMember -> Team -> Course`, ADMIN mọi Course/LECTURER instructor, anonymous 401, STUDENT 403, Course thiếu 404; GET không cần CSRF. Filter/sort chạy trước pagination, metadata tính trên toàn tập sau filter và tie-break theo id. `hasTeam=all|with|without`; sortBy `studentCode|fullName|email|teamName|projectName`; direction `asc|desc`; query invalid 400.
 - **PARTIAL:** `studentsWithoutTeam`/`hasTeam=without` hiện rỗng vì chưa có Student–Course enrollment độc lập; invitation outbox không phải enrollment source. Legacy invalid data nhiều Team cùng Course được đọc không crash nhưng không hợp lệ theo business rule.
-- **CONFIRMED tại HEAD `52a8c71`:** Lecturer options ADMIN-only; anonymous 401, LECTURER/STUDENT 403; keyword chỉ `fullName`/`email`, không tìm/trả `cognitoSub`; sortBy `fullName|email`, direction `asc|desc`, invalid query 400, GET không cần CSRF.
+- **CONFIRMED:** Lecturer options được đưa vào tại checkpoint lịch sử `52a8c71` và vẫn có trong HEAD `200d866`: ADMIN-only; anonymous 401, LECTURER/STUDENT 403; keyword chỉ `fullName`/`email`, không tìm/trả `cognitoSub`; sortBy `fullName|email`, direction `asc|desc`, invalid query 400, GET không cần CSRF.
 - **ACCEPTED (Product Owner):** Student có thể ở nhiều Course nhưng tối đa một Team trong mỗi Course; role và Project độc lập theo Team/Course. Nhiều Team/Project cùng Course hợp lệ nếu mỗi Project thuộc Team khác; cùng Student ở hai Team của cùng Course là không hợp lệ.
-- **CONFIRMED tại HEAD `52a8c71`:** `ExcelImportService` là production write path duy nhất tạo TeamMember. Lock `PESSIMISTIC_WRITE` trên Student rồi query Student+Course: chưa có thì tạo; cùng Team idempotent không đổi role; Team khác cùng Course conflict 409, không move/delete/update membership; khác Course hợp lệ. Local seed không tạo dữ liệu trái rule.
+- **CONFIRMED:** Rule TeamMember được đưa vào tại checkpoint lịch sử `52a8c71` và vẫn có trong HEAD `200d866`: `ExcelImportService` là production write path duy nhất tạo TeamMember. Lock `PESSIMISTIC_WRITE` trên Student rồi query Student+Course: chưa có thì tạo; cùng Team idempotent không đổi role; Team khác cùng Course conflict 409, không move/delete/update membership; khác Course hợp lệ. Local seed không tạo dữ liệu trái rule.
 - **PARTIAL/TBD:** application concurrency guard được test bằng hai thread/hai transaction; database chưa có `UNIQUE(student_id, course_id)`. Roster trả email Student cho ADMIN/Lecturer owner và options trả email Lecturer cho ADMIN, nhưng business/UI justification vẫn TBD; response không chứa cognitoSub, version, token hay credential.
-- **CONFIRMED trên working tree:** `GET /api/me/courses/{courseId}/team/members` chỉ cho STUDENT; anonymous 401, ADMIN/LECTURER 403, không cần CSRF. Backend resolve Student từ `SagaPrincipal.localProfileId` và Team theo Student+Course; no membership/Course thiếu 404, legacy nhiều Team 409. Response trả resolved teamId cho FE dùng Project/integration flow, Project nullable và page members không email/cognitoSub/version/token.
+- **CONFIRMED:** `GET /api/me/courses/{courseId}/team/members` đã được commit tại `250f514` và vẫn có trong HEAD `200d866`: chỉ cho STUDENT; anonymous 401, ADMIN/LECTURER 403, không cần CSRF. Backend resolve Student từ `SagaPrincipal.localProfileId` và Team theo Student+Course; no membership/Course thiếu 404, legacy nhiều Team 409. Response trả resolved teamId cho FE dùng Project/integration flow, Project nullable và page members không email/cognitoSub/version/token.
 - **CONFIRMED:** endpoint roster cũ vẫn giữ ADMIN/LECTURER/STUDENT exact-Team authorization; page member được tái sử dụng trong `TeamRosterService`. Project LEADER/MEMBER authorization không đổi.
-- **Verification mới:** full Maven suite trên working tree: **55 suites, 257 tests, 0 failures, 0 errors, 0 skipped**. Không thay đổi Jira, GitHub, OAuth callback, role priority, session hay import authorization.
+- **Verification hiện tại:** full Maven suite tại checkpoint hiện tại: **60 suites, 278 tests, 0 failures, 0 errors, 0 skipped**. Không thay đổi Jira, GitHub, OAuth callback, role priority, session hay import authorization.

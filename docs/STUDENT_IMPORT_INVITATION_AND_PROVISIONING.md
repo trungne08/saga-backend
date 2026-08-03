@@ -11,9 +11,9 @@
   `PolicyOverrideRequest` is not reused because it is not a per-Student/per-Project
   Contribution override.
 
-Status: **PARTIAL** — HEAD là `07ffa38` (`thêm trang privacy`); working tree có Jira labels snapshot, Task persistence/migration, integration test và sáu Markdown chưa commit. Source/config/test là evidence. No secret is recorded here.
+Status: **PARTIAL** — current HEAD là `200d866` (`cập nhật doc`); `07ffa38` là checkpoint Privacy lịch sử. Jira labels/components/description, V8/V9 và Contribution đã được commit tại `b9968dc`; sáu Markdown đang được đồng bộ. Source/config/test là evidence. No secret is recorded here.
 
-`GET /privacy` is a separate public HTML policy route. It does not change imported Student provisioning, invitation outbox, membership rules, OAuth, browser session, or CSRF behavior. Its public contact link is deployment configuration (`PRIVACY_CONTACT_URL`), not invitation data.
+`GET /privacy` is a separate public HTML policy route. It does not change imported Student provisioning, invitation outbox, membership rules, OAuth, browser session, or CSRF behavior. Its public contact link is deployment configuration (`PRIVACY_CONTACT_URL`), not invitation data. **Runtime fact do người dùng cung cấp:** route đã public thành công và Privacy Policy URL đã được cấu hình; giá trị URL không được ghi ở đây.
 
 ## Import and access flow
 
