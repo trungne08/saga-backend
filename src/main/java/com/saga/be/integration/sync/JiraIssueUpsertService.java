@@ -73,6 +73,9 @@ public class JiraIssueUpsertService {
         task.setExternalUpdatedAt(issue.updatedAt());
         task.setResolvedAt(issue.resolvedAt());
         task.setResolution(issue.resolution());
+        task.setLabels(issue.labels());
+        task.setDescription(issue.description());
+        task.setComponents(issue.components());
 
         task.setAssignee(attribution(
                 task.getAssignee(),

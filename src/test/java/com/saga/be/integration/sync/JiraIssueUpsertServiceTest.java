@@ -15,6 +15,7 @@ import com.saga.be.entity.JiraBoard;
 import com.saga.be.entity.Project;
 import com.saga.be.entity.Student;
 import com.saga.be.entity.Task;
+import com.saga.be.entity.value.TaskComponentSnapshot;
 import com.saga.be.entity.enums.Priority;
 import com.saga.be.entity.enums.TaskStatus;
 import com.saga.be.entity.enums.TaskType;
@@ -24,6 +25,7 @@ import com.saga.be.repository.JiraBoardRepository;
 import com.saga.be.repository.SprintRepository;
 import com.saga.be.repository.TaskRepository;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -131,10 +133,141 @@ class JiraIssueUpsertServiceTest {
         verifyNoInteractions(mappingService);
     }
 
+    @Test
+    void newTaskStoresEveryLabelFromTheSnapshot() {
+        when(taskRepository.findByProjectIdAndExternalId(projectId, "jira-10001"))
+                .thenReturn(Optional.empty());
+        when(taskRepository.saveAndFlush(any(Task.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.upsert(boardId, snapshot(
+                "jira-10001",
+                "To Do",
+                LocalDateTime.parse("2026-07-29T10:00:00"),
+                List.of("Backend", "Sprint 1")
+        ));
+
+        ArgumentCaptor<Task> captor = ArgumentCaptor.forClass(Task.class);
+        verify(taskRepository).saveAndFlush(captor.capture());
+        assertEquals(List.of("Backend", "Sprint 1"), captor.getValue().getLabels());
+    }
+
+    @Test
+    void existingTaskReplacesLabelsAndClearsThemForAnEmptySnapshot() {
+        Task existing = new Task();
+        existing.setLabels(List.of("obsolete"));
+        when(taskRepository.findByProjectIdAndExternalId(projectId, "jira-10001"))
+                .thenReturn(Optional.of(existing));
+        when(taskRepository.saveAndFlush(any(Task.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.upsert(boardId, snapshot(
+                "jira-10001",
+                "To Do",
+                LocalDateTime.parse("2026-07-29T10:00:00"),
+                List.of("new-one", "new-two")
+        ));
+        assertEquals(List.of("new-one", "new-two"), existing.getLabels());
+
+        existing.setLabels(List.of("prior-one", "prior-two"));
+        service.upsert(boardId, snapshot(
+                "jira-10001",
+                "To Do",
+                LocalDateTime.parse("2026-07-29T10:30:00"),
+                List.of("replacement")
+        ));
+        assertEquals(List.of("replacement"), existing.getLabels());
+
+        service.upsert(boardId, snapshot(
+                "jira-10001",
+                "To Do",
+                LocalDateTime.parse("2026-07-29T11:00:00"),
+                List.of()
+        ));
+        assertEquals(List.of(), existing.getLabels());
+        assertEquals("jira-10001", existing.getExternalId());
+        assertEquals("SAGA-1", existing.getExternalKey());
+    }
+
+    @Test
+    void repeatedSnapshotDoesNotDuplicateLabels() {
+        Task existing = new Task();
+        when(taskRepository.findByProjectIdAndExternalId(projectId, "jira-10001"))
+                .thenReturn(Optional.of(existing));
+        when(taskRepository.saveAndFlush(any(Task.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        JiraIssueSnapshot snapshot = snapshot(
+                "jira-10001",
+                "To Do",
+                LocalDateTime.parse("2026-07-29T10:00:00"),
+                List.of("stable", "stable-again")
+        );
+
+        service.upsert(boardId, snapshot);
+        service.upsert(boardId, snapshot);
+
+        assertEquals(List.of("stable", "stable-again"), existing.getLabels());
+    }
+
+    @Test
+    void existingTaskReplacesDescriptionAndComponentsAndClearsComponents() {
+        Task existing = new Task();
+        existing.setDescription("obsolete description");
+        existing.setComponents(List.of(new TaskComponentSnapshot("1", "obsolete")));
+        when(taskRepository.findByProjectIdAndExternalId(projectId, "jira-10001"))
+                .thenReturn(Optional.of(existing));
+        when(taskRepository.saveAndFlush(any(Task.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.upsert(boardId, snapshot(
+                "jira-10001",
+                "To Do",
+                LocalDateTime.parse("2026-07-29T10:00:00"),
+                List.of(),
+                "canonical description",
+                List.of(new TaskComponentSnapshot("10", "Backend"))
+        ));
+        assertEquals("canonical description", existing.getDescription());
+        assertEquals(List.of(new TaskComponentSnapshot("10", "Backend")), existing.getComponents());
+
+        service.upsert(boardId, snapshot(
+                "jira-10001",
+                "To Do",
+                LocalDateTime.parse("2026-07-29T11:00:00"),
+                List.of(),
+                null,
+                List.of()
+        ));
+        assertEquals(null, existing.getDescription());
+        assertEquals(List.of(), existing.getComponents());
+        assertEquals("jira-10001", existing.getExternalId());
+        assertEquals("SAGA-1", existing.getExternalKey());
+    }
+
     private JiraIssueSnapshot snapshot(
             String id,
             String status,
             LocalDateTime updatedAt
+    ) {
+        return snapshot(id, status, updatedAt, List.of());
+    }
+
+    private JiraIssueSnapshot snapshot(
+            String id,
+            String status,
+            LocalDateTime updatedAt,
+            List<String> labels
+    ) {
+        return snapshot(id, status, updatedAt, labels, null, List.of());
+    }
+
+    private JiraIssueSnapshot snapshot(
+            String id,
+            String status,
+            LocalDateTime updatedAt,
+            List<String> labels,
+            String description,
+            List<TaskComponentSnapshot> components
     ) {
         return new JiraIssueSnapshot(
                 id,
@@ -152,7 +285,11 @@ class JiraIssueUpsertServiceTest {
                 null,
                 null,
                 null,
-                null
+                null,
+                updatedAt.toInstant(java.time.ZoneOffset.UTC),
+                labels,
+                description,
+                components
         );
     }
 }

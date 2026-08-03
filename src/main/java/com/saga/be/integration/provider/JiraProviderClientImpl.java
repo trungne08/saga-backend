@@ -2,6 +2,7 @@ package com.saga.be.integration.provider;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import com.saga.be.entity.value.TaskComponentSnapshot;
 import com.saga.be.config.IntegrationProperties;
 import com.saga.be.config.JiraIntegrationProperties;
 import com.saga.be.config.JiraTimeZoneProperties;
@@ -454,7 +455,7 @@ public class JiraProviderClientImpl implements JiraProviderClient {
                         "fields",
                         "summary,issuetype,status,priority,assignee,reporter,"
                                 + "duedate,created,updated,resolutiondate,resolution,"
-                                + "customfield_10016,customfield_10020"
+                                + "customfield_10016,customfield_10020,labels,components,description"
                 );
         if (nextPageToken != null && !nextPageToken.isBlank()) {
             builder.queryParam("nextPageToken", nextPageToken);
@@ -954,8 +955,86 @@ public class JiraProviderClientImpl implements JiraProviderClient {
                 nestedText(fields, "resolution", "name"),
                 sprint == null ? null : text(sprint, "id"),
                 sprint == null ? null : text(sprint, "name"),
-                updatedAtUtc
+                updatedAtUtc,
+                labels(fields.path("labels")),
+                description(fields.path("description")),
+                components(fields.path("components"))
         );
+    }
+
+    private List<String> labels(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return List.of();
+        }
+        if (!node.isArray()) {
+            throw providerResponseInvalid();
+        }
+        List<String> labels = new ArrayList<>();
+        for (JsonNode label : node) {
+            if (!label.isTextual()) {
+                throw providerResponseInvalid();
+            }
+            labels.add(label.asText());
+        }
+        return List.copyOf(labels);
+    }
+
+    private List<TaskComponentSnapshot> components(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return List.of();
+        }
+        if (!node.isArray()) {
+            throw providerResponseInvalid();
+        }
+        List<TaskComponentSnapshot> components = new ArrayList<>();
+        for (JsonNode component : node) {
+            if (!component.isObject()) {
+                throw providerResponseInvalid();
+            }
+            components.add(new TaskComponentSnapshot(
+                    requiredText(component, "id"),
+                    requiredText(component, "name")
+            ));
+        }
+        return List.copyOf(components);
+    }
+
+    private String description(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return null;
+        }
+        if (node.isTextual()) {
+            return node.asText();
+        }
+        if (!node.isObject()) {
+            throw providerResponseInvalid();
+        }
+        StringBuilder text = new StringBuilder();
+        appendAdfText(node, text);
+        return text.toString();
+    }
+
+    private void appendAdfText(JsonNode node, StringBuilder text) {
+        JsonNode value = node.path("text");
+        if (!value.isMissingNode() && !value.isNull()) {
+            if (!value.isTextual()) {
+                throw providerResponseInvalid();
+            }
+            text.append(value.asText());
+        }
+        JsonNode content = node.path("content");
+        if (content.isMissingNode() || content.isNull()) {
+            return;
+        }
+        if (!content.isArray()) {
+            throw providerResponseInvalid();
+        }
+        for (JsonNode child : content) {
+            if (!child.isObject()) {
+                throw providerResponseInvalid();
+            }
+            appendAdfText(child, text);
+        }
     }
 
     private JsonNode first(JsonNode node) {

@@ -12,6 +12,7 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.saga.be.config.JiraIntegrationProperties;
 import com.saga.be.config.JiraTimeZoneProperties;
+import com.saga.be.entity.value.TaskComponentSnapshot;
 import com.saga.be.exception.IntegrationException;
 import java.net.URI;
 import java.net.URLDecoder;
@@ -266,6 +267,9 @@ class JiraProviderClientImplTest {
                     .contains("project = SDP")
                     .contains("updated >= \"2026-07-31 00:25\"")
                     .contains("updated < \"2026-07-31 00:32\"")
+                    .contains("labels")
+                    .contains("components")
+                    .contains("description")
                     .doesNotContain(":57")
                     .doesNotContain(":02")
                     .doesNotContainPattern(
@@ -303,6 +307,123 @@ class JiraProviderClientImplTest {
         assertThat(page.last()).isTrue();
         assertThat(page.nextPageToken()).isNull();
         fixture.server.verify();
+    }
+
+    @Test
+    void parsesMissingNullAndEmptyLabelsAsEmptyImmutableLists() {
+        assertThat(searchFirstIssue(null).labels()).isEmpty();
+        assertThat(searchFirstIssue("null").labels()).isEmpty();
+        assertThat(searchFirstIssue("[]").labels()).isEmpty();
+    }
+
+    @Test
+    void parsesOneAndMultipleLabelsWithoutChangingTheirValues() {
+        assertThat(searchFirstIssue("[\"Backend\"]").labels())
+                .containsExactly("Backend");
+        JiraIssueSnapshot multiple = searchFirstIssue("[\"UI Ready\",\"P1\",\"MiXeD\"]");
+        assertThat(multiple.labels())
+                .containsExactly("UI Ready", "P1", "MiXeD");
+        assertThrows(UnsupportedOperationException.class,
+                () -> multiple.labels().add("must-not-mutate"));
+    }
+
+    @Test
+    void rejectsNonStringJiraLabelValues() {
+        IntegrationException exception = assertThrows(
+                IntegrationException.class,
+                () -> searchFirstIssue("[{\"name\":\"not-a-string\"}]")
+        );
+
+        assertEquals("JIRA_RESPONSE_INVALID", exception.getCode());
+    }
+
+    @Test
+    void parsesMissingNullAndEmptyComponentsAsEmptyImmutableLists() {
+        assertThat(searchFirstIssueWithRaw(null, null, null).components()).isEmpty();
+        assertThat(searchFirstIssueWithRaw(null, "null", null).components()).isEmpty();
+        assertThat(searchFirstIssueWithRaw(null, "[]", null).components()).isEmpty();
+    }
+
+    @Test
+    void parsesAndPreservesComponentIdAndNameSnapshots() {
+        JiraIssueSnapshot issue = searchFirstIssueWithRaw(
+                null,
+                "[{\"id\":\"10\",\"name\":\"Backend\"},"
+                        + "{\"id\":\"20\",\"name\":\"UI\"}]",
+                null
+        );
+
+        assertThat(issue.components()).containsExactly(
+                new TaskComponentSnapshot("10", "Backend"),
+                new TaskComponentSnapshot("20", "UI")
+        );
+        assertThrows(UnsupportedOperationException.class,
+                () -> issue.components().add(new TaskComponentSnapshot("30", "Other")));
+    }
+
+    @Test
+    void rejectsInvalidComponentAndDescriptionShapes() {
+        assertEquals("JIRA_RESPONSE_INVALID", assertThrows(
+                IntegrationException.class,
+                () -> searchFirstIssueWithRaw(null, "[\"not-an-object\"]", null)
+        ).getCode());
+        assertEquals("JIRA_RESPONSE_INVALID", assertThrows(
+                IntegrationException.class,
+                () -> searchFirstIssueWithRaw(null, null, "{\"content\":\"not-an-array\"}")
+        ).getCode());
+    }
+
+    @Test
+    void convertsPlainTextAndAtlassianDocumentFormatDescriptionToSafeText() {
+        assertEquals("Plain description", searchFirstIssueWithRaw(
+                null,
+                null,
+                "\"Plain description\""
+        ).description());
+        assertEquals("Heading body", searchFirstIssueWithRaw(
+                null,
+                null,
+                "{\"type\":\"doc\",\"content\":[{\"type\":\"paragraph\","
+                        + "\"content\":[{\"type\":\"text\",\"text\":\"Heading \"},"
+                        + "{\"type\":\"text\",\"text\":\"body\"}]}]}"
+        ).description());
+    }
+
+    private JiraIssueSnapshot searchFirstIssue(String labelsJson) {
+        return searchFirstIssueWithRaw(labelsJson, null, null);
+    }
+
+    private JiraIssueSnapshot searchFirstIssueWithRaw(
+            String labelsJson,
+            String componentsJson,
+            String descriptionJson
+    ) {
+        Fixture fixture = fixture();
+        String labelsField = optionalJsonField("labels", labelsJson);
+        String componentsField = optionalJsonField("components", componentsJson);
+        String descriptionField = optionalJsonField("description", descriptionJson);
+        fixture.server.expect(request -> { }).andRespond(json("""
+                {"isLast":true,"issues":[{
+                  "id":"10452","key":"SDP-1",
+                  "fields":{"summary":"Labels test",
+                    "updated":"2026-07-31T00:30:57.360+0700"%s%s%s}
+                }]}
+                """.formatted(labelsField, componentsField, descriptionField)));
+
+        JiraIssueSnapshot issue = fixture.client.searchIssues(
+                "ACCESS_TOKEN_SECRET",
+                CLOUD_ID,
+                "SDP",
+                null,
+                Instant.parse("2026-07-31T00:31:02Z"),
+                null
+        ).issues().get(0);
+        fixture.server.verify();
+        return issue;
+    }
+
+    private String optionalJsonField(String name, String json) {
+        return json == null ? "" : ",\"" + name + "\":" + json;
     }
 
     @Test
