@@ -31,6 +31,7 @@ import com.saga.be.service.CourseService;
 import com.saga.be.service.SemesterService;
 import com.saga.be.service.SubjectService;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -133,9 +134,17 @@ public class LocalDemoDataSeeder implements ApplicationRunner {
         Team team = teamRepository.findByCourseIdAndName(course.getId(), TEAM_NAME)
                 .orElseGet(() -> teamRepository.save(Team.builder().course(course).name(TEAM_NAME).build()));
 
-        TeamMember membership = teamMemberRepository
-                .findByTeamIdAndStudentId(team.getId(), leader.getId())
-                .orElseGet(() -> TeamMember.builder().team(team).student(leader).build());
+        List<TeamMember> courseMemberships = teamMemberRepository
+                .findByStudentIdAndTeamCourseId(leader.getId(), course.getId());
+        if (courseMemberships.size() > 1) {
+            throw new IllegalStateException("Local demo leader has invalid multiple Team memberships in the demo Course");
+        }
+        TeamMember membership = courseMemberships.isEmpty()
+                ? TeamMember.builder().team(team).student(leader).build()
+                : courseMemberships.get(0);
+        if (!membership.getTeam().getId().equals(team.getId())) {
+            throw new IllegalStateException("Local demo leader already belongs to another Team in the demo Course");
+        }
         if (membership.getRoleInTeam() != RoleInTeam.LEADER) {
             membership.setRoleInTeam(RoleInTeam.LEADER);
             teamMemberRepository.save(membership);

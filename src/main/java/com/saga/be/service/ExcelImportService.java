@@ -23,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.InputStream;
+import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -85,20 +86,32 @@ public class ExcelImportService {
                     // Xác định Role trước
                     RoleInTeam role = leaderMark.equalsIgnoreCase("x") ? RoleInTeam.LEADER : RoleInTeam.MEMBER;
                     
-                    if (teamMemberRepository.findByTeamIdAndStudentId(
-                            team.getId(),
-                            student.getId()
-                    ).isEmpty()) {
+                    Student lockedStudent = studentRepository.findForTeamMembershipWriteById(student.getId())
+                            .orElseThrow(() -> new IdentityConflictException(
+                                    "Imported Student no longer exists while creating team membership"
+                            ));
+                    List<TeamMember> courseMemberships = teamMemberRepository
+                            .findByStudentIdAndTeamCourseId(lockedStudent.getId(), course.getId());
+                    if (courseMemberships.isEmpty()) {
                         TeamMember teamMember = TeamMember.builder()
                                 .team(team)
-                                .student(student)
+                                .student(lockedStudent)
                                 .roleInTeam(role)
                                 .build();
                         teamMemberRepository.save(teamMember);
+                    } else if (courseMemberships.size() == 1
+                            && courseMemberships.get(0).getTeam().getId().equals(team.getId())) {
+                        // Exact Student + Team import is idempotent and must not overwrite its role.
+                    } else {
+                        throw new IdentityConflictException(
+                                "Student already belongs to another Team in this Course"
+                        );
                     }
-                    invitationOutboxService.enqueueForCourse(student, course);
+                    invitationOutboxService.enqueueForCourse(lockedStudent, course);
                 }
             }
+        } catch (IdentityConflictException exception) {
+            throw exception;
         } catch (Exception e) {
             throw new RuntimeException("Lỗi khi đọc file Excel: " + e.getMessage());
         }

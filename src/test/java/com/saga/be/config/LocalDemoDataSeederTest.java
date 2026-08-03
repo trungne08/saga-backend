@@ -31,6 +31,7 @@ import com.saga.be.service.ClassService;
 import com.saga.be.service.CourseService;
 import com.saga.be.service.SemesterService;
 import com.saga.be.service.SubjectService;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
@@ -135,8 +136,10 @@ class LocalDemoDataSeederTest {
         when(teamRepository.findByCourseIdAndName(course.getId(), LocalDemoDataSeeder.TEAM_NAME))
                 .thenReturn(Optional.empty(), Optional.of(team));
         when(teamRepository.save(any(Team.class))).thenReturn(team);
-        when(teamMemberRepository.findByTeamIdAndStudentId(team.getId(), leader.getId()))
-                .thenAnswer(invocation -> Optional.ofNullable(storedMembership.get()));
+        when(teamMemberRepository.findByStudentIdAndTeamCourseId(leader.getId(), course.getId()))
+                .thenAnswer(invocation -> storedMembership.get() == null
+                        ? List.of()
+                        : List.of(storedMembership.get()));
         when(teamMemberRepository.save(any(TeamMember.class))).thenAnswer(invocation -> {
             TeamMember saved = invocation.getArgument(0);
             storedMembership.set(saved);

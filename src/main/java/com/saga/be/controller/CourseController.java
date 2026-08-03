@@ -20,7 +20,6 @@ import org.springframework.http.MediaType;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Sort;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import java.util.UUID;
@@ -66,11 +65,13 @@ public class CourseController {
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size
     ) {
-        Sort.Direction direction = "desc".equalsIgnoreCase(sortDirection)
-                ? Sort.Direction.DESC
-                : Sort.Direction.ASC;
-        Pageable pageable = PageRequest.of(page, size, Sort.by(direction, sortBy));
-        return ResponseEntity.ok(courseService.getLecturersForCourseAssignment(keyword, pageable));
+        Pageable pageable = PageRequest.of(page, size);
+        return ResponseEntity.ok(courseService.getLecturersForCourseAssignment(
+                keyword,
+                sortBy,
+                sortDirection,
+                pageable
+        ));
     }
 
     @GetMapping("/{courseId}/students")
