@@ -8,6 +8,10 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.saga.be.entity.enums.AccountStatus;
+import com.saga.be.entity.enums.IdentityMappingStatus;
+import com.saga.be.entity.enums.IntegrationProvider;
+import com.saga.be.dto.response.IdentityConnectionResponse;
+import com.saga.be.dto.response.JiraAuthorizationResponse;
 import com.saga.be.exception.IntegrationException;
 import com.saga.be.integration.identity.PersonalIntegrationService;
 import com.saga.be.integration.project.ProjectIntegrationService;
@@ -55,6 +59,16 @@ class JiraOAuthCallbackServiceTest {
     void dispatchesPersonalFlowOnlyFromConsumedServerState() {
         when(stateService.consumeAndResolve(session, principal, "state"))
                 .thenReturn(binding(OAuthFlow.PERSONAL_JIRA, null));
+        when(personalService.completeJiraCallback(
+                principal, "code", null, "127.0.0.1"
+        )).thenReturn(new IdentityConnectionResponse(
+                IntegrationProvider.JIRA,
+                IdentityMappingStatus.ACTIVE,
+                "Student",
+                null,
+                null,
+                null
+        ));
 
         callbackService.complete(
                 principal,
@@ -85,6 +99,9 @@ class JiraOAuthCallbackServiceTest {
         UUID projectId = UUID.randomUUID();
         when(stateService.consumeAndResolve(session, principal, "state"))
                 .thenReturn(binding(OAuthFlow.PROJECT_JIRA, projectId));
+        when(projectService.completeJiraCallback(
+                principal, projectId, session, "code", null
+        )).thenReturn(new JiraAuthorizationResponse(projectId, java.util.List.of()));
 
         callbackService.complete(
                 principal,

@@ -7,6 +7,7 @@ import com.saga.be.config.JiraIntegrationProperties;
 import com.saga.be.dto.request.GitHubRepositoriesLinkRequest;
 import com.saga.be.dto.request.JiraProjectLinkRequest;
 import com.saga.be.dto.response.GitHubInstallationResponse;
+import com.saga.be.dto.response.IntegrationCallbackResultResponse;
 import com.saga.be.dto.response.GitHubRepositoryResponse;
 import com.saga.be.dto.response.JiraAuthorizationResponse;
 import com.saga.be.dto.response.JiraSiteResponse;
@@ -490,6 +491,32 @@ public class ProjectIntegrationService {
         );
     }
 
+    public IntegrationCallbackResultResponse finishGitHubInstallationCallback(
+            SagaPrincipal principal,
+            UUID projectId,
+            HttpSession session,
+            String state,
+            String code,
+            String oauthError
+    ) {
+        authorization.requireProjectManager(principal, projectId);
+        limit(principal, "project-github-verify");
+        stateService.consume(
+                session,
+                principal,
+                OAuthFlow.PROJECT_GITHUB_INSTALLATION_VERIFY,
+                projectId,
+                state
+        );
+        return completeGitHubInstallationResult(
+                principal,
+                projectId,
+                session,
+                code,
+                oauthError
+        );
+    }
+
     public GitHubInstallationResponse finishGitHubInstallationFromProvider(
             SagaPrincipal principal,
             HttpSession session,
@@ -514,6 +541,61 @@ public class ProjectIntegrationService {
                 code,
                 oauthError
         );
+    }
+
+    public IntegrationCallbackResultResponse
+            finishGitHubInstallationFromProviderCallback(
+            SagaPrincipal principal,
+            HttpSession session,
+            String state,
+            String code,
+            String oauthError
+    ) {
+        OAuthStateService.StateBinding binding =
+                stateService.consumeWithResolvedTarget(
+                        session,
+                        principal,
+                        OAuthFlow.PROJECT_GITHUB_INSTALLATION_VERIFY,
+                        state
+                );
+        UUID projectId = binding.targetId();
+        authorization.requireProjectManager(principal, projectId);
+        limit(principal, "project-github-verify");
+        return completeGitHubInstallationResult(
+                principal,
+                projectId,
+                session,
+                code,
+                oauthError
+        );
+    }
+
+    private IntegrationCallbackResultResponse completeGitHubInstallationResult(
+            SagaPrincipal principal,
+            UUID projectId,
+            HttpSession session,
+            String code,
+            String oauthError
+    ) {
+        try {
+            return IntegrationCallbackResultResponse.projectGitHubSuccess(
+                    completeGitHubInstallation(
+                            principal,
+                            projectId,
+                            session,
+                            code,
+                            oauthError
+                    )
+            );
+        } catch (IntegrationException exception) {
+            return IntegrationCallbackResultResponse.failure(
+                    com.saga.be.entity.enums.IntegrationProvider.GITHUB,
+                    com.saga.be.dto.response.IntegrationCallbackFlow.PROJECT,
+                    projectId,
+                    exception.getCode(),
+                    exception.getMessage()
+            );
+        }
     }
 
     private URI startGitHubInstallationVerification(

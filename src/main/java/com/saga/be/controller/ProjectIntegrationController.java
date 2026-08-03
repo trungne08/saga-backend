@@ -8,6 +8,8 @@ import com.saga.be.dto.response.JiraAuthorizationResponse;
 import com.saga.be.dto.response.ProjectIntegrationsResponse;
 import com.saga.be.dto.response.SyncStatusResponse;
 import com.saga.be.integration.project.ProjectIntegrationService;
+import com.saga.be.integration.callback.IntegrationCallbackRedirectService;
+import com.saga.be.integration.callback.IntegrationCallbackResultStore;
 import com.saga.be.security.SagaPrincipal;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
@@ -33,13 +35,19 @@ public class ProjectIntegrationController {
 
     private final ProjectIntegrationService integrationService;
     private final IntegrationAvailability availability;
+    private final IntegrationCallbackResultStore resultStore;
+    private final IntegrationCallbackRedirectService callbackRedirectService;
 
     public ProjectIntegrationController(
             ProjectIntegrationService integrationService,
-            IntegrationAvailability availability
+            IntegrationAvailability availability,
+            IntegrationCallbackResultStore resultStore,
+            IntegrationCallbackRedirectService callbackRedirectService
     ) {
         this.integrationService = integrationService;
         this.availability = availability;
+        this.resultStore = resultStore;
+        this.callbackRedirectService = callbackRedirectService;
     }
 
     @GetMapping("/integrations")
@@ -133,7 +141,7 @@ public class ProjectIntegrationController {
     }
 
     @GetMapping("/github/callback")
-    public GitHubInstallationResponse githubCallback(
+    public ResponseEntity<Void> githubCallback(
             @AuthenticationPrincipal SagaPrincipal principal,
             @PathVariable UUID projectId,
             HttpSession session,
@@ -141,14 +149,17 @@ public class ProjectIntegrationController {
             @RequestParam(required = false) String code,
             @RequestParam(required = false, name = "error") String oauthError
     ) {
-        return integrationService.finishGitHubInstallation(
+        availability.requireGitHub();
+        String resultId = resultStore.store(session, principal,
+                integrationService.finishGitHubInstallationCallback(
                 principal,
                 projectId,
                 session,
                 state,
                 code,
                 oauthError
-        );
+        ));
+        return redirect(callbackRedirectService.callbackResultUri(resultId));
     }
 
     @PostMapping("/github/repositories")

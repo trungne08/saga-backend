@@ -5,6 +5,8 @@ import com.saga.be.dto.response.PersonalIntegrationsResponse;
 import com.saga.be.config.IntegrationAvailability;
 import com.saga.be.entity.enums.IntegrationProvider;
 import com.saga.be.integration.identity.PersonalIntegrationService;
+import com.saga.be.integration.callback.IntegrationCallbackRedirectService;
+import com.saga.be.integration.callback.IntegrationCallbackResultStore;
 import com.saga.be.security.SagaPrincipal;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
@@ -24,13 +26,19 @@ public class PersonalIntegrationController {
 
     private final PersonalIntegrationService integrationService;
     private final IntegrationAvailability availability;
+    private final IntegrationCallbackResultStore resultStore;
+    private final IntegrationCallbackRedirectService callbackRedirectService;
 
     public PersonalIntegrationController(
             PersonalIntegrationService integrationService,
-            IntegrationAvailability availability
+            IntegrationAvailability availability,
+            IntegrationCallbackResultStore resultStore,
+            IntegrationCallbackRedirectService callbackRedirectService
     ) {
         this.integrationService = integrationService;
         this.availability = availability;
+        this.resultStore = resultStore;
+        this.callbackRedirectService = callbackRedirectService;
     }
 
     @GetMapping
@@ -72,7 +80,7 @@ public class PersonalIntegrationController {
     }
 
     @GetMapping("/github/callback")
-    public IdentityConnectionResponse githubCallback(
+    public ResponseEntity<Void> githubCallback(
             @AuthenticationPrincipal SagaPrincipal principal,
             HttpSession session,
             @RequestParam(required = false) String state,
@@ -80,14 +88,17 @@ public class PersonalIntegrationController {
             @RequestParam(required = false, name = "error") String oauthError,
             HttpServletRequest request
     ) {
-        return integrationService.finishGitHub(
+        availability.requireGitHub();
+        String resultId = resultStore.store(session, principal,
+                integrationService.finishGitHubCallback(
                 principal,
                 session,
                 state,
                 code,
                 oauthError,
                 request.getRemoteAddr()
-        );
+        ));
+        return redirect(callbackRedirectService.callbackResultUri(resultId));
     }
 
     @DeleteMapping("/github")

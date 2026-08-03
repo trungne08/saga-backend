@@ -3,6 +3,7 @@ package com.saga.be.integration.identity;
 import com.saga.be.config.GitHubIntegrationProperties;
 import com.saga.be.config.JiraIntegrationProperties;
 import com.saga.be.dto.response.IdentityConnectionResponse;
+import com.saga.be.dto.response.IntegrationCallbackResultResponse;
 import com.saga.be.dto.response.PersonalIntegrationsResponse;
 import com.saga.be.entity.IdentityMap;
 import com.saga.be.entity.enums.IntegrationProvider;
@@ -152,6 +153,59 @@ public class PersonalIntegrationService {
                 null,
                 state
         );
+        return finishGitHubAfterState(
+                principal,
+                session,
+                code,
+                oauthError,
+                remoteAddress
+        );
+    }
+
+    public IntegrationCallbackResultResponse finishGitHubCallback(
+            SagaPrincipal principal,
+            HttpSession session,
+            String state,
+            String code,
+            String oauthError,
+            String remoteAddress
+    ) {
+        limit(principal, "personal-github-callback");
+        stateService.consume(
+                session,
+                principal,
+                OAuthFlow.PERSONAL_GITHUB,
+                null,
+                state
+        );
+        try {
+            return IntegrationCallbackResultResponse.personalSuccess(
+                    finishGitHubAfterState(
+                            principal,
+                            session,
+                            code,
+                            oauthError,
+                            remoteAddress
+                    )
+            );
+        } catch (IntegrationException exception) {
+            return IntegrationCallbackResultResponse.failure(
+                    IntegrationProvider.GITHUB,
+                    com.saga.be.dto.response.IntegrationCallbackFlow.PERSONAL,
+                    null,
+                    exception.getCode(),
+                    exception.getMessage()
+            );
+        }
+    }
+
+    private IdentityConnectionResponse finishGitHubAfterState(
+            SagaPrincipal principal,
+            HttpSession session,
+            String code,
+            String oauthError,
+            String remoteAddress
+    ) {
         requireConsent(code, oauthError);
 
         String userToken = gitHubClient.exchangeUserCode(
