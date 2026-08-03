@@ -5,9 +5,9 @@
 | Mục | Giá trị |
 |---|---|
 | Branch được audit | `main` |
-| Commit được audit | `52a8c71` (`chỉnh sửa lại logic student trong course và project trong một team`) |
+| Commit được audit | `c351ae9` (`cập nhật docs`) |
 | Ngày cập nhật | 2026-08-03 (Asia/Saigon, UTC+07:00) |
-| Working tree hiện tại | Chỉ sáu tài liệu checkpoint chưa commit; hardening Course roster/lecturer options, guard một Student/một Team/mỗi Course và integration/concurrency tests đã có tại HEAD `52a8c71`; không commit/push |
+| Working tree hiện tại | Có endpoint Student self-scoped, DTO, reuse service, integration test và sáu tài liệu chưa commit; không commit/push |
 | Phạm vi thay đổi của task | Source/config/test ở HEAD và working tree là bằng chứng mạnh nhất |
 
 ## 2. Đã hoàn thành
@@ -26,10 +26,10 @@
 |---|---|---|
 | Import authorization integration test | `-Dtest=CourseImportSecurityIntegrationTest test` | 13 tests, 0 failures/errors/skips; `BUILD SUCCESS` |
 | Existing Security integration test | `-Dtest=SecurityIntegrationTest test` (three repeated runs) | 13 tests/run, all pass |
-| Maven test suite (working tree hiện tại) | `./mvnw.cmd test` | 54 suites, 249 tests, 0 failures, 0 errors, 0 skipped; `BUILD SUCCESS` |
+| Maven test suite (working tree hiện tại) | `./mvnw.cmd test` | 55 suites, 257 tests, 0 failures, 0 errors, 0 skipped; `BUILD SUCCESS` |
 | Checkpoint trước Swagger-CSRF commit | mốc audit trước đó | 51 suites, 228 tests, 0 failures, 0 errors, 0 skipped; không phải số liệu hiện tại |
-| Source/test audit count | quét `src/main` và `src/test` | 13 REST controllers; 1 `@RestControllerAdvice`; 43 controller HTTP methods; 5 `@PreAuthorize`; 0 `@Secured`; 56 test source classes |
-| Roster/membership regression | targeted integration tests | 7 suites, 56 tests, 0 failures/errors/skips; gồm roster/options, import/security, provisioning, project authorization và concurrency guard |
+| Source/test audit count | quét `src/main` và `src/test` | 14 REST controllers; 1 `@RestControllerAdvice`; 44 controller HTTP methods; 6 `@PreAuthorize`; 0 `@Secured`; 57 test source classes |
+| Self-team/roster/security regression | targeted integration tests | 6 suites, 62 tests, 0 failures/errors/skips; gồm endpoint self-team, roster cũ, guard, project authorization, security và import |
 | Compile | Maven compile trong test lifecycle | 229 main source files và 44 test source files compile thành công |
 | Security/CSRF/CORS | `SecurityIntegrationTest` | 16 tests pass, gồm anonymous 401 cho protected API, role 403, CSRF, preflight và logout framework-managed |
 | Profile/OIDC | `AuthenticatedProfileServiceTest`, `OidcIdentityServiceTest`, security tests | pass trong Maven suite |
@@ -88,12 +88,12 @@ Không lưu username, password, token hoặc secret của tài khoản test tron
 
 ```text
 ĐÃ HOÀN THÀNH: OIDC/session/profile/roles; master data; team authorization; Jira/GitHub integration; CSRF/CORS; health/OpenAPI configuration.
-ĐÃ KIỂM CHỨNG: full working tree Maven 54 suites / 249 tests / 0 failures / 0 errors / 0 skipped; targeted roster/membership regression 56 tests pass.
+ĐÃ KIỂM CHỨNG: full working tree Maven 55 suites / 257 tests / 0 failures / 0 errors / 0 skipped; targeted self-team/roster/security regression 62 tests pass.
 ĐANG LÀM: Cập nhật tài liệu checkpoint theo source/test tại HEAD.
 CHƯA LÀM: Import production-ready validation/provider delivery; browser E2E localhost→Railway; session scaling/redeploy verification.
 VẤN ĐỀ ĐANG MỞ: Import validation/identity; third-party cookie; error contract; session store; hạ tầng Cognito/Railway còn TBD.
 BƯỚC TIẾP THEO: Chốt parser/error DTO, policy email exposure và provider email, chạy E2E cookie/CSRF.
-BASE HEAD và `origin/main`: `52a8c71`. WORKING TREE HIỆN CÓ: chỉ sáu Markdown chưa commit; hardening roster/options, membership guard và tests đã thuộc HEAD.
+BASE HEAD: `c351ae9`. WORKING TREE HIỆN CÓ: endpoint Student self-scoped, DTO, reuse service, integration test và sáu Markdown chưa commit.
 ```
 
 ## 10. Update — provisioning, invitation, roster và Swagger CSRF
@@ -113,4 +113,6 @@ BASE HEAD và `origin/main`: `52a8c71`. WORKING TREE HIỆN CÓ: chỉ sáu Mark
 - **ACCEPTED (Product Owner):** Student có thể ở nhiều Course nhưng tối đa một Team trong mỗi Course; role và Project độc lập theo Team/Course. Nhiều Team/Project cùng Course hợp lệ nếu mỗi Project thuộc Team khác; cùng Student ở hai Team của cùng Course là không hợp lệ.
 - **CONFIRMED tại HEAD `52a8c71`:** `ExcelImportService` là production write path duy nhất tạo TeamMember. Lock `PESSIMISTIC_WRITE` trên Student rồi query Student+Course: chưa có thì tạo; cùng Team idempotent không đổi role; Team khác cùng Course conflict 409, không move/delete/update membership; khác Course hợp lệ. Local seed không tạo dữ liệu trái rule.
 - **PARTIAL/TBD:** application concurrency guard được test bằng hai thread/hai transaction; database chưa có `UNIQUE(student_id, course_id)`. Roster trả email Student cho ADMIN/Lecturer owner và options trả email Lecturer cho ADMIN, nhưng business/UI justification vẫn TBD; response không chứa cognitoSub, version, token hay credential.
-- **Verification mới:** full Maven suite trên working tree: **54 suites, 249 tests, 0 failures, 0 errors, 0 skipped**. Không thay đổi Jira, GitHub, OAuth callback, role priority, session hay import authorization.
+- **CONFIRMED trên working tree:** `GET /api/me/courses/{courseId}/team/members` chỉ cho STUDENT; anonymous 401, ADMIN/LECTURER 403, không cần CSRF. Backend resolve Student từ `SagaPrincipal.localProfileId` và Team theo Student+Course; no membership/Course thiếu 404, legacy nhiều Team 409. Response trả resolved teamId cho FE dùng Project/integration flow, Project nullable và page members không email/cognitoSub/version/token.
+- **CONFIRMED:** endpoint roster cũ vẫn giữ ADMIN/LECTURER/STUDENT exact-Team authorization; page member được tái sử dụng trong `TeamRosterService`. Project LEADER/MEMBER authorization không đổi.
+- **Verification mới:** full Maven suite trên working tree: **55 suites, 257 tests, 0 failures, 0 errors, 0 skipped**. Không thay đổi Jira, GitHub, OAuth callback, role priority, session hay import authorization.

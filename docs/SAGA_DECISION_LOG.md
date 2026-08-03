@@ -2,7 +2,7 @@
 
 Tài liệu ghi lại quyết định đã được code/runtime fact chứng minh và các đề xuất còn mở. `ACCEPTED` không có nghĩa production đã được kiểm chứng; evidence của từng quyết định xác định phạm vi xác nhận.
 
-> Metadata audit: branch `main`, HEAD và `origin/main` thực tế `52a8c71` (`chỉnh sửa lại logic student trong course và project trong một team`). Source/test hardening đã thuộc HEAD; chỉ sáu tài liệu checkpoint chưa commit. Full Maven suite trong working tree hiện tại: 54 suites, 249 tests pass, 0 failures/errors/skips.
+> Metadata audit: branch `main`, HEAD thực tế `c351ae9` (`cập nhật docs`). Working tree có endpoint Student self-scoped, DTO, service reuse, integration test và sáu tài liệu chưa commit. Full Maven suite trong working tree hiện tại: 55 suites, 257 tests pass, 0 failures/errors/skips.
 
 ## DEC-001 — Dùng Spring Security OAuth2/OIDC và server-side session
 
@@ -271,3 +271,13 @@ Không có secret hoặc thông tin đăng nhập thật trong decision log này
 - Concurrency/database: test dùng hai thread và hai transaction độc lập, có latch/barrier/timeout, rồi query transaction mới và xác nhận đúng một membership. Application guard là CONFIRMED cho write path tuân thủ guard; database chưa có invariant trực tiếp `UNIQUE(student_id, course_id)`, nên enforcement DB là PARTIAL.
 - Email exposure: roster hiện trả email Student cho ADMIN/Lecturer owner và lecturer options trả email Lecturer cho ADMIN; actor ngoài scope bị authorization chặn, response không chứa `cognitoSub`, version, token hay credential. Business/UI justification cho hai email field vẫn TBD; quyết định này không chấp nhận policy email mới.
 - Evidence: `ExcelImportService#importStudentsToCourse`, `StudentRepository#findForTeamMembershipWriteById`, `TeamMemberRepository#findByStudentIdAndTeamCourseId`, `LocalDemoDataSeeder#seed`, `CourseTeamMembershipGuardIntegrationTest`, `CourseRosterAndLecturerOptionsIntegrationTest`.
+
+## DEC-025 — Student tự resolve Team trong Course qua endpoint self-scoped
+
+- Ngày: 2026-08-03
+- Trạng thái: ACCEPTED (Product Owner; implementation ở working tree chưa commit)
+- Quyết định: thêm `GET /api/me/courses/{courseId}/team/members` cho STUDENT, dùng browser session/SagaPrincipal và không nhận `studentId` hoặc `teamId`. Backend lấy Student từ `SagaPrincipal.localProfileId`, kiểm tra Course, rồi query tất cả TeamMember theo Student+Course.
+- Hệ quả: không có membership trả 404; đúng một membership trả teamId/teamName/role hiện tại, Project id/name nullable và `Page<TeamMemberResponse>`; legacy nhiều membership trả 409, không chọn Team đầu tiên hay sửa/xóa/merge dữ liệu. GET không cần CSRF. ADMIN/LECTURER 403, anonymous 401.
+- Reuse: endpoint gọi logic page members dùng chung trong `TeamRosterService`; endpoint roster cũ giữ nguyên contract ADMIN/LECTURER/STUDENT exact-Team. Project authorization LEADER/MEMBER không thay đổi.
+- Privacy: response không có email, `cognitoSub`, Student.version, session/CSRF/provider token hay credential. teamId được trả để FE đi tiếp flow Project/integration.
+- Evidence: `MyCourseTeamController`, `TeamRosterService#getCurrentStudentTeamMembers`, `TeamMemberRepository#findByStudentIdAndTeamCourseId`, `MyCourseTeamMembersIntegrationTest`, `TeamRosterSecurityIntegrationTest`.

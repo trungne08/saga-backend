@@ -753,6 +753,7 @@ header/secret đó.
 | --- | --- | --- | --- |
 | GET | `/api/v1/courses/{courseId}/students` | ADMIN mọi Course; LECTURER là instructor; anonymous 401; STUDENT/lecturer ngoài scope 403; Course thiếu 404 | `keyword`, `hasTeam=all|with|without`, `sortBy=studentCode|fullName|email|teamName|projectName`, `sortDirection=asc|desc`, `page`, `size` → `studentsWithTeam`/`studentsWithoutTeam` pages |
 | GET | `/api/v1/courses/instructors` | ADMIN; anonymous 401; LECTURER/STUDENT 403 | `keyword` chỉ trên fullName/email, `sortBy=fullName|email`, `sortDirection=asc|desc`, `page`, `size` → `Page<LecturerOptionResponse>` |
+| GET | `/api/me/courses/{courseId}/team/members` | STUDENT-only; anonymous 401; ADMIN/LECTURER 403 | backend tự resolve team; `page`, `size` → `MyCourseTeamMembersResponse`; 404 Course/no Team, 409 legacy nhiều Team |
 
 Cả hai là GET, cần browser session nhưng không cần CSRF. Giá trị filter/sort không
 hợp lệ trả 400. Roster filter/sort trước pagination; metadata được tính trên toàn bộ
@@ -769,3 +770,29 @@ không phải behavior hợp lệ. Roster trả email Student cho ADMIN/Lecturer
 lecturer options trả email Lecturer cho ADMIN. Actor ngoài scope bị authorization
 chặn. Business/UI justification cho hai email field vẫn TBD; không response nào trả
 `cognitoSub`, version, session, token hoặc credential.
+
+### Student self-scoped team trong Course
+
+FE dùng endpoint này khi Student cần xem Team/Course hiện tại mà chưa biết `teamId`:
+
+```ts
+type MyCourseTeamMembersResponse = {
+  courseId: string;
+  teamId: string;       // backend tự resolve; FE không gửi teamId
+  teamName: string;
+  roleInTeam: "LEADER" | "MEMBER" | "MENTOR";
+  project: { id: string; name: string } | null;
+  members: Page<TeamMemberResponse>;
+};
+```
+
+`GET /api/me/courses/{courseId}/team/members?page=0&size=20` dùng browser
+session, không cần CSRF và không nhận `studentId` hay `teamId`. Backend lấy Student
+từ `SagaPrincipal.localProfileId`, query membership theo Student+Course rồi trả
+resolved `teamId`; FE có thể dùng id đó cho flow Project/integration hiện có. MEMBER
+và LEADER đều xem được team của mình; quyền tạo Project vẫn là rule riêng.
+
+`404` nghĩa Course không tồn tại hoặc Student chưa có Team trong Course. `409` nghĩa
+dữ liệu legacy không hợp lệ có nhiều Team cho cùng Student/Course; FE không tự chọn
+một Team để retry. Response và từng member không có email, `cognitoSub`, version,
+session, CSRF, token hay credential.

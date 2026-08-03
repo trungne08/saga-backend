@@ -1,6 +1,6 @@
 # Student import, invitation, and first-login provisioning
 
-Status: **PARTIAL** — HEAD và `origin/main` là `52a8c71` (`chỉnh sửa lại logic student trong course và project trong một team`); hardening Course roster/lecturer options, guard một Student/một Team/mỗi Course và integration/concurrency tests đã thuộc HEAD. Working tree chỉ có sáu Markdown chưa commit. Source/config/test là evidence. No secret is recorded here.
+Status: **PARTIAL** — HEAD là `c351ae9` (`cập nhật docs`); working tree có endpoint Student self-scoped, DTO, reuse service, integration test và sáu Markdown chưa commit. Source/config/test là evidence. No secret is recorded here.
 
 ## Import and access flow
 
@@ -82,4 +82,12 @@ migration status is **TBD**, not CONFIRMED.
 
 Invitation outbox serves delivery, not Course enrollment. Course roster must not use it as an enrollment source: current membership evidence is `TeamMember -> Team -> Course`. There is no modeled Student–Course relation for a Student without Team, so `studentsWithoutTeam`/`hasTeam=without` remain **PARTIAL** and empty; they must not be inferred from invitations.
 
-Tests cover matching/conflicts/status/idempotency, competitive bind, multi-course role preservation, import rollback/dedup, outbox template/dedup, concurrent claims, stale recovery, retry and delivery failure. `CourseTeamMembershipGuardIntegrationTest` also covers same-Team idempotency/role preservation, same-Course conflict 409, independent roles in different Courses, HTTP conflict and two independent competing transactions with a fresh final query. The current working-tree `./mvnw.cmd test` result is **54 suites / 249 tests / 0 failures / 0 errors / 0 skipped**; the working tree differs from HEAD `52a8c71` only in Markdown.
+`GET /api/me/courses/{courseId}/team/members` is a separate STUDENT self-scoped
+read API. It resolves the Student from `SagaPrincipal.localProfileId`, confirms the
+Course, and reads all TeamMember rows for Student+Course. No membership is 404;
+legacy multiple memberships are 409 and are not selected, deleted or merged. The
+single valid membership returns its resolved teamId, Team/Project summary and paged
+`TeamMemberResponse`; it does not create membership and does not use the invitation
+outbox as enrollment. GET uses the existing browser session and needs no CSRF.
+
+Tests cover matching/conflicts/status/idempotency, competitive bind, multi-course role preservation, import rollback/dedup, outbox template/dedup, concurrent claims, stale recovery, retry and delivery failure. `CourseTeamMembershipGuardIntegrationTest` also covers same-Team idempotency/role preservation, same-Course conflict 409, independent roles in different Courses, HTTP conflict and two independent competing transactions with a fresh final query. `MyCourseTeamMembersIntegrationTest` covers Student self-scope, no membership/legacy data, project nullable, privacy, pagination and OpenAPI. The current working-tree `./mvnw.cmd test` result is **55 suites / 257 tests / 0 failures / 0 errors / 0 skipped**.
