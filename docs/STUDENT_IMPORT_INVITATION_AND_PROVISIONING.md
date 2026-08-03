@@ -1,6 +1,6 @@
 # Student import, invitation, and first-login provisioning
 
-Status: **PARTIAL** — implemented on `main`, audited from HEAD `90b1852`; application code/test are clean and the working tree only has six uncommitted checkpoint documents. Source/config/test are the evidence. No secret is recorded here.
+Status: **PARTIAL** — HEAD và `origin/main` là `52a8c71` (`chỉnh sửa lại logic student trong course và project trong một team`); hardening Course roster/lecturer options, guard một Student/một Team/mỗi Course và integration/concurrency tests đã thuộc HEAD. Working tree chỉ có sáu Markdown chưa commit. Source/config/test là evidence. No secret is recorded here.
 
 ## Import and access flow
 
@@ -9,8 +9,9 @@ Status: **PARTIAL** — implemented on `main`, audited from HEAD `90b1852`; appl
 1. ADMIN may import any Course; LECTURER must be that Course's instructor; STUDENT is forbidden.
 2. Excel values are normalized: email is trimmed/lowercased and student code is trimmed/uppercased.
 3. Import reuses a Student only when normalized email and code resolve to the same record. A partial or split match fails the transaction safely.
-4. Import creates/reuses Team and TeamMember. The Student starts `PENDING` when newly created.
-5. Once a TeamMember exists, import enqueues a course invitation in the same transaction. Rollback creates neither membership nor invitation.
+4. Import creates/reuses Team and TeamMember. The Student starts `PENDING` when newly created. Student có thể thuộc nhiều Course nhưng tối đa một Team trong mỗi Course: cùng Team idempotent và không tự đổi role; Team khác trong cùng Course conflict 409; Course khác hợp lệ với role độc lập.
+5. Trước khi quyết định TeamMember, import lock Student bằng `PESSIMISTIC_WRITE`, rồi query membership theo Student+Course. Chỉ production write path này tạo TeamMember; local seed không tạo dữ liệu trái rule.
+6. Once a TeamMember exists/reuses, import enqueues a course invitation in the same transaction. Rollback creates neither membership nor invitation.
 
 Student is a global profile. Course, Team and LEADER/MEMBER/MENTOR are represented only by `Student -> TeamMember -> Team -> Course`. Provisioning never creates, deletes or changes those memberships; therefore a bound Student immediately sees the existing Course/Team/Project relations through the same Student id.
 
@@ -77,6 +78,8 @@ migration status is **TBD**, not CONFIRMED.
 
 **CONFIRMED:** provisioning keeps multi-course memberships and their per-Team LEADER/MEMBER roles intact; a leader's project permission remains scoped to that Team through existing authorization services.
 
-**PARTIAL/TBD:** Excel header/schema validation, preview, row-error DTO, production Cognito self-sign-up evidence, and a database unique constraint for `team_member(team_id, student_id)` are not implemented. The business rule for multiple Teams in one Course is unchanged and remains TBD.
+**PARTIAL/TBD:** Excel header/schema validation, preview, row-error DTO, production Cognito self-sign-up evidence, and a database invariant directly enforcing `UNIQUE(student_id, course_id)` are not implemented. Product Owner has accepted the business rule: multiple Courses are allowed, but a Student may not be in two Teams of the same Course. The application guard protects write paths that follow it; it does not automatically repair/delete/merge legacy invalid data.
 
-Tests cover matching/conflicts/status/idempotency, competitive bind, multi-course role preservation, import rollback/dedup, outbox template/dedup, concurrent claims, stale recovery, retry and delivery failure. The current source-HEAD `./mvnw.cmd test` result is **52 suites / 232 tests / 0 failures / 0 errors / 0 skipped**. The checkpoint before the Swagger-CSRF commit was **51 suites / 228 tests / 0 failures / 0 errors / 0 skipped**.
+Invitation outbox serves delivery, not Course enrollment. Course roster must not use it as an enrollment source: current membership evidence is `TeamMember -> Team -> Course`. There is no modeled Student–Course relation for a Student without Team, so `studentsWithoutTeam`/`hasTeam=without` remain **PARTIAL** and empty; they must not be inferred from invitations.
+
+Tests cover matching/conflicts/status/idempotency, competitive bind, multi-course role preservation, import rollback/dedup, outbox template/dedup, concurrent claims, stale recovery, retry and delivery failure. `CourseTeamMembershipGuardIntegrationTest` also covers same-Team idempotency/role preservation, same-Course conflict 409, independent roles in different Courses, HTTP conflict and two independent competing transactions with a fresh final query. The current working-tree `./mvnw.cmd test` result is **54 suites / 249 tests / 0 failures / 0 errors / 0 skipped**; the working tree differs from HEAD `52a8c71` only in Markdown.

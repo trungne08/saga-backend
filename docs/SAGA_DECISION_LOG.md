@@ -2,7 +2,7 @@
 
 Tài liệu ghi lại quyết định đã được code/runtime fact chứng minh và các đề xuất còn mở. `ACCEPTED` không có nghĩa production đã được kiểm chứng; evidence của từng quyết định xác định phạm vi xác nhận.
 
-> Metadata audit: branch `main`, HEAD thực tế `90b1852` (`sửa lại lấy token vào api swagger`). Application code/test sạch tại HEAD; chỉ sáu tài liệu checkpoint chưa commit. Full Maven suite trên source hiện tại: 52 suites, 232 tests pass, 0 failures/errors/skips. Checkpoint trước Swagger-CSRF commit: 51 suites, 228 tests pass.
+> Metadata audit: branch `main`, HEAD và `origin/main` thực tế `52a8c71` (`chỉnh sửa lại logic student trong course và project trong một team`). Source/test hardening đã thuộc HEAD; chỉ sáu tài liệu checkpoint chưa commit. Full Maven suite trong working tree hiện tại: 54 suites, 249 tests pass, 0 failures/errors/skips.
 
 ## DEC-001 — Dùng Spring Security OAuth2/OIDC và server-side session
 
@@ -251,3 +251,23 @@ Không có secret hoặc thông tin đăng nhập thật trong decision log này
 - Runtime fact do người dùng cung cấp: deployment Railway từng fail vì schema thiếu `student.version`.
 - Quyết định: V6/V7 phải chạy trước Hibernate `ddl-auto=validate`; không ghi trạng thái production migration là CONFIRMED khi repository không chứa dashboard/log production.
 - Evidence: V6/V7 source migrations và `Student.version`; production log không có trong repository.
+
+## DEC-023 — Course roster dùng membership hiện tại, không dùng invitation outbox làm enrollment
+
+- Ngày: 2026-08-03
+- Trạng thái: PARTIAL
+- Quyết định: `GET /api/v1/courses/{courseId}/students` chỉ materialize row từ `TeamMember -> Team -> Course`. `student_course_invitation` là transactional outbox/event history, không phải nguồn enrollment hiện tại.
+- Hệ quả: `hasTeam` chỉ nhận `all`, `with`, `without`; do repository chưa có quan hệ Student–Course không Team, `without` hiện rỗng. Đây là giới hạn được nêu rõ, không tạo entity/migration enrollment mới.
+- Query: roster whitelist `studentCode`, `fullName`, `email`, `teamName`, `projectName`; lecturer options whitelist `fullName`, `email`; direction chỉ `asc`/`desc`; invalid trả 400. Lecturer keyword không còn tìm `cognitoSub`.
+- Evidence: `CourseService`, `CourseRosterAndLecturerOptionsIntegrationTest`.
+
+## DEC-024 — Một Student tối đa một Team trong mỗi Course
+
+- Ngày: 2026-08-03
+- Trạng thái: ACCEPTED (Product Owner; implementation tại HEAD `52a8c71`)
+- Bối cảnh lịch sử: trước quyết định này, rule nhiều Team trong một Course là TBD. Dữ liệu legacy không hợp lệ có thể vẫn tồn tại và chỉ được đọc không crash; không được xem là business contract hợp lệ.
+- Quyết định: Student có thể thuộc nhiều Course, nhưng trong mỗi Course tối đa một Team. `RoleInTeam` độc lập theo Team/Course; Student có thể tham gia Project khác nhau ở Course khác. Một Course có thể có nhiều Team; mỗi Team tối đa một Project; nhiều Team/Project trong cùng Course hợp lệ khi mỗi Project thuộc Team khác.
+- Write-path behavior: `ExcelImportService` là production write path duy nhất tạo TeamMember. Service lấy `PESSIMISTIC_WRITE` trên đúng Student row, sau đó query membership Student+Course. Không có membership thì tạo; đúng Team thì idempotent, không duplicate/không tự đổi role; Team khác cùng Course trả conflict 409 và không move/delete/update membership cũ; Course khác hợp lệ. Local seed phải không tạo dữ liệu trái rule.
+- Concurrency/database: test dùng hai thread và hai transaction độc lập, có latch/barrier/timeout, rồi query transaction mới và xác nhận đúng một membership. Application guard là CONFIRMED cho write path tuân thủ guard; database chưa có invariant trực tiếp `UNIQUE(student_id, course_id)`, nên enforcement DB là PARTIAL.
+- Email exposure: roster hiện trả email Student cho ADMIN/Lecturer owner và lecturer options trả email Lecturer cho ADMIN; actor ngoài scope bị authorization chặn, response không chứa `cognitoSub`, version, token hay credential. Business/UI justification cho hai email field vẫn TBD; quyết định này không chấp nhận policy email mới.
+- Evidence: `ExcelImportService#importStudentsToCourse`, `StudentRepository#findForTeamMembershipWriteById`, `TeamMemberRepository#findByStudentIdAndTeamCourseId`, `LocalDemoDataSeeder#seed`, `CourseTeamMembershipGuardIntegrationTest`, `CourseRosterAndLecturerOptionsIntegrationTest`.

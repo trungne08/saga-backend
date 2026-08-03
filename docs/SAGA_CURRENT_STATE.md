@@ -5,9 +5,9 @@
 | Mục | Giá trị |
 |---|---|
 | Branch được audit | `main` |
-| Commit được audit | `90b1852` (`sửa lại lấy token vào api swagger`) |
-| Ngày cập nhật | 2026-08-02 (Asia/Saigon, UTC+07:00) |
-| Working tree hiện tại | Chỉ sáu tài liệu checkpoint đang thay đổi chưa commit; application code và test sạch tại HEAD; không commit/push |
+| Commit được audit | `52a8c71` (`chỉnh sửa lại logic student trong course và project trong một team`) |
+| Ngày cập nhật | 2026-08-03 (Asia/Saigon, UTC+07:00) |
+| Working tree hiện tại | Chỉ sáu tài liệu checkpoint chưa commit; hardening Course roster/lecturer options, guard một Student/một Team/mỗi Course và integration/concurrency tests đã có tại HEAD `52a8c71`; không commit/push |
 | Phạm vi thay đổi của task | Source/config/test ở HEAD và working tree là bằng chứng mạnh nhất |
 
 ## 2. Đã hoàn thành
@@ -18,7 +18,7 @@
 - **CONFIRMED:** master-data Class/Course/Subject/Semester có API read/create; create được bảo vệ bằng ADMIN. Evidence: bốn controller master-data và `@PreAuthorize`.
 - **CONFIRMED:** Jira và GitHub có code OAuth/App, linking, webhook, sync/backfill, reconciliation và encrypted secret handling. Evidence: `integration/callback`, `integration/project`, `integration/provider`, `integration/webhook`, `integration/sync`, `IntegrationSecretCipher`.
 - **CONFIRMED:** MySQL/JPA là store domain chính; MongoDB lưu `SystemAuditLog`. Evidence: `application.properties`, entities/repositories.
-- **PARTIAL:** import Excel sinh viên có authorization course scope, transaction rollback, duplicate membership guard, identity bind an toàn và invitation outbox. Parser/header-preview/error DTO và database uniqueness/concurrency còn chưa hoàn chỉnh. Evidence: `CourseController#importStudents`, `CourseImportAuthorizationService`, `ExcelImportService#importStudentsToCourse`, `AuthenticatedProfileService`, `StudentInvitationOutboxService`.
+- **PARTIAL:** import Excel sinh viên có authorization course scope, transaction rollback, identity bind an toàn, invitation outbox và application guard một Student/một Team/mỗi Course. Parser/header-preview/error DTO và database invariant trực tiếp Student+Course chưa hoàn chỉnh. Evidence: `CourseController#importStudents`, `CourseImportAuthorizationService`, `ExcelImportService#importStudentsToCourse`, `AuthenticatedProfileService`, `StudentInvitationOutboxService`.
 
 ## 3. Đã kiểm chứng
 
@@ -26,9 +26,10 @@
 |---|---|---|
 | Import authorization integration test | `-Dtest=CourseImportSecurityIntegrationTest test` | 13 tests, 0 failures/errors/skips; `BUILD SUCCESS` |
 | Existing Security integration test | `-Dtest=SecurityIntegrationTest test` (three repeated runs) | 13 tests/run, all pass |
-| Maven test suite (source HEAD hiện tại) | `./mvnw.cmd test` | 52 suites, 232 tests, 0 failures, 0 errors, 0 skipped; `BUILD SUCCESS` |
+| Maven test suite (working tree hiện tại) | `./mvnw.cmd test` | 54 suites, 249 tests, 0 failures, 0 errors, 0 skipped; `BUILD SUCCESS` |
 | Checkpoint trước Swagger-CSRF commit | mốc audit trước đó | 51 suites, 228 tests, 0 failures, 0 errors, 0 skipped; không phải số liệu hiện tại |
-| Source/test audit count | quét `src/main` và `src/test` | 13 REST controllers; 1 `@RestControllerAdvice`; 41 controller HTTP methods; 5 `@PreAuthorize`; 0 `@Secured`; 54 test source classes |
+| Source/test audit count | quét `src/main` và `src/test` | 13 REST controllers; 1 `@RestControllerAdvice`; 43 controller HTTP methods; 5 `@PreAuthorize`; 0 `@Secured`; 56 test source classes |
+| Roster/membership regression | targeted integration tests | 7 suites, 56 tests, 0 failures/errors/skips; gồm roster/options, import/security, provisioning, project authorization và concurrency guard |
 | Compile | Maven compile trong test lifecycle | 229 main source files và 44 test source files compile thành công |
 | Security/CSRF/CORS | `SecurityIntegrationTest` | 16 tests pass, gồm anonymous 401 cho protected API, role 403, CSRF, preflight và logout framework-managed |
 | Profile/OIDC | `AuthenticatedProfileServiceTest`, `OidcIdentityServiceTest`, security tests | pass trong Maven suite |
@@ -38,7 +39,7 @@
 
 ## 4. Đang thực hiện
 
-- Chuẩn hóa ba tài liệu làm checkpoint/source-of-truth kỹ thuật cho các lượt tiếp theo.
+- Cập nhật sáu tài liệu làm checkpoint/source-of-truth kỹ thuật cho các lượt tiếp theo.
 - Import Excel ở trạng thái **PARTIAL**: scope authorization, identity binding và outbox đã hoàn thành; validation/parser và production email delivery chưa production-ready.
 
 ## 5. Chưa hoàn thành
@@ -87,12 +88,12 @@ Không lưu username, password, token hoặc secret của tài khoản test tron
 
 ```text
 ĐÃ HOÀN THÀNH: OIDC/session/profile/roles; master data; team authorization; Jira/GitHub integration; CSRF/CORS; health/OpenAPI configuration.
-ĐÃ KIỂM CHỨNG: Import authorization test 13/13 pass; SecurityIntegrationTest 16/16 pass khi chạy độc lập; Lambda Node 23 tests pass ở audit trước.
-ĐANG LÀM: Cập nhật tài liệu sau khi secure import.
+ĐÃ KIỂM CHỨNG: full working tree Maven 54 suites / 249 tests / 0 failures / 0 errors / 0 skipped; targeted roster/membership regression 56 tests pass.
+ĐANG LÀM: Cập nhật tài liệu checkpoint theo source/test tại HEAD.
 CHƯA LÀM: Import production-ready validation/provider delivery; browser E2E localhost→Railway; session scaling/redeploy verification.
 VẤN ĐỀ ĐANG MỞ: Import validation/identity; third-party cookie; error contract; session store; hạ tầng Cognito/Railway còn TBD.
-BƯỚC TIẾP THEO: Chốt parser/error DTO và provider email, chạy E2E cookie/CSRF.
-HEAD ĐÃ BAO GỒM: CourseController, ExcelImportService, CourseImportAuthorizationService và CourseImportSecurityIntegrationTest. WORKING TREE HIỆN CÓ: thay đổi chưa commit cho provisioning, invitation outbox, migration, test và docs.
+BƯỚC TIẾP THEO: Chốt parser/error DTO, policy email exposure và provider email, chạy E2E cookie/CSRF.
+BASE HEAD và `origin/main`: `52a8c71`. WORKING TREE HIỆN CÓ: chỉ sáu Markdown chưa commit; hardening roster/options, membership guard và tests đã thuộc HEAD.
 ```
 
 ## 10. Update — provisioning, invitation, roster và Swagger CSRF
@@ -104,6 +105,12 @@ HEAD ĐÃ BAO GỒM: CourseController, ExcelImportService, CourseImportAuthoriza
 - **CONFIRMED:** `POST /api/auth/logout` là Spring Security framework-managed, cần `X-XSRF-TOKEN`; CSRF hợp lệ trả 302 Cognito logout, thiếu/sai trả 403. Swagger fetch có thể báo `Failed to fetch` khi theo cross-origin redirect; browser dùng top-level form/navigation.
 - **CONFIRMED:** Swagger dùng `withCredentials`, cookie `XSRF-TOKEN` và interceptor same-origin chỉ cho POST/PUT/PATCH/DELETE; không có Bearer application API.
 - **CONFIRMED:** `GET /api/v1/courses/{courseId}/teams/{teamId}/members` trả `Page<TeamMemberResponse>`; ADMIN mọi Team, Lecturer Course mình dạy, Student đúng Team (LEADER/MEMBER), 401/403/404; response không có email/cognitoSub/version.
-- **PARTIAL/TBD:** Không có production mail provider trong `pom.xml` hay source; adapter mặc định đánh dấu failed an toàn. Parser/preview/error DTO, Cognito self-sign-up deployed và unique database constraint TeamMember còn mở.
+- **PARTIAL/TBD:** Không có production mail provider trong `pom.xml` hay source; adapter mặc định đánh dấu failed an toàn. Parser/preview/error DTO, Cognito self-sign-up deployed và database invariant trực tiếp `UNIQUE(student_id, course_id)` còn mở.
 - **Railway runtime fact (user-provided):** deployment từng fail vì database thiếu `student.version`; V6/V7 phải migrate trước Hibernate `validate`. Repository không có production log, nên trạng thái migration production là **TBD**, không CONFIRMED.
-- **Verification mới:** full Maven suite trên source HEAD: **52 suites, 232 tests, 0 failures, 0 errors, 0 skipped**. Mốc trước Swagger-CSRF commit là **51 suites, 228 tests**. Không thay đổi Jira, GitHub, OAuth callback, role priority, session hay import authorization.
+- **CONFIRMED tại HEAD `52a8c71`:** Course roster lấy `TeamMember -> Team -> Course`, ADMIN mọi Course/LECTURER instructor, anonymous 401, STUDENT 403, Course thiếu 404; GET không cần CSRF. Filter/sort chạy trước pagination, metadata tính trên toàn tập sau filter và tie-break theo id. `hasTeam=all|with|without`; sortBy `studentCode|fullName|email|teamName|projectName`; direction `asc|desc`; query invalid 400.
+- **PARTIAL:** `studentsWithoutTeam`/`hasTeam=without` hiện rỗng vì chưa có Student–Course enrollment độc lập; invitation outbox không phải enrollment source. Legacy invalid data nhiều Team cùng Course được đọc không crash nhưng không hợp lệ theo business rule.
+- **CONFIRMED tại HEAD `52a8c71`:** Lecturer options ADMIN-only; anonymous 401, LECTURER/STUDENT 403; keyword chỉ `fullName`/`email`, không tìm/trả `cognitoSub`; sortBy `fullName|email`, direction `asc|desc`, invalid query 400, GET không cần CSRF.
+- **ACCEPTED (Product Owner):** Student có thể ở nhiều Course nhưng tối đa một Team trong mỗi Course; role và Project độc lập theo Team/Course. Nhiều Team/Project cùng Course hợp lệ nếu mỗi Project thuộc Team khác; cùng Student ở hai Team của cùng Course là không hợp lệ.
+- **CONFIRMED tại HEAD `52a8c71`:** `ExcelImportService` là production write path duy nhất tạo TeamMember. Lock `PESSIMISTIC_WRITE` trên Student rồi query Student+Course: chưa có thì tạo; cùng Team idempotent không đổi role; Team khác cùng Course conflict 409, không move/delete/update membership; khác Course hợp lệ. Local seed không tạo dữ liệu trái rule.
+- **PARTIAL/TBD:** application concurrency guard được test bằng hai thread/hai transaction; database chưa có `UNIQUE(student_id, course_id)`. Roster trả email Student cho ADMIN/Lecturer owner và options trả email Lecturer cho ADMIN, nhưng business/UI justification vẫn TBD; response không chứa cognitoSub, version, token hay credential.
+- **Verification mới:** full Maven suite trên working tree: **54 suites, 249 tests, 0 failures, 0 errors, 0 skipped**. Không thay đổi Jira, GitHub, OAuth callback, role priority, session hay import authorization.

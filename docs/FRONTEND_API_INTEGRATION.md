@@ -746,3 +746,26 @@ header/secret đó.
    quay lại cùng browser session.
 8. Lấy contract response thực tế từ Swagger khi Springdoc bật, đặc biệt với
    các master-data endpoint trả JPA entity trực tiếp và `Page<T>`.
+
+## 12. Course roster và lecturer options
+
+| Method | Path | Quyền | Query/response |
+| --- | --- | --- | --- |
+| GET | `/api/v1/courses/{courseId}/students` | ADMIN mọi Course; LECTURER là instructor; anonymous 401; STUDENT/lecturer ngoài scope 403; Course thiếu 404 | `keyword`, `hasTeam=all|with|without`, `sortBy=studentCode|fullName|email|teamName|projectName`, `sortDirection=asc|desc`, `page`, `size` → `studentsWithTeam`/`studentsWithoutTeam` pages |
+| GET | `/api/v1/courses/instructors` | ADMIN; anonymous 401; LECTURER/STUDENT 403 | `keyword` chỉ trên fullName/email, `sortBy=fullName|email`, `sortDirection=asc|desc`, `page`, `size` → `Page<LecturerOptionResponse>` |
+
+Cả hai là GET, cần browser session nhưng không cần CSRF. Giá trị filter/sort không
+hợp lệ trả 400. Roster filter/sort trước pagination; metadata được tính trên toàn bộ
+tập sau filter và tie-break ổn định theo id. Roster chỉ dùng `TeamMember -> Team ->
+Course` làm bằng chứng Student thuộc Course; invitation outbox không phải enrollment
+source. `studentsWithoutTeam` và `hasTeam=without` hiện rỗng vì chưa có quan hệ
+enrollment Student–Course độc lập, nên FE không được quảng bá nhánh `without` như
+feature đầy đủ.
+
+Business rule đã được Product Owner chốt: Student có thể thuộc nhiều Course nhưng
+tối đa một Team trong mỗi Course; role và Project độc lập theo Team/Course. Legacy
+invalid data nhiều Team cùng Course có thể được đọc mà roster không crash, nhưng đó
+không phải behavior hợp lệ. Roster trả email Student cho ADMIN/Lecturer owner;
+lecturer options trả email Lecturer cho ADMIN. Actor ngoài scope bị authorization
+chặn. Business/UI justification cho hai email field vẫn TBD; không response nào trả
+`cognitoSub`, version, session, token hoặc credential.
