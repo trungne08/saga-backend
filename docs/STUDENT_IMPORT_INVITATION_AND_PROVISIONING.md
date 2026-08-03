@@ -77,6 +77,11 @@ For a linked Student, the message says they were added to Course/Team and asks t
 
 No URL is hard-coded; `/auth/callback` is not used to begin login. The repository does not contain a mail SDK, mail provider configuration or production adapter. Its default adapter marks delivery unavailable safely. Choosing/configuring a production provider is **TBD** and does not alter the transaction contract.
 
+## Update 2026-08-04 — callback redirect isolation
+
+- **CONFIRMED:** OAuth completion hands a safe short-lived session result to frontend via opaque `resultId`; it does not create or change Student, Course, TeamMember, invitation outbox, provisioning, migration or email data.
+- **CONFIRMED:** Personal result consumption is Student-only and the POST consume endpoint remains authenticated and CSRF-protected. No provider credential or OAuth state enters invitation/provisioning data.
+
 ## Migration and deployment status
 
 **CONFIRMED from source:** Flyway V6 and V7 must run before production Hibernate

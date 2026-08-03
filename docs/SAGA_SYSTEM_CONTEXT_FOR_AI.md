@@ -327,6 +327,12 @@ Có 62 test source classes. **CONFIRMED tại HEAD `200d866`:** full `./mvnw.cmd
 
 Evidence: `src/test/java/**`, `infra/lambda/cognito-account-linking/test/index.test.mjs`.
 
+## Update 2026-08-04 — integration callback result handoff
+
+- **CONFIRMED:** Four Jira/GitHub OAuth completion callbacks now return `302 Found` to the configured frontend integration callback URI. URL query contains only cryptographically random opaque `resultId`; provider code, state, token, secret and raw payload are never included.
+- **CONFIRMED:** `POST /api/integrations/callback-results/{resultId}/consume` is authenticated and uses global CSRF. Results are session/principal-bound, expire by configured TTL, are read-once, and project results recheck manager authorization while personal results remain Student-only.
+- **PARTIAL:** No shared Spring Session store is configured, so restart/multi-instance session continuity remains deployment TBD.
+
 ## 13. Known issues
 
 | Severity | Vấn đề | Evidence | Khuyến nghị |

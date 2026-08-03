@@ -121,6 +121,12 @@ BƯỚC TIẾP THEO: Chốt parser/error DTO, policy email exposure và provider
 BASE HEAD: `200d866`. Endpoint Student self-scoped đã được commit tại `250f514`; không phải dirty working-tree state.
 ```
 
+## Update 2026-08-04 — OAuth completion callback redirect
+
+- **CONFIRMED:** Jira common, personal GitHub, project GitHub and GitHub provider-alias completion callbacks return `302` to `app.integration.callback-redirect-uri` with only `resultId`.
+- **CONFIRMED:** Safe callback summaries are in current HTTP session for `app.integration.callback-result-ttl` (default `PT5M`), bounded to ten and consumed once by authenticated, CSRF-protected POST. Invalid/missing/replayed state still fails closed.
+- **TBD:** Browser E2E confirmation for cross-site cookie and multi-instance session behavior.
+
 ## 10. Update — provisioning, invitation, roster và Swagger CSRF
 
 - **CONFIRMED:** ADMIN import mọi Course; LECTURER chỉ import Course mình là instructor; STUDENT bị từ chối; mutation vẫn cần JSESSIONID và CSRF.

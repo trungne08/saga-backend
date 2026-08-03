@@ -586,10 +586,10 @@ navigation vì trả `302` đến OAuth provider.
 | --- | --- | --- | --- |
 | GET | `/api/me/integrations` | 200 `PersonalIntegrationsResponse` | Danh sách kết nối của chính user. |
 | GET | `/api/me/integrations/jira/connect` | 302 | Dùng `window.location.assign`; bắt đầu Jira OAuth. |
-| GET | `/api/integrations/jira/callback` | 200 JSON polymorphic | Provider callback; hiện trả JSON trực tiếp sau khi consume session state. Không gọi thủ công. |
+| GET | `/api/integrations/jira/callback` | 302 | Provider callback; redirects browser to the configured frontend callback with an opaque `resultId` only. Do not call it manually. |
 | DELETE | `/api/me/integrations/jira` | 204 | CSRF required. |
 | GET | `/api/me/integrations/github/connect` | 302 | Dùng browser navigation; bắt đầu GitHub OAuth. |
-| GET | `/api/me/integrations/github/callback` | 200 `IdentityConnectionResponse` JSON | Provider callback, hiện trả JSON trực tiếp; không gọi thủ công. |
+| GET | `/api/me/integrations/github/callback` | 302 | Provider callback redirect with an opaque `resultId`; no direct JSON response. |
 | DELETE | `/api/me/integrations/github` | 204 | CSRF required. |
 
 ```ts
@@ -603,11 +603,8 @@ Jira callback có response phụ thuộc OAuth flow: personal flow trả
 FE không tự truyền `state`, `code` hoặc `error`: chúng là query parameters do
 provider redirect trả về và được backend kiểm tra bằng `HttpSession` state.
 
-**CONFIRMED:** Jira/GitHub completion callback hiện trả JSON trực tiếp sau khi
-backend consume state session; không redirect về frontend sau completion.
-**RECOMMENDED, chưa implemented:** redirect callback về FE và expose một
-read-once result đã được consume từ session qua API riêng. FE không được giả định
-flow này đã tồn tại.
+**Historical behavior:** Jira/GitHub completion callbacks previously returned direct JSON after consuming session state. Current implementation redirects to frontend as documented below.
+**CONFIRMED:** completion callback redirects to frontend with only opaque `resultId`; the frontend consumes the safe, read-once session result via the dedicated POST API.
 
 Nếu Jira hoặc GitHub bị tắt ở backend, endpoint connect trả `503` với code
 `INTEGRATION_NOT_CONFIGURED`. Consent bị từ chối/cancel trả `400`
@@ -631,7 +628,7 @@ CSRF utility.
 | DELETE | `/api/projects/{projectId}/jira` | 204 | CSRF required. |
 | GET | `/api/projects/{projectId}/github/install` | 302 | Bắt đầu GitHub App install. |
 | GET | `/api/projects/{projectId}/github/setup` | 302 | GitHub setup callback route; provider/browser flow. |
-| GET | `/api/projects/{projectId}/github/callback` | 200 `GitHubInstallationResponse` | GitHub OAuth callback; hiện trả JSON trực tiếp. |
+| GET | `/api/projects/{projectId}/github/callback` | 302 | GitHub OAuth callback redirect with opaque `resultId`. |
 | POST | `/api/projects/{projectId}/github/repositories` | 200 `ProjectIntegrationsResponse` | Liên kết repository và yêu cầu initial backfill. |
 | DELETE | `/api/projects/{projectId}/github/repositories/{repositoryId}` | 204 | CSRF required. |
 | GET | `/api/projects/{projectId}/sync-status` | 200 `SyncStatusResponse` | Tối đa 20 job mới nhất của Jira/repository thuộc project. |
@@ -641,7 +638,7 @@ Provider callback aliases có cùng session flow:
 | Method | Path | Success |
 | --- | --- | --- |
 | GET | `/api/integrations/github/setup` | 302 |
-| GET | `/api/integrations/github/project/callback` | 200 `GitHubInstallationResponse` | Hiện trả JSON trực tiếp. |
+| GET | `/api/integrations/github/project/callback` | 302 | Redirect with opaque `resultId`. |
 
 ### Request/response bodies
 
@@ -823,6 +820,14 @@ và LEADER đều xem được team của mình; quyền tạo Project vẫn là
 dữ liệu legacy không hợp lệ có nhiều Team cho cùng Student/Course; FE không tự chọn
 một Team để retry. Response và từng member không có email, `cognitoSub`, version,
 session, CSRF, token hay credential.
+
+## OAuth callback result handoff (2026-08-04)
+
+After the provider returns to SAGA, each completion callback returns `302` to the configured frontend integration callback route. The URL contains exactly one query field, `resultId`; it never includes OAuth `code`, `state`, token, provider payload, secret or session id.
+
+Frontend keeps the browser `JSESSIONID`, reads `resultId`, obtains CSRF using the existing `/api/auth/csrf` flow, then calls `POST /api/integrations/callback-results/{resultId}/consume` with `X-XSRF-TOKEN`. The response is safe `IntegrationCallbackResultResponse`: provider, `PERSONAL`/`PROJECT`, nullable project id, success plus exactly one relevant safe response (`IdentityConnectionResponse`, `JiraAuthorizationResponse`, or `GitHubInstallationResponse`) or safe `errorCode`/`message`. It is read-once; missing, expired, consumed or wrong-session values return a controlled unavailable error.
+
+Deployment: `INTEGRATION_CALLBACK_REDIRECT_URI` is a required absolute HTTP(S) frontend URI with no userinfo/query/fragment. `INTEGRATION_CALLBACK_RESULT_TTL` defaults to `PT5M`; neither replaces `AUTH_SUCCESS_REDIRECT_URI`.
 
 ### Jira labels status
 

@@ -311,6 +311,13 @@ Không có secret hoặc thông tin đăng nhập thật trong decision log này
 - Hệ quả: không sửa OAuth callback, scope, credential/encryption, `SagaPrincipal`, JSESSIONID, CORS, CSRF hoặc hai webhook exemptions. Policy nêu data/use/sharing/retention/choices/security/children/changes nhưng không hiển thị secret, token hay credential.
 - Evidence: `PrivacyPolicyController#getPrivacyPolicy`, `static/privacy.html`, `SecurityConfig#securityFilterChain`, `PrivacyPolicyIntegrationTest`, `PrivacyPolicyControllerTest`, `SecurityIntegrationTest`, `SwaggerUiCsrfIntegrationTest`.
 
+## DEC-029 — OAuth completion callbacks hand off via session-bound opaque result
+
+- Ngày: 2026-08-04; trạng thái: ACCEPTED.
+- Jira/GitHub completion callbacks keep existing callback URL, state validation, exchange, authorization and webhook behavior, but return `302` to `app.integration.callback-redirect-uri` with only a secure random opaque `resultId` query parameter.
+- A safe success/failure summary is stored only in current `HttpSession`, bound to Cognito subject/local profile, TTL default `PT5M`, bounded and read-once through authenticated, CSRF-protected `POST /api/integrations/callback-results/{resultId}/consume`. Missing/replayed/invalid state remains fail-closed; consume rechecks Student or current project-manager access.
+- Tokens, authorization codes, state, secrets, session ids and raw provider payload are neither persisted nor exposed in URL/API/log contract.
+
 ## DEC-027 — Jira labels là Task snapshot replace-all, không phải Label domain riêng
 
 - Ngày: 2026-08-04

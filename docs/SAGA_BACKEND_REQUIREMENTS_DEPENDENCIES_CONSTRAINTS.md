@@ -493,6 +493,15 @@ Không có bằng chứng ADMIN thiếu override: `requireTeamManager` chứng m
 | 13–14 | `integration/provider`, `project`, `sync`, `webhook` | Jira/GitHub flows |
 | 16–17 | `src/test/java/*` và implementation | behavior/risk evidence |
 
+## Callback result contract update (2026-08-04)
+
+| Route | Authorization / CSRF | Result |
+|---|---|---|
+| Four Jira/GitHub OAuth completion callbacks | Existing authenticated browser session/state validation; GET | `302` configured frontend URI, query only `resultId` |
+| `POST /api/integrations/callback-results/{resultId}/consume` | Authenticated + CSRF; personal Student-only or current Project Manager | Safe read-once callback result; missing/expired/replayed/wrong-session uses controlled non-oracle error |
+
+`INTEGRATION_CALLBACK_REDIRECT_URI` is absolute HTTP(S), host-required and rejects userinfo/query/fragment. `INTEGRATION_CALLBACK_RESULT_TTL` is positive and defaults `PT5M`. Both are separate from `AUTH_SUCCESS_REDIRECT_URI`; provider URLs, scopes, exchange, session and webhook exemptions remain unchanged.
+
 ## Biên bản kiểm tra sau khi tạo file
 
 - Quét lại HEAD `200d866`: **15 REST controller có HTTP mapping, 45 controller HTTP methods**; thêm 1 `@RestControllerAdvice` (`GlobalExceptionHandler`) không có endpoint. `POST /api/auth/logout` là framework-managed ngoài controller scan.
