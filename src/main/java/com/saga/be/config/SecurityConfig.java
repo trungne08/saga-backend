@@ -104,6 +104,7 @@ public class SecurityConfig {
                             HttpMethod.GET,
                             "/",
                             "/index.html",
+                            "/privacy",
                             "/favicon.ico",
                             "/assets/**",
                             "/css/**",
