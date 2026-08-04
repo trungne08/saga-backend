@@ -64,7 +64,7 @@ public class SyncJobFinalizationService {
         if (!isTerminal(status)) {
             throw new IllegalArgumentException("Sync job status must be terminal");
         }
-        jobRepository.findById(jobId).ifPresent(job -> {
+        jobRepository.findForFinalizationById(jobId).ifPresent(job -> {
             if (isTerminal(job.getStatus())) {
                 return;
             }

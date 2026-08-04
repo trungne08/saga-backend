@@ -12,6 +12,7 @@ import com.saga.be.entity.enums.IntegrationStatus;
 import com.saga.be.entity.enums.WebhookReceiptStatus;
 import com.saga.be.integration.security.IntegrationSecretCipher;
 import com.saga.be.integration.sync.AutomaticSyncDispatcher;
+import com.saga.be.integration.sync.GitRepoStateService;
 import com.saga.be.repository.GitHubInstallationRepository;
 import com.saga.be.repository.GitRepoRepository;
 import com.saga.be.repository.WebhookReceiptRepository;
@@ -42,6 +43,7 @@ public class WebhookReceiptProcessor {
     private final ObjectMapper objectMapper;
     private final AutomaticSyncDispatcher dispatcher;
     private final IntegrationAvailability availability;
+    private final GitRepoStateService gitRepoStateService;
 
     public WebhookReceiptProcessor(
             WebhookReceiptRepository receiptRepository,
@@ -52,7 +54,8 @@ public class WebhookReceiptProcessor {
             IntegrationSecretCipher cipher,
             ObjectMapper objectMapper,
             AutomaticSyncDispatcher dispatcher,
-            IntegrationAvailability availability
+            IntegrationAvailability availability,
+            GitRepoStateService gitRepoStateService
     ) {
         this.receiptRepository = receiptRepository;
         this.claimService = claimService;
@@ -63,6 +66,7 @@ public class WebhookReceiptProcessor {
         this.objectMapper = objectMapper;
         this.dispatcher = dispatcher;
         this.availability = availability;
+        this.gitRepoStateService = gitRepoStateService;
     }
 
     @Async
@@ -170,10 +174,9 @@ public class WebhookReceiptProcessor {
         }
         removed.forEach(repository -> gitRepoRepository
                 .findByRepositoryId(repository.path("id").asLong())
-                .ifPresent(linked -> {
-                    linked.setConnectionStatus(IntegrationStatus.DEGRADED);
-                    gitRepoRepository.saveAndFlush(linked);
-                }));
+                .ifPresent(linked -> gitRepoStateService.markDegraded(
+                        linked.getId()
+                )));
         for (GitRepo linked : gitRepoRepository
                 .findByInstallationInstallationId(installationId)) {
             if (linked.getConnectionStatus() != IntegrationStatus.DISCONNECTED) {
@@ -187,8 +190,7 @@ public class WebhookReceiptProcessor {
                 .findByInstallationInstallationId(installationId)) {
             if (repository.getConnectionStatus()
                     != IntegrationStatus.DISCONNECTED) {
-                repository.setConnectionStatus(IntegrationStatus.DEGRADED);
-                gitRepoRepository.saveAndFlush(repository);
+                gitRepoStateService.markDegraded(repository.getId());
             }
         }
     }

@@ -48,7 +48,8 @@ class IntegrationReconciliationSchedulerTest {
                         installationRepository,
                         gitHubClient,
                         webhookMaintenance,
-                        dispatcher
+                        dispatcher,
+                        mock(GitRepoStateService.class)
                 );
 
         scheduler.reconcile();

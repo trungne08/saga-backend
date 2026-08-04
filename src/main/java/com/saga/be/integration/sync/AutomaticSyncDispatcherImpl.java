@@ -57,6 +57,8 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
     private final JiraIssueUpsertService jiraUpsertService;
     private final GitHubDataUpsertService gitHubUpsertService;
     private final GitHubInitialBackfillJobService initialBackfillJobService;
+    private final GitHubSyncJobService gitHubSyncJobService;
+    private final GitRepoStateService gitRepoStateService;
     private final JiraSyncJobService jiraSyncJobService;
     private final SyncJobFinalizationService syncJobFinalizationService;
     private final JiraBoardStateService jiraBoardStateService;
@@ -76,6 +78,8 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
             JiraIssueUpsertService jiraUpsertService,
             GitHubDataUpsertService gitHubUpsertService,
             GitHubInitialBackfillJobService initialBackfillJobService,
+            GitHubSyncJobService gitHubSyncJobService,
+            GitRepoStateService gitRepoStateService,
             JiraSyncJobService jiraSyncJobService,
             SyncJobFinalizationService syncJobFinalizationService,
             JiraBoardStateService jiraBoardStateService,
@@ -93,6 +97,8 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
                 jiraUpsertService,
                 gitHubUpsertService,
                 initialBackfillJobService,
+                gitHubSyncJobService,
+                gitRepoStateService,
                 jiraSyncJobService,
                 syncJobFinalizationService,
                 jiraBoardStateService,
@@ -113,6 +119,8 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
             JiraIssueUpsertService jiraUpsertService,
             GitHubDataUpsertService gitHubUpsertService,
             GitHubInitialBackfillJobService initialBackfillJobService,
+            GitHubSyncJobService gitHubSyncJobService,
+            GitRepoStateService gitRepoStateService,
             JiraSyncJobService jiraSyncJobService,
             SyncJobFinalizationService syncJobFinalizationService,
             JiraBoardStateService jiraBoardStateService,
@@ -130,6 +138,8 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
         this.jiraUpsertService = jiraUpsertService;
         this.gitHubUpsertService = gitHubUpsertService;
         this.initialBackfillJobService = initialBackfillJobService;
+        this.gitHubSyncJobService = gitHubSyncJobService;
+        this.gitRepoStateService = gitRepoStateService;
         this.jiraSyncJobService = jiraSyncJobService;
         this.syncJobFinalizationService = syncJobFinalizationService;
         this.jiraBoardStateService = jiraBoardStateService;
@@ -346,42 +356,46 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
         if (!availability.gitHubEnabled()) {
             return;
         }
-        SyncJobLog claimedJob = null;
-        if (jobType == SyncJobType.INITIAL_BACKFILL) {
-            claimedJob = initialBackfillJobService.claim(repositoryLocalId)
-                    .orElse(null);
-            if (claimedJob == null) {
-                return;
-            }
+        SyncJobLog job = (jobType == SyncJobType.INITIAL_BACKFILL
+                ? initialBackfillJobService.claim(repositoryLocalId)
+                : gitHubSyncJobService.claim(repositoryLocalId, jobType))
+                        .orElse(null);
+        if (job == null) {
+            return;
         }
-        GitRepo repository = gitRepoRepository
-                .findForSyncById(repositoryLocalId)
-                .orElse(null);
+        GitRepo repository;
+        try {
+            repository = gitRepoRepository
+                    .findForSyncById(repositoryLocalId)
+                    .orElse(null);
+        } catch (RuntimeException exception) {
+            finalizeGitHubJob(
+                    job,
+                    SyncJobStatus.FAILED,
+                    0,
+                    0,
+                    null,
+                    gitHubCategoryOf(exception),
+                    "LOAD_REPOSITORY"
+            );
+            return;
+        }
         if (
             repository == null
             || repository.getConnectionStatus() == IntegrationStatus.DISCONNECTED
         ) {
-            if (claimedJob != null) {
-                completeJob(
-                        claimedJob,
-                        SyncJobStatus.FAILED,
-                        0,
-                        0,
-                        null,
-                        "GITHUB_REPOSITORY_UNAVAILABLE"
-                );
-            }
+            finalizeGitHubJob(
+                    job,
+                    SyncJobStatus.FAILED,
+                    0,
+                    0,
+                    null,
+                    "GITHUB_REPOSITORY_UNAVAILABLE",
+                    "LOAD_REPOSITORY"
+            );
             return;
         }
         LocalDateTime cursorBefore = repository.getSyncCursor();
-        SyncJobLog job = claimedJob == null
-                ? startJob(
-                        "GITHUB",
-                        repositoryLocalId,
-                        jobType,
-                        cursorBefore
-                )
-                : claimedJob;
         int processed = 0;
         int failed = 0;
         LocalDateTime maxUpdated = cursorBefore;
@@ -505,80 +519,65 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
                 LocalDateTime cursorAfter = maxUpdated == null
                         ? LocalDateTime.now()
                         : maxUpdated;
-                completeGitHub(repository, cursorAfter);
-                completeJob(
-                        job,
-                        SyncJobStatus.COMPLETED,
-                        processed,
-                        0,
-                        cursorAfter,
-                        null
-                );
+                if (completeGitHub(repositoryLocalId, cursorAfter)) {
+                    finalizeGitHubJob(
+                            job,
+                            SyncJobStatus.COMPLETED,
+                            processed,
+                            0,
+                            cursorAfter,
+                            null,
+                            null
+                    );
+                } else {
+                    finalizeGitHubJob(
+                            job,
+                            SyncJobStatus.FAILED,
+                            processed,
+                            0,
+                            null,
+                            "GITHUB_REPOSITORY_UNAVAILABLE",
+                            "COMPLETE_REPOSITORY"
+                    );
+                }
             } else {
-                degradeGitHub(repository);
-                completeJob(
+                degradeGitHubSafely(repositoryLocalId, job, jobType,
+                        "DEGRADE_REPOSITORY");
+                finalizeGitHubJob(
                         job,
                         SyncJobStatus.PARTIAL_FAILURE,
                         processed,
                         failed,
                         null,
-                        "ITEM_UPSERT_FAILED"
+                        "ITEM_UPSERT_FAILED",
+                        "SYNC_ITEMS"
                 );
             }
         } catch (IntegrationException exception) {
-            degradeGitHub(repository);
-            completeJob(
+            degradeGitHubSafely(repositoryLocalId, job, jobType,
+                    "DEGRADE_REPOSITORY");
+            finalizeGitHubJob(
                     job,
                     SyncJobStatus.FAILED,
                     processed,
                     failed,
                     null,
-                    exception.getCode()
+                    exception.getCode(),
+                    "SYNC_ITEMS"
             );
         } catch (RuntimeException exception) {
-            degradeGitHub(repository);
-            completeJob(
+            degradeGitHubSafely(repositoryLocalId, job, jobType,
+                    "DEGRADE_REPOSITORY");
+            finalizeGitHubJob(
                     job,
                     SyncJobStatus.FAILED,
                     processed,
                     failed,
                     null,
-                    "UNEXPECTED_SYNC_FAILURE"
+                    "UNEXPECTED_SYNC_FAILURE",
+                    "SYNC_ITEMS"
             );
         }
-    }
-
-    private SyncJobLog startJob(
-            String targetSystem,
-            UUID targetId,
-            SyncJobType type,
-            LocalDateTime cursorBefore
-    ) {
-        return jobRepository.saveAndFlush(SyncJobLog.builder()
-                .targetSystem(targetSystem)
-                .targetId(targetId)
-                .jobType(type)
-                .status(SyncJobStatus.IN_PROGRESS)
-                .startedAt(utcNow())
-                .cursorBefore(cursorBefore)
-                .build());
-    }
-
-    private void completeJob(
-            SyncJobLog job,
-            SyncJobStatus status,
-            int processed,
-            int failed,
-            LocalDateTime cursorAfter,
-            String safeErrorCategory
-    ) {
-        job.setStatus(status);
-        job.setItemsProcessed(processed);
-        job.setItemsFailed(failed);
-        job.setCursorAfter(cursorAfter);
-        job.setErrorMessage(safeErrorCategory);
-        job.setCompletedAt(utcNow());
-        jobRepository.saveAndFlush(job);
     }
 
     private LocalDateTime utcNow() {
@@ -695,20 +694,87 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
         }
     }
 
-    private void completeGitHub(GitRepo repository, LocalDateTime cursor) {
-        repository.setSyncCursor(cursor);
-        repository.setLastSyncedAt(LocalDateTime.now());
-        repository.setConnectionStatus(IntegrationStatus.ACTIVE);
-        repository.setConsecutiveFailures(0);
-        gitRepoRepository.saveAndFlush(repository);
+    private boolean completeGitHub(
+            UUID repositoryId,
+            LocalDateTime cursor
+    ) {
+        return gitRepoStateService.complete(repositoryId, cursor);
     }
 
-    private void degradeGitHub(GitRepo repository) {
-        repository.setConsecutiveFailures(
-                repository.getConsecutiveFailures() + 1
+    private void degradeGitHubSafely(
+            UUID repositoryId,
+            SyncJobLog job,
+            SyncJobType jobType,
+            String stage
+    ) {
+        try {
+            gitRepoStateService.degrade(repositoryId);
+        } catch (RuntimeException exception) {
+            logGitHubFailure(
+                    "GitHub sync degradation failed",
+                    repositoryId,
+                    job,
+                    jobType,
+                    stage,
+                    exception
+            );
+        }
+    }
+
+    private void finalizeGitHubJob(
+            SyncJobLog job,
+            SyncJobStatus status,
+            int processed,
+            int failed,
+            LocalDateTime cursorAfter,
+            String errorCategory,
+            String failureStage
+    ) {
+        if (job == null || job.getId() == null) {
+            return;
+        }
+        try {
+            syncJobFinalizationService.finalizeJob(
+                    job.getId(),
+                    status,
+                    processed,
+                    failed,
+                    cursorAfter,
+                    errorCategory,
+                    failureStage
+            );
+        } catch (RuntimeException exception) {
+            logGitHubFailure(
+                    "GitHub sync finalization deferred",
+                    job.getTargetId(),
+                    job,
+                    job.getJobType(),
+                    "FINALIZE_JOB",
+                    exception
+            );
+        }
+    }
+
+    private void logGitHubFailure(
+            String message,
+            UUID repositoryId,
+            SyncJobLog job,
+            SyncJobType jobType,
+            String stage,
+            RuntimeException exception
+    ) {
+        Throwable root = rootCause(exception);
+        log.error(
+                "{}: repositoryId={}, jobId={}, jobType={}, stage={}, "
+                        + "exceptionClass={}, rootCauseClass={}",
+                message,
+                repositoryId,
+                job == null ? null : job.getId(),
+                jobType,
+                stage,
+                exception.getClass().getName(),
+                root.getClass().getName()
         );
-        repository.setConnectionStatus(IntegrationStatus.DEGRADED);
-        gitRepoRepository.saveAndFlush(repository);
     }
 
     private String jiraSearchJql(
@@ -753,6 +819,16 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
         }
         if (exception instanceof OptimisticLockingFailureException) {
             return "JIRA_BOARD_CONCURRENT_UPDATE";
+        }
+        return "UNEXPECTED_SYNC_FAILURE";
+    }
+
+    private String gitHubCategoryOf(RuntimeException exception) {
+        if (exception instanceof IntegrationException integrationException) {
+            return integrationException.getCode();
+        }
+        if (exception instanceof OptimisticLockingFailureException) {
+            return "GITHUB_REPOSITORY_CONCURRENT_UPDATE";
         }
         return "UNEXPECTED_SYNC_FAILURE";
     }

@@ -13,6 +13,7 @@ import com.saga.be.entity.enums.IntegrationProvider;
 import com.saga.be.entity.enums.WebhookReceiptStatus;
 import com.saga.be.integration.security.IntegrationSecretCipher;
 import com.saga.be.integration.sync.AutomaticSyncDispatcher;
+import com.saga.be.integration.sync.GitRepoStateService;
 import com.saga.be.repository.GitHubInstallationRepository;
 import com.saga.be.repository.GitRepoRepository;
 import com.saga.be.repository.WebhookReceiptRepository;
@@ -53,7 +54,8 @@ class WebhookReceiptProcessorTest {
                 cipher,
                 JsonMapper.builder().build(),
                 dispatcher,
-                availability
+                availability,
+                mock(GitRepoStateService.class)
         );
     }
 

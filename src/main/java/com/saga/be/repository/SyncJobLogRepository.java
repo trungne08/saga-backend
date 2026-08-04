@@ -6,6 +6,8 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import jakarta.persistence.LockModeType;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -36,4 +38,8 @@ public interface SyncJobLogRepository extends JpaRepository<SyncJobLog, UUID> {
             @Param("statuses") Collection<
                     com.saga.be.entity.enums.SyncJobStatus> statuses
     );
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select job from SyncJobLog job where job.id = :id")
+    Optional<SyncJobLog> findForFinalizationById(@Param("id") UUID id);
 }

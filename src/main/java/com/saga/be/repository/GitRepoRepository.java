@@ -33,6 +33,10 @@ public interface GitRepoRepository extends JpaRepository<GitRepo, UUID> {
     @Query("select repository from GitRepo repository where repository.id = :id")
     Optional<GitRepo> findForInitialBackfillClaimById(@Param("id") UUID id);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select repository from GitRepo repository where repository.id = :id")
+    Optional<GitRepo> findForStateUpdateById(@Param("id") UUID id);
+
     List<GitRepo> findByInstallationInstallationId(Long installationId);
 
     List<GitRepo> findByConnectionStatusIn(List<IntegrationStatus> statuses);

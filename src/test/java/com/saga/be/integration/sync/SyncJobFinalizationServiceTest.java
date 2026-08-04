@@ -40,7 +40,8 @@ class SyncJobFinalizationServiceTest {
                 .build();
         UUID jobId = UUID.randomUUID();
         job.setId(jobId);
-        when(jobRepository.findById(jobId)).thenReturn(Optional.of(job));
+        when(jobRepository.findForFinalizationById(jobId))
+                .thenReturn(Optional.of(job));
         SyncJobFinalizationService service = new SyncJobFinalizationService(
                 jobRepository,
                 FIXED_CLOCK
@@ -53,6 +54,29 @@ class SyncJobFinalizationServiceTest {
                 LocalDateTime.of(2026, 8, 4, 5, 13, 49),
                 job.getCompletedAt()
         );
+        verify(jobRepository).saveAndFlush(job);
+    }
+
+    @Test
+    void terminalJobIsNotOverwrittenByRepeatedFinalization() {
+        SyncJobLogRepository jobRepository = mock(SyncJobLogRepository.class);
+        SyncJobLog job = SyncJobLog.builder()
+                .status(SyncJobStatus.IN_PROGRESS)
+                .build();
+        UUID jobId = UUID.randomUUID();
+        job.setId(jobId);
+        when(jobRepository.findForFinalizationById(jobId))
+                .thenReturn(Optional.of(job));
+        SyncJobFinalizationService service = new SyncJobFinalizationService(
+                jobRepository,
+                FIXED_CLOCK
+        );
+
+        service.finalizeJob(jobId, SyncJobStatus.FAILED, 1, 0, null, "FIRST");
+        service.finalizeJob(jobId, SyncJobStatus.COMPLETED, 2, 0, null, null);
+
+        assertEquals(SyncJobStatus.FAILED, job.getStatus());
+        assertEquals("FIRST", job.getErrorCategory());
         verify(jobRepository).saveAndFlush(job);
     }
 }

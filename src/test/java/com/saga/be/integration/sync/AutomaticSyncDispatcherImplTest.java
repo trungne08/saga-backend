@@ -52,6 +52,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.OptimisticLockingFailureException;
 
 class AutomaticSyncDispatcherImplTest {
 
@@ -68,6 +69,8 @@ class AutomaticSyncDispatcherImplTest {
     private GitRepoRepository gitRepoRepository;
     private GitHubProviderClient gitHubClient;
     private GitHubInitialBackfillJobService initialBackfillJobService;
+    private GitHubSyncJobService gitHubSyncJobService;
+    private GitRepoStateService gitRepoStateService;
     private JiraSyncJobService jiraSyncJobService;
     private SyncJobFinalizationService syncJobFinalizationService;
     private JiraBoardStateService jiraBoardStateService;
@@ -89,6 +92,8 @@ class AutomaticSyncDispatcherImplTest {
         initialBackfillJobService = mock(
                 GitHubInitialBackfillJobService.class
         );
+        gitHubSyncJobService = mock(GitHubSyncJobService.class);
+        gitRepoStateService = mock(GitRepoStateService.class);
         jiraSyncJobService = mock(JiraSyncJobService.class);
         syncJobFinalizationService = mock(SyncJobFinalizationService.class);
         jiraBoardStateService = mock(JiraBoardStateService.class);
@@ -105,6 +110,8 @@ class AutomaticSyncDispatcherImplTest {
                 jiraUpsertService,
                 mock(GitHubDataUpsertService.class),
                 initialBackfillJobService,
+                gitHubSyncJobService,
+                gitRepoStateService,
                 jiraSyncJobService,
                 syncJobFinalizationService,
                 jiraBoardStateService,
@@ -483,20 +490,21 @@ class AutomaticSyncDispatcherImplTest {
                 "backend",
                 null
         )).thenReturn(List.of());
+        when(gitRepoStateService.complete(eq(repositoryId), any()))
+                .thenReturn(true);
 
         dispatcher.syncGitHub(repositoryId, SyncJobType.INITIAL_BACKFILL);
 
-        assertEquals(IntegrationStatus.ACTIVE, repository.getConnectionStatus());
-        assertNotNull(repository.getLastSyncedAt());
-        assertNotNull(repository.getSyncCursor());
-        assertEquals(SyncJobStatus.COMPLETED, job.getStatus());
-        assertEquals(
-                LocalDateTime.of(2026, 8, 4, 5, 13, 49),
-                job.getCompletedAt()
+        verify(gitRepoStateService).complete(eq(repositoryId), any());
+        verify(syncJobFinalizationService).finalizeJob(
+                eq(job.getId()),
+                eq(SyncJobStatus.COMPLETED),
+                eq(0),
+                eq(0),
+                any(),
+                isNull(),
+                isNull()
         );
-        assertEquals(0, job.getItemsProcessed());
-        assertEquals(0, job.getItemsFailed());
-        verify(jobRepository).saveAndFlush(job);
     }
 
     @Test
@@ -516,6 +524,17 @@ class AutomaticSyncDispatcherImplTest {
                 .connectionStatus(IntegrationStatus.ACTIVE)
                 .build();
         repository.setId(repositoryId);
+        SyncJobLog job = SyncJobLog.builder()
+                .targetSystem("GITHUB")
+                .targetId(repositoryId)
+                .jobType(SyncJobType.RECONCILIATION)
+                .status(SyncJobStatus.IN_PROGRESS)
+                .build();
+        job.setId(UUID.randomUUID());
+        when(gitHubSyncJobService.claim(
+                repositoryId,
+                SyncJobType.RECONCILIATION
+        )).thenReturn(Optional.of(job));
         when(gitRepoRepository.findForSyncById(repositoryId))
                 .thenReturn(Optional.of(repository));
         when(gitHubClient.pullRequests(123L, "saga", "backend", null))
@@ -528,20 +547,20 @@ class AutomaticSyncDispatcherImplTest {
                 .thenReturn(List.of());
         when(gitHubClient.reviewComments(123L, "saga", "backend", null))
                 .thenReturn(List.of());
+        when(gitRepoStateService.complete(eq(repositoryId), any()))
+                .thenReturn(true);
 
         dispatcher.syncGitHub(repositoryId, SyncJobType.RECONCILIATION);
 
-        ArgumentCaptor<SyncJobLog> saved = ArgumentCaptor.forClass(
-                SyncJobLog.class
-        );
-        verify(jobRepository, times(2)).saveAndFlush(saved.capture());
-        assertEquals(
-                LocalDateTime.of(2026, 8, 4, 5, 13, 49),
-                saved.getAllValues().get(0).getStartedAt()
-        );
-        assertEquals(
-                LocalDateTime.of(2026, 8, 4, 5, 13, 49),
-                saved.getAllValues().get(1).getCompletedAt()
+        verify(gitRepoStateService).complete(eq(repositoryId), any());
+        verify(syncJobFinalizationService).finalizeJob(
+                eq(job.getId()),
+                eq(SyncJobStatus.COMPLETED),
+                eq(0),
+                eq(0),
+                any(),
+                isNull(),
+                isNull()
         );
     }
 
@@ -551,7 +570,8 @@ class AutomaticSyncDispatcherImplTest {
         clearInvocations(
                 gitRepoRepository,
                 gitHubClient,
-                initialBackfillJobService
+                initialBackfillJobService,
+                gitHubSyncJobService
         );
 
         dispatcher.syncGitHub(
@@ -562,7 +582,8 @@ class AutomaticSyncDispatcherImplTest {
         verifyNoInteractions(
                 gitRepoRepository,
                 gitHubClient,
-                initialBackfillJobService
+                initialBackfillJobService,
+                gitHubSyncJobService
         );
     }
 
@@ -605,6 +626,7 @@ class AutomaticSyncDispatcherImplTest {
                 .status(SyncJobStatus.IN_PROGRESS)
                 .startedAt(LocalDateTime.now())
                 .build();
+        job.setId(UUID.randomUUID());
         when(initialBackfillJobService.claim(repositoryId))
                 .thenReturn(Optional.of(job));
         when(gitRepoRepository.findForSyncById(repositoryId))
@@ -621,15 +643,57 @@ class AutomaticSyncDispatcherImplTest {
                 SyncJobType.INITIAL_BACKFILL
         );
 
-        assertEquals(
-                IntegrationStatus.DEGRADED,
-                repository.getConnectionStatus()
+        verify(gitRepoStateService).degrade(repositoryId);
+        verify(syncJobFinalizationService).finalizeJob(
+                eq(job.getId()),
+                eq(SyncJobStatus.FAILED),
+                eq(0),
+                eq(0),
+                isNull(),
+                eq("UNEXPECTED_SYNC_FAILURE"),
+                eq("SYNC_ITEMS")
         );
-        assertEquals(1, repository.getConsecutiveFailures());
-        assertEquals(SyncJobStatus.FAILED, job.getStatus());
-        assertEquals("UNEXPECTED_SYNC_FAILURE", job.getErrorMessage());
-        assertNotNull(job.getCompletedAt());
-        verify(jobRepository).saveAndFlush(job);
+    }
+
+    @Test
+    void optimisticLockDuringGitHubDegradationStillFinalizesTheJob() {
+        UUID repositoryId = UUID.randomUUID();
+        GitHubInstallation installation = GitHubInstallation.builder()
+                .installationId(123L)
+                .installationStatus(GitHubInstallationStatus.SUSPENDED)
+                .build();
+        GitRepo repository = GitRepo.builder()
+                .installation(installation)
+                .connectionStatus(IntegrationStatus.ACTIVE)
+                .build();
+        repository.setId(repositoryId);
+        SyncJobLog job = SyncJobLog.builder()
+                .targetSystem("GITHUB")
+                .targetId(repositoryId)
+                .jobType(SyncJobType.RECONCILIATION)
+                .status(SyncJobStatus.IN_PROGRESS)
+                .build();
+        job.setId(UUID.randomUUID());
+        when(gitHubSyncJobService.claim(
+                repositoryId,
+                SyncJobType.RECONCILIATION
+        )).thenReturn(Optional.of(job));
+        when(gitRepoRepository.findForSyncById(repositoryId))
+                .thenReturn(Optional.of(repository));
+        doThrow(new OptimisticLockingFailureException("concurrent update"))
+                .when(gitRepoStateService).degrade(repositoryId);
+
+        dispatcher.syncGitHub(repositoryId, SyncJobType.RECONCILIATION);
+
+        verify(syncJobFinalizationService).finalizeJob(
+                eq(job.getId()),
+                eq(SyncJobStatus.FAILED),
+                eq(0),
+                eq(0),
+                isNull(),
+                eq("GITHUB_INSTALLATION_INACTIVE"),
+                eq("SYNC_ITEMS")
+        );
     }
 
     private JiraIssueSnapshot issue(String id, LocalDateTime updatedAt) {
