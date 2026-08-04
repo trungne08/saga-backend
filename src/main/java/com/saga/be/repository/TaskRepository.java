@@ -1,6 +1,7 @@
 package com.saga.be.repository;
 
 import com.saga.be.entity.Task;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -20,4 +21,7 @@ public interface TaskRepository extends JpaRepository<Task, UUID> {
             @Param("sprintId") UUID sprintId,
             @Param("studentId") UUID studentId
     );
+    List<Task> findByProjectId(UUID projectId);
+
+    List<Task> findByProjectIdAndAssigneeId(UUID projectId, UUID assigneeId);
 }

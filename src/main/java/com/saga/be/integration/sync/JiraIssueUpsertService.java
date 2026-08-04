@@ -14,6 +14,7 @@ import com.saga.be.integration.provider.JiraIssueSnapshot;
 import com.saga.be.repository.JiraBoardRepository;
 import com.saga.be.repository.SprintRepository;
 import com.saga.be.repository.TaskRepository;
+import com.saga.be.service.TeamContributionRefreshService;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.UUID;
@@ -27,17 +28,20 @@ public class JiraIssueUpsertService {
     private final TaskRepository taskRepository;
     private final SprintRepository sprintRepository;
     private final IdentityMappingService identityMappingService;
+    private final TeamContributionRefreshService teamContributionRefreshService;
 
     public JiraIssueUpsertService(
             JiraBoardRepository boardRepository,
             TaskRepository taskRepository,
             SprintRepository sprintRepository,
-            IdentityMappingService identityMappingService
+            IdentityMappingService identityMappingService,
+            TeamContributionRefreshService teamContributionRefreshService
     ) {
         this.boardRepository = boardRepository;
         this.taskRepository = taskRepository;
         this.sprintRepository = sprintRepository;
         this.identityMappingService = identityMappingService;
+        this.teamContributionRefreshService = teamContributionRefreshService;
     }
 
     @Transactional
@@ -91,6 +95,7 @@ public class JiraIssueUpsertService {
         task.setReporterExternalId(issue.reporterAccountId());
         task.setSprint(sprint(board, issue));
         taskRepository.saveAndFlush(task);
+        teamContributionRefreshService.refreshFromBoard(boardId);
         return true;
     }
 

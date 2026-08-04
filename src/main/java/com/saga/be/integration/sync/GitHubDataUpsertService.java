@@ -25,6 +25,7 @@ import com.saga.be.repository.GitIssueRepository;
 import com.saga.be.repository.GitRepoRepository;
 import com.saga.be.repository.PrReviewRepository;
 import com.saga.be.repository.PullRequestRepository;
+import com.saga.be.service.TeamContributionRefreshService;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.UUID;
@@ -47,6 +48,7 @@ public class GitHubDataUpsertService {
     private final PrReviewRepository reviewRepository;
     private final CommentRepository commentRepository;
     private final IdentityMappingService identityMappingService;
+    private final TeamContributionRefreshService teamContributionRefreshService;
 
     public GitHubDataUpsertService(
             GitRepoRepository gitRepoRepository,
@@ -55,7 +57,8 @@ public class GitHubDataUpsertService {
             PullRequestRepository pullRequestRepository,
             PrReviewRepository reviewRepository,
             CommentRepository commentRepository,
-            IdentityMappingService identityMappingService
+            IdentityMappingService identityMappingService,
+            TeamContributionRefreshService teamContributionRefreshService
     ) {
         this.gitRepoRepository = gitRepoRepository;
         this.issueRepository = issueRepository;
@@ -64,6 +67,7 @@ public class GitHubDataUpsertService {
         this.reviewRepository = reviewRepository;
         this.commentRepository = commentRepository;
         this.identityMappingService = identityMappingService;
+        this.teamContributionRefreshService = teamContributionRefreshService;
     }
 
     @Transactional
@@ -107,6 +111,7 @@ public class GitHubDataUpsertService {
         ));
         issue.setAssigneeExternalId(assigneeId);
         issueRepository.saveAndFlush(issue);
+        teamContributionRefreshService.refreshFromRepo(repoId);
         return IssueResult.UPSERTED;
     }
 
@@ -140,6 +145,7 @@ public class GitHubDataUpsertService {
         ));
         commit.setAuthorExternalId(authorId);
         commitRepository.saveAndFlush(commit);
+        teamContributionRefreshService.refreshFromRepo(repoId);
         return true;
     }
 
@@ -176,7 +182,9 @@ public class GitHubDataUpsertService {
                 authorId
         ));
         pull.setAuthorExternalId(authorId);
-        return pullRequestRepository.saveAndFlush(pull);
+        PullRequest savedPullRequest = pullRequestRepository.saveAndFlush(pull);
+        teamContributionRefreshService.refreshFromRepo(repoId);
+        return savedPullRequest;
     }
 
     @Transactional
@@ -209,6 +217,7 @@ public class GitHubDataUpsertService {
         ));
         review.setReviewerExternalId(reviewerId);
         reviewRepository.saveAndFlush(review);
+        teamContributionRefreshService.refreshFromRepo(repoId);
         return true;
     }
 
@@ -264,7 +273,8 @@ public class GitHubDataUpsertService {
             comment.setTargetType(TargetType.GITHUB_ISSUE);
         }
         commentRepository.saveAndFlush(comment);
-        return true;
+            teamContributionRefreshService.refreshFromRepo(repoId);
+            return true;
     }
 
     private GitRepo requireRepository(UUID repoId) {

@@ -1,6 +1,7 @@
 package com.saga.be.repository;
 
 import com.saga.be.entity.Sprint;
+import java.util.List;
 import java.util.Optional;
 import java.util.List;
 import java.util.UUID;
@@ -15,4 +16,8 @@ public interface SprintRepository extends JpaRepository<Sprint, UUID> {
     );
 
     List<Sprint> findByBoardProjectId(UUID projectId);
+    
+    List<Sprint> findByBoardProjectIdOrderByStartDateAsc(UUID projectId);
+
+    Optional<Sprint> findByIdAndBoardProjectId(UUID id, UUID projectId);
 }

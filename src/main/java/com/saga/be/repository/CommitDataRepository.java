@@ -1,6 +1,7 @@
 package com.saga.be.repository;
 
 import com.saga.be.entity.CommitData;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -18,4 +19,12 @@ public interface CommitDataRepository extends JpaRepository<CommitData, UUID> {
             @Param("projectId") UUID projectId,
             @Param("studentId") UUID studentId
     );
+    @Query("select commit from CommitData commit join commit.repo repo where commit.author.id = :authorId and repo.project.id = :projectId")
+    List<CommitData> findByAuthorIdAndProjectId(@Param("authorId") UUID authorId, @Param("projectId") UUID projectId);
+
+    @Query("select commit from CommitData commit join commit.repo repo where commit.author.id = :authorId and repo.project.id = :projectId and commit.task is not null")
+    List<CommitData> findByAuthorIdAndProjectIdAndTaskIsNotNull(@Param("authorId") UUID authorId, @Param("projectId") UUID projectId);
+
+    @Query("select commit from CommitData commit join commit.repo repo where repo.project.id = :projectId")
+    List<CommitData> findByProjectId(@Param("projectId") UUID projectId);
 }

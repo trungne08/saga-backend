@@ -53,6 +53,15 @@ public class PolicyOverrideRequest extends BaseEntity {
     @Column(name = "proposed_weight", nullable = true)
     private Float proposedWeight;
 
+    @Column(name = "proposed_code_weight", nullable = true)
+    private Float proposedCodeWeight;
+
+    @Column(name = "proposed_document_weight", nullable = true)
+    private Float proposedDocumentWeight;
+
+    @Column(name = "proposed_design_weight", nullable = true)
+    private Float proposedDesignWeight;
+
     @Column(name = "reason", columnDefinition = "TEXT")
     private String reason;
 

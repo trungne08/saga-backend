@@ -24,6 +24,7 @@ import com.saga.be.integration.provider.JiraIssueSnapshot;
 import com.saga.be.repository.JiraBoardRepository;
 import com.saga.be.repository.SprintRepository;
 import com.saga.be.repository.TaskRepository;
+import com.saga.be.service.TeamContributionRefreshService;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -37,6 +38,7 @@ class JiraIssueUpsertServiceTest {
     private JiraBoardRepository boardRepository;
     private TaskRepository taskRepository;
     private IdentityMappingService mappingService;
+    private TeamContributionRefreshService teamContributionRefreshService;
     private JiraIssueUpsertService service;
     private UUID boardId;
     private UUID projectId;
@@ -46,11 +48,13 @@ class JiraIssueUpsertServiceTest {
         boardRepository = mock(JiraBoardRepository.class);
         taskRepository = mock(TaskRepository.class);
         mappingService = mock(IdentityMappingService.class);
+        teamContributionRefreshService = mock(TeamContributionRefreshService.class);
         service = new JiraIssueUpsertService(
                 boardRepository,
                 taskRepository,
                 mock(SprintRepository.class),
-                mappingService
+                mappingService,
+                teamContributionRefreshService
         );
         boardId = UUID.randomUUID();
         projectId = UUID.randomUUID();

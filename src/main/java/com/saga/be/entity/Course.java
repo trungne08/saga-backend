@@ -42,4 +42,13 @@ public class Course extends BaseEntity {
 
     @Column(name = "name")
     private String name;
+
+    @Column(name = "code_contribution_weight", nullable = false)
+    private Double codeContributionWeight;
+
+    @Column(name = "document_contribution_weight", nullable = false)
+    private Double documentContributionWeight;
+
+    @Column(name = "design_contribution_weight", nullable = false)
+    private Double designContributionWeight;
 }
