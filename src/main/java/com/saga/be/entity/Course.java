@@ -5,6 +5,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
+import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -20,6 +21,7 @@ import lombok.Setter;
 @AllArgsConstructor
 @Builder
 public class Course extends BaseEntity {
+    private static final double DEFAULT_SLICE_WEIGHT = 100.0 / 3.0;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "subject_id")
@@ -51,4 +53,17 @@ public class Course extends BaseEntity {
 
     @Column(name = "design_contribution_weight", nullable = false)
     private Double designContributionWeight;
+
+    @PrePersist
+    void applyDefaultContributionWeights() {
+        if (codeContributionWeight == null) {
+            codeContributionWeight = DEFAULT_SLICE_WEIGHT;
+        }
+        if (documentContributionWeight == null) {
+            documentContributionWeight = DEFAULT_SLICE_WEIGHT;
+        }
+        if (designContributionWeight == null) {
+            designContributionWeight = DEFAULT_SLICE_WEIGHT;
+        }
+    }
 }

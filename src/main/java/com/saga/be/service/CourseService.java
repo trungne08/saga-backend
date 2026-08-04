@@ -14,6 +14,7 @@ import com.saga.be.entity.Student;
 import com.saga.be.entity.Subject;
 import com.saga.be.entity.Team;
 import com.saga.be.entity.TeamMember;
+import com.saga.be.service.contribution.ContributionSliceWeights;
 import com.saga.be.repository.ClassRepository;
 import com.saga.be.repository.CourseRepository;
 import com.saga.be.repository.LecturerRepository;
@@ -69,6 +70,7 @@ public class CourseService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Semester not found"));
         Lecturer instructor = lecturerRepository.findById(request.getInstructorId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Lecturer not found"));
+        ContributionSliceWeights defaultWeights = ContributionSliceWeights.fromCourse(null);
 
         Course course = Course.builder()
                 .courseCode(courseCode)
@@ -77,6 +79,9 @@ public class CourseService {
                 .clazz(clazz)
                 .semester(semester)
                 .instructor(instructor)
+                .codeContributionWeight(defaultWeights.codeValue())
+                .documentContributionWeight(defaultWeights.documentValue())
+                .designContributionWeight(defaultWeights.designValue())
                 .build();
 
         return courseRepository.save(course);

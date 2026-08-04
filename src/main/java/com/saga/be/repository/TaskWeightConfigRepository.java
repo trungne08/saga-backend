@@ -8,5 +8,5 @@ import org.springframework.stereotype.Repository;
 
 @Repository
 public interface TaskWeightConfigRepository extends JpaRepository<TaskWeightConfig, UUID> {
-    List<TaskWeightConfig> findByClassId(UUID classId);
+    List<TaskWeightConfig> findByCourse_Id(UUID courseId);
 }
