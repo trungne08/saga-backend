@@ -258,7 +258,10 @@ public class ProjectIntegrationService {
                         resource.cloudId()
                 )
                 .stream()
-                .filter(value -> value.id().equals(request.jiraProjectId()))
+                .filter(value -> matchesJiraProject(
+                        value,
+                        request.jiraProjectId()
+                ))
                 .findFirst()
                 .orElseThrow(() -> IntegrationException.conflict(
                         "JIRA_PROJECT_NOT_ACCESSIBLE",
@@ -353,6 +356,17 @@ public class ProjectIntegrationService {
             );
             throw exception;
         }
+    }
+
+    private boolean matchesJiraProject(
+            JiraProjectInfo jiraProject,
+            String requestedProjectIdOrKey
+    ) {
+        String requested = requestedProjectIdOrKey == null
+                ? ""
+                : requestedProjectIdOrKey.trim();
+        return jiraProject.id().equals(requested)
+                || jiraProject.key().equalsIgnoreCase(requested);
     }
 
     public void disconnectJira(
