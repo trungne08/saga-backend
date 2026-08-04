@@ -7,11 +7,14 @@ import com.saga.be.entity.enums.SyncJobStatus;
 import com.saga.be.entity.enums.SyncJobType;
 import com.saga.be.repository.JiraBoardRepository;
 import com.saga.be.repository.SyncJobLogRepository;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -29,7 +32,9 @@ public class JiraSyncJobService {
     private final SyncJobLogRepository jobRepository;
     private final SyncJobFinalizationService finalizationService;
     private final Duration staleAfter;
+    private final Clock clock;
 
+    @Autowired
     public JiraSyncJobService(
             JiraBoardRepository boardRepository,
             SyncJobLogRepository jobRepository,
@@ -37,10 +42,27 @@ public class JiraSyncJobService {
             @Value("${app.integrations.sync-job-stale-after:PT15M}")
             Duration staleAfter
     ) {
+        this(
+                boardRepository,
+                jobRepository,
+                finalizationService,
+                staleAfter,
+                Clock.systemUTC()
+        );
+    }
+
+    JiraSyncJobService(
+            JiraBoardRepository boardRepository,
+            SyncJobLogRepository jobRepository,
+            SyncJobFinalizationService finalizationService,
+            Duration staleAfter,
+            Clock clock
+    ) {
         this.boardRepository = boardRepository;
         this.jobRepository = jobRepository;
         this.finalizationService = finalizationService;
         this.staleAfter = staleAfter;
+        this.clock = clock;
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -64,7 +86,7 @@ public class JiraSyncJobService {
                 );
         if (!activeJobs.isEmpty()) {
             SyncJobLog activeJob = activeJobs.get(0);
-            if (!isStale(activeJob, LocalDateTime.now())) {
+            if (!isStale(activeJob, utcNow())) {
                 return Optional.empty();
             }
             finalizationService.finalizeJob(
@@ -86,13 +108,13 @@ public class JiraSyncJobService {
                 .targetId(boardId)
                 .jobType(jobType)
                 .status(SyncJobStatus.IN_PROGRESS)
-                .startedAt(LocalDateTime.now())
+                .startedAt(utcNow())
                 .cursorBefore(board.getSyncCursor())
                 .build()));
     }
 
     public void recoverStaleJobs() {
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = utcNow();
         for (SyncJobLog job : jobRepository.findByStatusIn(ACTIVE_STATUSES)) {
             if ("JIRA".equals(job.getTargetSystem()) && isStale(job, now)) {
                 finalizationService.finalizeJob(
@@ -116,5 +138,9 @@ public class JiraSyncJobService {
 
     private int valueOrZero(Integer value) {
         return value == null ? 0 : value;
+    }
+
+    private LocalDateTime utcNow() {
+        return LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
     }
 }

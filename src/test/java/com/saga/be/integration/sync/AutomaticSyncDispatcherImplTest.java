@@ -40,6 +40,7 @@ import com.saga.be.integration.provider.JiraProviderClient;
 import com.saga.be.repository.GitRepoRepository;
 import com.saga.be.repository.JiraBoardRepository;
 import com.saga.be.repository.SyncJobLogRepository;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -53,6 +54,11 @@ import org.mockito.ArgumentCaptor;
 import org.slf4j.LoggerFactory;
 
 class AutomaticSyncDispatcherImplTest {
+
+    private static final Clock FIXED_CLOCK = Clock.fixed(
+            Instant.parse("2026-08-04T05:13:49Z"),
+            ZoneOffset.UTC
+    );
 
     private JiraBoardRepository boardRepository;
     private SyncJobLogRepository jobRepository;
@@ -113,7 +119,8 @@ class AutomaticSyncDispatcherImplTest {
                         true,
                         Duration.ofMinutes(5)
                 ),
-                new JiraTimeZoneProperties("UTC")
+                new JiraTimeZoneProperties("UTC"),
+                FIXED_CLOCK
         );
         boardId = UUID.randomUUID();
         Project project = Project.builder().name("Project").build();
@@ -483,10 +490,59 @@ class AutomaticSyncDispatcherImplTest {
         assertNotNull(repository.getLastSyncedAt());
         assertNotNull(repository.getSyncCursor());
         assertEquals(SyncJobStatus.COMPLETED, job.getStatus());
-        assertNotNull(job.getCompletedAt());
+        assertEquals(
+                LocalDateTime.of(2026, 8, 4, 5, 13, 49),
+                job.getCompletedAt()
+        );
         assertEquals(0, job.getItemsProcessed());
         assertEquals(0, job.getItemsFailed());
         verify(jobRepository).saveAndFlush(job);
+    }
+
+    @Test
+    void githubReconciliationWritesStartAndCompletionUsingFixedUtcClock() {
+        UUID repositoryId = UUID.randomUUID();
+        Project project = Project.builder().name("Project").build();
+        project.setId(UUID.randomUUID());
+        GitHubInstallation installation = GitHubInstallation.builder()
+                .installationId(123L)
+                .installationStatus(GitHubInstallationStatus.ACTIVE)
+                .build();
+        GitRepo repository = GitRepo.builder()
+                .project(project)
+                .installation(installation)
+                .ownerLogin("saga")
+                .name("backend")
+                .connectionStatus(IntegrationStatus.ACTIVE)
+                .build();
+        repository.setId(repositoryId);
+        when(gitRepoRepository.findForSyncById(repositoryId))
+                .thenReturn(Optional.of(repository));
+        when(gitHubClient.pullRequests(123L, "saga", "backend", null))
+                .thenReturn(List.of());
+        when(gitHubClient.issues(123L, "saga", "backend", null))
+                .thenReturn(List.of());
+        when(gitHubClient.commits(123L, "saga", "backend", null))
+                .thenReturn(List.of());
+        when(gitHubClient.issueComments(123L, "saga", "backend", null))
+                .thenReturn(List.of());
+        when(gitHubClient.reviewComments(123L, "saga", "backend", null))
+                .thenReturn(List.of());
+
+        dispatcher.syncGitHub(repositoryId, SyncJobType.RECONCILIATION);
+
+        ArgumentCaptor<SyncJobLog> saved = ArgumentCaptor.forClass(
+                SyncJobLog.class
+        );
+        verify(jobRepository, times(2)).saveAndFlush(saved.capture());
+        assertEquals(
+                LocalDateTime.of(2026, 8, 4, 5, 13, 49),
+                saved.getAllValues().get(0).getStartedAt()
+        );
+        assertEquals(
+                LocalDateTime.of(2026, 8, 4, 5, 13, 49),
+                saved.getAllValues().get(1).getCompletedAt()
+        );
     }
 
     @Test

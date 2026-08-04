@@ -7,9 +7,12 @@ import com.saga.be.entity.enums.SyncJobStatus;
 import com.saga.be.entity.enums.SyncJobType;
 import com.saga.be.repository.GitRepoRepository;
 import com.saga.be.repository.SyncJobLogRepository;
+import java.time.Clock;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,13 +22,24 @@ public class GitHubInitialBackfillJobService {
 
     private final GitRepoRepository gitRepoRepository;
     private final SyncJobLogRepository jobRepository;
+    private final Clock clock;
 
+    @Autowired
     public GitHubInitialBackfillJobService(
             GitRepoRepository gitRepoRepository,
             SyncJobLogRepository jobRepository
     ) {
+        this(gitRepoRepository, jobRepository, Clock.systemUTC());
+    }
+
+    GitHubInitialBackfillJobService(
+            GitRepoRepository gitRepoRepository,
+            SyncJobLogRepository jobRepository,
+            Clock clock
+    ) {
         this.gitRepoRepository = gitRepoRepository;
         this.jobRepository = jobRepository;
+        this.clock = clock;
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -67,8 +81,12 @@ public class GitHubInitialBackfillJobService {
                 .targetId(repositoryLocalId)
                 .jobType(SyncJobType.INITIAL_BACKFILL)
                 .status(SyncJobStatus.IN_PROGRESS)
-                .startedAt(LocalDateTime.now())
+                .startedAt(utcNow())
                 .cursorBefore(repository.getSyncCursor())
                 .build()));
+    }
+
+    private LocalDateTime utcNow() {
+        return LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
     }
 }

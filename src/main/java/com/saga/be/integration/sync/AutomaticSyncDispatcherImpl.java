@@ -25,6 +25,7 @@ import com.saga.be.repository.GitRepoRepository;
 import com.saga.be.repository.JiraBoardRepository;
 import com.saga.be.repository.SyncJobLogRepository;
 import java.time.Duration;
+import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -33,6 +34,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
@@ -61,7 +63,9 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
     private final IntegrationAvailability availability;
     private final Duration overlapWindow;
     private final ZoneId jiraZoneId;
+    private final Clock clock;
 
+    @Autowired
     public AutomaticSyncDispatcherImpl(
             JiraBoardRepository jiraBoardRepository,
             GitRepoRepository gitRepoRepository,
@@ -78,6 +82,44 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
             IntegrationAvailability availability,
             IntegrationProperties properties,
             JiraTimeZoneProperties jiraTimeZoneProperties
+    ) {
+        this(
+                jiraBoardRepository,
+                gitRepoRepository,
+                jobRepository,
+                jiraCredentialService,
+                jiraClient,
+                gitHubClient,
+                jiraUpsertService,
+                gitHubUpsertService,
+                initialBackfillJobService,
+                jiraSyncJobService,
+                syncJobFinalizationService,
+                jiraBoardStateService,
+                availability,
+                properties,
+                jiraTimeZoneProperties,
+                Clock.systemUTC()
+        );
+    }
+
+    AutomaticSyncDispatcherImpl(
+            JiraBoardRepository jiraBoardRepository,
+            GitRepoRepository gitRepoRepository,
+            SyncJobLogRepository jobRepository,
+            JiraCredentialService jiraCredentialService,
+            JiraProviderClient jiraClient,
+            GitHubProviderClient gitHubClient,
+            JiraIssueUpsertService jiraUpsertService,
+            GitHubDataUpsertService gitHubUpsertService,
+            GitHubInitialBackfillJobService initialBackfillJobService,
+            JiraSyncJobService jiraSyncJobService,
+            SyncJobFinalizationService syncJobFinalizationService,
+            JiraBoardStateService jiraBoardStateService,
+            IntegrationAvailability availability,
+            IntegrationProperties properties,
+            JiraTimeZoneProperties jiraTimeZoneProperties,
+            Clock clock
     ) {
         this.jiraBoardRepository = jiraBoardRepository;
         this.gitRepoRepository = gitRepoRepository;
@@ -96,6 +138,7 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
                 ? Duration.ofMinutes(5)
                 : properties.overlapWindow();
         this.jiraZoneId = ZoneId.of(jiraTimeZoneProperties.timeZone());
+        this.clock = clock;
     }
 
     @Override
@@ -516,7 +559,7 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
                 .targetId(targetId)
                 .jobType(type)
                 .status(SyncJobStatus.IN_PROGRESS)
-                .startedAt(LocalDateTime.now())
+                .startedAt(utcNow())
                 .cursorBefore(cursorBefore)
                 .build());
     }
@@ -534,8 +577,12 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
         job.setItemsFailed(failed);
         job.setCursorAfter(cursorAfter);
         job.setErrorMessage(safeErrorCategory);
-        job.setCompletedAt(LocalDateTime.now());
+        job.setCompletedAt(utcNow());
         jobRepository.saveAndFlush(job);
+    }
+
+    private LocalDateTime utcNow() {
+        return LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
     }
 
     private void finalizeJiraFailure(

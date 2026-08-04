@@ -16,7 +16,10 @@ import com.saga.be.entity.enums.SyncJobStatus;
 import com.saga.be.entity.enums.SyncJobType;
 import com.saga.be.repository.GitRepoRepository;
 import com.saga.be.repository.SyncJobLogRepository;
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -31,13 +34,19 @@ class GitHubInitialBackfillJobServiceTest {
     private UUID repositoryId;
     private GitRepo repository;
 
+    private static final Clock FIXED_CLOCK = Clock.fixed(
+            Instant.parse("2026-08-04T05:13:49Z"),
+            ZoneOffset.UTC
+    );
+
     @BeforeEach
     void setUp() {
         gitRepoRepository = mock(GitRepoRepository.class);
         jobRepository = mock(SyncJobLogRepository.class);
         service = new GitHubInitialBackfillJobService(
                 gitRepoRepository,
-                jobRepository
+                jobRepository,
+                FIXED_CLOCK
         );
         repositoryId = UUID.randomUUID();
         Project project = Project.builder().name("Project").build();
@@ -68,6 +77,10 @@ class GitHubInitialBackfillJobServiceTest {
         assertEquals(SyncJobStatus.IN_PROGRESS, job.getStatus());
         assertEquals(SyncJobType.INITIAL_BACKFILL, job.getJobType());
         assertEquals(repositoryId, job.getTargetId());
+        assertEquals(
+                LocalDateTime.of(2026, 8, 4, 5, 13, 49),
+                job.getStartedAt()
+        );
     }
 
     @Test

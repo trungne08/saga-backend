@@ -3,7 +3,8 @@ package com.saga.be.dto.response;
 import com.saga.be.entity.SyncJobLog;
 import com.saga.be.entity.enums.SyncJobStatus;
 import com.saga.be.entity.enums.SyncJobType;
-import java.time.LocalDateTime;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 
@@ -16,8 +17,8 @@ public record SyncStatusResponse(
             String targetSystem,
             SyncJobType type,
             SyncJobStatus status,
-            LocalDateTime startedAt,
-            LocalDateTime completedAt,
+            Instant startedAt,
+            Instant completedAt,
             Integer itemsProcessed,
             Integer itemsFailed,
             String errorCategory,
@@ -29,8 +30,12 @@ public record SyncStatusResponse(
                     log.getTargetSystem(),
                     log.getJobType(),
                     log.getStatus(),
-                    log.getStartedAt(),
-                    log.getCompletedAt(),
+                    log.getStartedAt() == null
+                            ? null
+                            : log.getStartedAt().toInstant(ZoneOffset.UTC),
+                    log.getCompletedAt() == null
+                            ? null
+                            : log.getCompletedAt().toInstant(ZoneOffset.UTC),
                     log.getItemsProcessed(),
                     log.getItemsFailed(),
                     log.getErrorCategory() == null

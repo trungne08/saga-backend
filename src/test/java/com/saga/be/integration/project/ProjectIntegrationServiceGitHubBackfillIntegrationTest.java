@@ -325,6 +325,7 @@ class ProjectIntegrationServiceGitHubBackfillIntegrationTest {
                 project.getId()
         );
 
+        verify(authorization).requireProjectManager(principal, project.getId());
         assertEquals(1, response.recentJobs().size());
         assertEquals(job.getId(), response.recentJobs().get(0).id());
         assertEquals(
