@@ -7,14 +7,17 @@
 | Mục | Giá trị |
 |---|---|
 | Branch | `main` |
-| Commit | `200d866` (`cập nhật doc`); `07ffa38` là checkpoint Privacy lịch sử |
-| Thời điểm audit | 2026-08-03 (Asia/Saigon, UTC+07:00) |
-| Working tree | Sáu Markdown đang được đồng bộ. Jira labels/components/description, V8/V9 và Contribution đã được commit tại `b9968dc`; tài liệu trước đó tại `200d866`. |
+| Commit | `0bc30bedff6cef4f065e5eef559404987f53d045` (`0bc30be`); `200d866`, `a43f05d` và `07ffa38` là checkpoint lịch sử |
+| Thời điểm audit | 2026-08-04 (Asia/Saigon, UTC+07:00) |
+| Working tree | Chỉ sáu Markdown đang được đồng bộ trong task tài liệu; source/test/config/migration sạch so với HEAD. |
 | Java / Spring Boot | Java 17 / Spring Boot 4.1.0 |
 | Profile tìm thấy | mặc định, `local`, `prod`, `test` |
 | Phạm vi | `src/main`, `src/test`, `pom.xml`, cấu hình, Railway, Lambda Cognito, scripts và docs hiện hữu |
 
 Evidence: `pom.xml`; `src/main/resources/application*.properties`; `railway.json`.
+
+> Lưu ý lịch sử: các đoạn bên dưới có cụm “HEAD `200d866` hiện tại” phản ánh đúng
+> thời điểm audit cũ; HEAD hiện hành của tài liệu này là `0bc30be`.
 
 ### Privacy Policy public (2026-08-03)
 
@@ -220,7 +223,7 @@ Static GET `/`, `/index.html`, `/favicon.ico`, `/assets/**`, `/css/**`, `/js/**`
 
 ### Frontend integration contract
 
-**CONFIRMED:** dùng browser navigation cho login/authorization redirect, `fetch`/Axios có `credentials: "include"` cho API, không dùng `Authorization: Bearer`, không đọc/lưu OAuth JWT/token trong localStorage. Sau login gọi `/api/auth/me`, lấy CSRF qua cookie hoặc `GET /api/auth/csrf`; mutation gửi `X-XSRF-TOKEN`. Swagger UI cùng origin dùng global interceptor để bootstrap/read cookie và chỉ gắn header cho unsafe method. 401/403 trả JSON error, frontend phải xử lý theo status. Logout gọi `POST /api/auth/logout` có CSRF và browser nhận redirect Cognito. Jira/GitHub completion callbacks hiện trả JSON trực tiếp sau khi consume state session. **RECOMMENDED, chưa implemented:** callback redirect về FE với result được consume từ session qua API riêng. Evidence: `AuthController`, callback controllers, `SecurityConfig`, `SwaggerUiCsrfConfiguration`, `CognitoLogoutSuccessHandler`, `docs/FRONTEND_API_INTEGRATION.md`.
+**CONFIRMED:** dùng browser navigation cho login/authorization redirect, `fetch`/Axios có `credentials: "include"` cho API, không dùng `Authorization: Bearer`, không đọc/lưu OAuth JWT/token trong localStorage. Sau login gọi `/api/auth/me`, lấy CSRF qua cookie hoặc `GET /api/auth/csrf`; mutation gửi `X-XSRF-TOKEN`. Swagger UI cùng origin dùng global interceptor để bootstrap/read cookie và chỉ gắn header cho unsafe method. 401/403 trả JSON error, frontend phải xử lý theo status. Logout gọi `POST /api/auth/logout` có CSRF và browser nhận redirect Cognito. Jira/GitHub completion callbacks redirect `302` về FE với opaque `resultId`; FE consume kết quả an toàn qua endpoint POST authenticated có CSRF. Evidence: `AuthController`, callback controllers, `IntegrationCallbackResultController`, `SecurityConfig`, `SwaggerUiCsrfConfiguration`, `CognitoLogoutSuccessHandler`, `docs/FRONTEND_API_INTEGRATION.md`.
 
 **RUNTIME FACT DO NGƯỜI DÙNG CUNG CẤP:** frontend dev `http://localhost:3000`; production backend `https://saga-backend-production-3951.up.railway.app`; FE success route dự kiến `/auth/callback`; OIDC callback vẫn backend. Các giá trị chỉ hoạt động nếu environment `FRONTEND_ORIGINS`, `AUTH_SUCCESS_REDIRECT_URI`, cookie settings triển khai tương ứng.
 
@@ -298,7 +301,16 @@ Key classes: `PersonalIntegrationService`, `JiraOAuthCallbackService`, `ProjectI
 
 **CONFIRMED:** GitHub App/OAuth routes support personal connect and project installation/setup/callback, then repository link. `ProjectIntegrationAuthorizationService` and installation-owner checks constrain project flow; webhook HMAC signature is verified before receipt processing. Initial backfill/reconciliation dispatch GitHub snapshots into deduplicating upsert services; installation token uses App private key but value is never documented here.
 
-Key classes: `ProjectIntegrationService#beginGitHubInstallation/#linkGitHubRepositories`, `GitHubProviderClientImpl`, `GitHubWebhookSignatureVerifier`, `GitHubInitialBackfillJobService`, `GitHubDataUpsertService`, `WebhookReceiptProcessor`.
+**CONFIRMED:** `GitHubSyncJobService#claim` là claim dùng chung cho initial backfill và reconciliation. Transaction `REQUIRES_NEW` khóa đúng row `GitRepo` bằng `PESSIMISTIC_WRITE`, kiểm tra active job rồi mới tạo `SyncJobLog` `IN_PROGRESS`; cùng GitRepo có active non-stale job sẽ coalesce, GitRepo khác vẫn song song. `GitRepoStateService` reload/khóa row managed theo id cho complete/degrade; không save entity cũ đã đi qua provider I/O. `SyncJobFinalizationService` finalize bằng jobId trong `REQUIRES_NEW`, khóa job và giữ nguyên terminal state. Scheduler stale recovery cover GitHub job quá ngưỡng cấu hình.
+
+Key classes: `ProjectIntegrationService#beginGitHubInstallation/#linkGitHubRepositories`, `GitHubProviderClientImpl`, `GitHubWebhookSignatureVerifier`, `GitHubInitialBackfillJobService`, `GitHubSyncJobService`, `GitRepoStateService`, `SyncJobFinalizationService`, `SyncJobStaleRecoveryScheduler`, `GitHubDataUpsertService`, `WebhookReceiptProcessor`.
+
+### Timestamp sync vận hành (2026-08-04)
+
+- **CONFIRMED:** `SyncJobLog.startedAt`/`completedAt` vẫn là `LocalDateTime` và schema vẫn dùng `DATETIME(6)`, nhưng các write path production của SyncJobLog dùng `Clock.systemUTC()` và `LocalDateTime.ofInstant(..., ZoneOffset.UTC)`.
+- **CONFIRMED:** `SyncStatusResponse.Job` map hai field này sang `Instant`; JSON trả UTC offset rõ ràng, ví dụ `2026-08-04T05:13:49Z`. `null` vẫn là `null`.
+- **CONFIRMED:** không cộng cứng UTC+7, không đổi timezone JVM/Railway hay `JIRA_TIME_ZONE`. Các `LocalDateTime` nghiệp vụ khác không được suy diễn là UTC chỉ từ contract này.
+- **CONFIRMED:** quét source tại `0bc30be` có 16 REST controller chứa HTTP mapping, 46 controller HTTP methods và 72 test source Java classes. Full Maven: 70 suites / 299 tests / 0 failures / 0 errors / 0 skipped.
 
 ## 12. Deployment
 
@@ -426,6 +438,13 @@ DO NOT ASSUME: FE implementation, infrastructure wiring, deployment variables, U
 - **CONFIRMED:** backend kiểm tra Course tồn tại, lấy Student từ `SagaPrincipal.localProfileId`, query `TeamMember` theo Student+Course. Không có membership trả 404; đúng một membership thì trả Team, Project nullable và `Page<TeamMemberResponse>`; legacy nhiều membership trả 409 an toàn, không chọn Team đầu tiên hay sửa dữ liệu.
 - **CONFIRMED:** endpoint tái sử dụng đọc page của `TeamRosterService`; endpoint cũ `/api/v1/courses/{courseId}/teams/{teamId}/members` giữ nguyên authorization và response contract. Response mới trả `courseId`, resolved `teamId`, `teamName`, role hiện tại, Project id/name nullable và members; không trả email, `cognitoSub`, version, session, CSRF, token hay credential.
 
+## Cập nhật 2026-08-04 — độ tin cậy GitHub reconciliation
+
+- **CONFIRMED:** initial backfill, scheduler reconciliation và webhook-triggered reconciliation cùng dùng claim theo `GitRepo`; không có lock toàn bảng hay in-memory lock làm bảo vệ chính.
+- **CONFIRMED:** lỗi optimistic lock khi degrade được cô lập; finalization theo jobId vẫn được gọi độc lập. Không retry toàn bộ provider sync và không sửa thủ công `@Version`.
+- **PARTIAL:** source chứng minh stale detached `GitRepo` có thể tạo lỗi đã thấy; external writer production cụ thể vẫn cần runtime observation sau deploy.
+- **TBD:** row GitHub cũ trên production đã về terminal state hay chưa, cho tới khi quan sát DB/log sau deploy.
+
 ### Traceability index
 
 | Chủ đề | File/class chính | Method/điểm đọc |
@@ -438,6 +457,8 @@ DO NOT ASSUME: FE implementation, infrastructure wiring, deployment variables, U
 | Identity review | `IdentityMappingReviewService` | `requireReviewer` |
 | HTTP API | `src/main/java/com/saga/be/controller/*` | mappings listed in section 9 |
 | Jira/GitHub | `integration/project`, `provider`, `webhook`, `sync` | methods cited sections 14–15 |
+| UTC sync status | `SyncStatusResponse`, `JiraSyncJobService`, `GitHubSyncJobService`, `SyncJobFinalizationService` | `Job#from`, `claim`, `finalizeJob` |
+| GitHub concurrency | `GitHubSyncJobService`, `GitRepoStateService`, `SyncJobStaleRecoveryScheduler` | `claim`, `complete/degrade`, `recoverStaleJobs` |
 | Lambda link | `infra/lambda/cognito-account-linking/index.mjs` | `createHandler` |
 | deployment/config | `application*.properties`, `railway.json`, `.env.example` | property tables |
 

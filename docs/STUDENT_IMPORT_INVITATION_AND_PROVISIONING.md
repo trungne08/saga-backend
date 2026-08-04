@@ -11,7 +11,7 @@
   `PolicyOverrideRequest` is not reused because it is not a per-Student/per-Project
   Contribution override.
 
-Status: **PARTIAL** — current HEAD là `200d866` (`cập nhật doc`); `07ffa38` là checkpoint Privacy lịch sử. Jira labels/components/description, V8/V9 và Contribution đã được commit tại `b9968dc`; sáu Markdown đang được đồng bộ. Source/config/test là evidence. No secret is recorded here.
+Trạng thái: **PARTIAL** — HEAD hiện tại là `0bc30be`; `200d866`, `a43f05d` và `07ffa38` là checkpoint lịch sử. Sáu Markdown đang được đồng bộ; source/config/test là evidence. Không ghi secret tại đây.
 
 `GET /privacy` is a separate public HTML policy route. It does not change imported Student provisioning, invitation outbox, membership rules, OAuth, browser session, or CSRF behavior. Its public contact link is deployment configuration (`PRIVACY_CONTACT_URL`), not invitation data. **Runtime fact do người dùng cung cấp:** route đã public thành công và Privacy Policy URL đã được cấu hình; giá trị URL không được ghi ở đây.
 
@@ -82,6 +82,16 @@ No URL is hard-coded; `/auth/callback` is not used to begin login. The repositor
 - **CONFIRMED:** OAuth completion hands a safe short-lived session result to frontend via opaque `resultId`; it does not create or change Student, Course, TeamMember, invitation outbox, provisioning, migration or email data.
 - **CONFIRMED:** Personal result consumption is Student-only and the POST consume endpoint remains authenticated and CSRF-protected. No provider credential or OAuth state enters invitation/provisioning data.
 
+## Ghi chú isolation cho sync (2026-08-04)
+
+Chuẩn hóa UTC cho operational timestamp và GitHub claim/finalization/stale
+recovery không thay đổi Student, TeamMember, Course invitation, identity
+provisioning, invitation outbox, browser session hay CSRF. Không có migration.
+GitHub state được update từ row managed có lock thay vì detached entity; job stale
+được finalize an toàn và idempotent. Maven: **70 suites / 299 tests / 0 failures /
+0 errors / 0 skipped**. Row production cũ vẫn cần quan sát sau deploy; không ghi
+production id hay secret trong tài liệu.
+
 ## Migration and deployment status
 
 **CONFIRMED from source:** Flyway V6 and V7 must run before production Hibernate
@@ -110,4 +120,4 @@ outbox as enrollment. GET uses the existing browser session and needs no CSRF.
 
 Jira label snapshot persistence is separate from import/provisioning: it does not create, delete or change Student, TeamMember, invitation or identity data. Labels remain internal Task classification data; no Task HTTP API or Jira task creation API is introduced.
 
-Tests cover matching/conflicts/status/idempotency, competitive bind, multi-course role preservation, import rollback/dedup, outbox template/dedup, concurrent claims, stale recovery, retry and delivery failure. `CourseTeamMembershipGuardIntegrationTest` also covers same-Team idempotency/role preservation, same-Course conflict 409, independent roles in different Courses, HTTP conflict and two independent competing transactions with a fresh final query. `MyCourseTeamMembersIntegrationTest` covers Student self-scope, no membership/legacy data, project nullable, privacy, pagination and OpenAPI. The current working-tree `./mvnw.cmd test` result is **60 suites / 278 tests / 0 failures / 0 errors / 0 skipped**.
+Tests cover matching/conflicts/status/idempotency, competitive bind, multi-course role preservation, import rollback/dedup, outbox template/dedup, concurrent claims, stale recovery, retry and delivery failure. `CourseTeamMembershipGuardIntegrationTest` also covers same-Team idempotency/role preservation, same-Course conflict 409, independent roles in different Courses, HTTP conflict and two independent competing transactions with a fresh final query. `MyCourseTeamMembersIntegrationTest` covers Student self-scope, no membership/legacy data, project nullable, privacy, pagination and OpenAPI. Kết quả `./mvnw.cmd test` tại working tree hiện tại là **70 suites / 299 tests / 0 failures / 0 errors / 0 skipped**.

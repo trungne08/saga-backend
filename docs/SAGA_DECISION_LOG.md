@@ -2,7 +2,10 @@
 
 Tài liệu ghi lại quyết định đã được code/runtime fact chứng minh và các đề xuất còn mở. `ACCEPTED` không có nghĩa production đã được kiểm chứng; evidence của từng quyết định xác định phạm vi xác nhận.
 
-> Metadata audit hiện tại: branch `main`, HEAD thực tế `200d866` (`cập nhật doc`). `07ffa38`, `90b1852` và `52a8c71` là checkpoint lịch sử; Jira labels/components/description, V8/V9 và Contribution đã được commit tại `b9968dc`. Full Maven checkpoint hiện tại: 60 suites, 278 tests pass, 0 failures/errors/skips.
+> Metadata audit hiện tại: branch `main`, HEAD thực tế `0bc30be` (`0bc30bedff6cef4f065e5eef559404987f53d045`). `200d866`, `a43f05d`, `07ffa38`, `90b1852` và `52a8c71` là checkpoint lịch sử. Full Maven checkpoint: 70 suites, 299 tests pass, 0 failures/errors/skips.
+
+> Các DEC cũ có diễn đạt “HEAD hiện tại `200d866`” là mô tả tại thời điểm quyết
+> định lịch sử; không thay thế metadata audit hiện tại ở trên.
 
 ## DEC-028 — Contribution calculation reads source-of-truth; unresolved policies fail closed
 
@@ -310,6 +313,23 @@ Không có secret hoặc thông tin đăng nhập thật trong decision log này
 - Contact: policy thay `{{CONTACT_URL}}` bằng `app.privacy.contact-url` (`PRIVACY_CONTACT_URL`) sau khi validate URL absolute `http`/`https`, host không rỗng và không có userinfo. Thiếu/sai cấu hình trả lỗi controlled 503; phải cấu hình URL contact thật trước deploy. Test chỉ dùng URL example domain.
 - Hệ quả: không sửa OAuth callback, scope, credential/encryption, `SagaPrincipal`, JSESSIONID, CORS, CSRF hoặc hai webhook exemptions. Policy nêu data/use/sharing/retention/choices/security/children/changes nhưng không hiển thị secret, token hay credential.
 - Evidence: `PrivacyPolicyController#getPrivacyPolicy`, `static/privacy.html`, `SecurityConfig#securityFilterChain`, `PrivacyPolicyIntegrationTest`, `PrivacyPolicyControllerTest`, `SecurityIntegrationTest`, `SwaggerUiCsrfIntegrationTest`.
+
+## DEC-030 — Timestamp vận hành của SyncJobLog là UTC, HTTP trả Instant
+
+- Ngày: 2026-08-04; trạng thái: ACCEPTED tại HEAD `a43f05d`, vẫn có tại HEAD hiện tại.
+- Quyết định: giữ entity `SyncJobLog` và cột `DATETIME(6)` là `LocalDateTime` với UTC semantics; write path job dùng `Clock.systemUTC()` và chuyển `Instant` sang UTC `LocalDateTime` có chủ đích.
+- Quyết định: `SyncStatusResponse.Job` trả `Instant`; JSON có offset `Z`. FE format `Instant` theo timezone giao diện, không nối `Z` hay cộng cứng +7.
+- Hệ quả: không đổi JVM/Railway timezone, `JIRA_TIME_ZONE`, entity/schema hay mọi `LocalDateTime` business khác.
+- Evidence: `JiraSyncJobService`, `GitHubSyncJobService`, `SyncJobFinalizationService`, `SyncStatusResponse`, `SyncStatusResponseTest`.
+
+## DEC-031 — Claim GitHub theo repository và finalization độc lập
+
+- Ngày: 2026-08-04; trạng thái: ACCEPTED tại HEAD `0bc30be`.
+- Quyết định: initial backfill và reconciliation claim cùng một `GitRepo` bằng database `PESSIMISTIC_WRITE`; active non-stale job coalesce, repository khác vẫn chạy song song.
+- Quyết định: complete/degrade nhận id, reload row managed trong `REQUIRES_NEW`; job terminal finalize theo jobId trong `REQUIRES_NEW`, lock job và không ghi đè terminal state. Lỗi degrade không cản finalization.
+- Quyết định: stale recovery xử lý chỉ GitHub `IN_PROGRESS` quá `SYNC_JOB_STALE_AFTER`, chạy theo `STALE_SYNC_JOB_RECOVERY_DELAY_MS`, không reclaim job fresh và idempotent khi lặp lại.
+- Hệ quả: không migration, endpoint mới, retry toàn bộ provider sync, in-memory lock, OAuth/callback/session/JSESSIONID/CSRF/CORS/scope/webhook/encryption change. External writer production cụ thể và kết quả row cũ sau deploy là **PARTIAL/TBD**.
+- Evidence: `GitHubSyncJobService`, `GitRepoStateService`, `SyncJobFinalizationService`, `SyncJobStaleRecoveryScheduler`, `GitHubSyncJobServicePersistenceTest`, `AutomaticSyncDispatcherImplTest`.
 
 ## DEC-029 — OAuth completion callbacks hand off via session-bound opaque result
 

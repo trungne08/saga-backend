@@ -5,10 +5,13 @@
 | Mục | Giá trị |
 |---|---|
 | Branch được audit | `main` |
-| Commit được audit | `200d866` (`cập nhật doc`); `07ffa38` là checkpoint lịch sử Privacy |
+| Commit được audit | `0bc30be` (`0bc30bedff6cef4f065e5eef559404987f53d045`); `200d866`, `a43f05d` và `07ffa38` là checkpoint lịch sử |
 | Ngày cập nhật | 2026-08-04 (Asia/Saigon, UTC+07:00) |
-| Working tree hiện tại | Sáu tài liệu đang được đồng bộ; Jira labels/components/description, V8/V9, Contribution engine và tests đã thuộc lịch sử Git (`b9968dc`/`200d866`) |
+| Working tree hiện tại | Chỉ sáu Markdown được đồng bộ trong task tài liệu; không sửa source/test/config/migration |
 | Phạm vi thay đổi của task | Source/config/test ở HEAD và working tree là bằng chứng mạnh nhất |
+
+> Lưu ý lịch sử: các đoạn phía dưới ghi “HEAD hiện tại `200d866`” là snapshot của
+> audit cũ; không phải mô tả HEAD `0bc30be`.
 
 ## Update 2026-08-04 — Contribution engine and Jira task snapshots
 
@@ -26,7 +29,7 @@
   policy.
 - **Verification:** targeted Jira/persistence/repository/calculation tests pass:
   5 suites, 33 tests, 0 failures/errors/skips. Full Maven working tree passes
-  60 suites, 278 tests, 0 failures, 0 errors and 0 skipped.
+  70 suites, 299 tests, 0 failures, 0 errors and 0 skipped.
 
 ## 2. Đã hoàn thành
 
@@ -46,7 +49,7 @@
 |---|---|---|
 | Import authorization integration test | `-Dtest=CourseImportSecurityIntegrationTest test` | 13 tests, 0 failures/errors/skips; `BUILD SUCCESS` |
 | Existing Security integration test | `-Dtest=SecurityIntegrationTest test` (three repeated runs) | 13 tests/run, all pass |
-| Maven test suite (working tree hiện tại) | `./mvnw.cmd test` | 60 suites, 278 tests, 0 failures, 0 errors, 0 skipped; `BUILD SUCCESS` |
+| Maven test suite (working tree hiện tại) | `./mvnw.cmd test` | 70 suites, 299 tests, 0 failures, 0 errors, 0 skipped; `BUILD SUCCESS` |
 | Jira labels targeted regression | provider, upsert, H2 persistence, dispatcher, webhook processor | 37 tests, 0 failures/errors/skips; `BUILD SUCCESS` |
 | Privacy/security/integration regression | `PrivacyPolicyIntegrationTest`, `PrivacyPolicyControllerTest`, `SecurityIntegrationTest`, `SwaggerUiCsrfIntegrationTest`, Jira/GitHub callback/security tests | 32 tests, 0 failures/errors/skips; `BUILD SUCCESS` |
 | Checkpoint trước Swagger-CSRF commit | mốc audit trước đó | 51 suites, 228 tests, 0 failures, 0 errors, 0 skipped; không phải số liệu hiện tại |
@@ -113,12 +116,12 @@ Không lưu username, password, token hoặc secret của tài khoản test tron
 
 ```text
 ĐÃ HOÀN THÀNH: OIDC/session/profile/roles; master data; team authorization; Jira/GitHub integration; CSRF/CORS; health/OpenAPI configuration.
-ĐÃ KIỂM CHỨNG: full Maven tại checkpoint hiện tại 60 suites / 278 tests / 0 failures / 0 errors / 0 skipped; targeted self-team/roster/security regression là checkpoint lịch sử.
-ĐANG LÀM: Cập nhật tài liệu checkpoint theo source/test tại HEAD.
+ĐÃ KIỂM CHỨNG: full Maven tại checkpoint hiện tại 70 suites / 299 tests / 0 failures / 0 errors / 0 skipped; targeted GitHub concurrency/recovery 40 tests pass; self-team/roster/security là checkpoint lịch sử.
+ĐANG LÀM: Xác minh runtime production sau deploy cho stale GitHub job và optimistic locking.
 CHƯA LÀM: Import production-ready validation/provider delivery; browser E2E localhost→Railway; session scaling/redeploy verification.
 VẤN ĐỀ ĐANG MỞ: Import validation/identity; third-party cookie; error contract; session store; hạ tầng Cognito/Railway còn TBD.
 BƯỚC TIẾP THEO: Chốt parser/error DTO, policy email exposure và provider email, chạy E2E cookie/CSRF.
-BASE HEAD: `200d866`. Endpoint Student self-scoped đã được commit tại `250f514`; không phải dirty working-tree state.
+BASE HEAD: `0bc30be`. Endpoint Student self-scoped đã được commit tại `250f514`; `200d866` là checkpoint tài liệu lịch sử.
 ```
 
 ## Update 2026-08-04 — OAuth completion callback redirect
@@ -126,6 +129,13 @@ BASE HEAD: `200d866`. Endpoint Student self-scoped đã được commit tại `2
 - **CONFIRMED:** Jira common, personal GitHub, project GitHub and GitHub provider-alias completion callbacks return `302` to `app.integration.callback-redirect-uri` with only `resultId`.
 - **CONFIRMED:** Safe callback summaries are in current HTTP session for `app.integration.callback-result-ttl` (default `PT5M`), bounded to ten and consumed once by authenticated, CSRF-protected POST. Invalid/missing/replayed state still fails closed.
 - **TBD:** Browser E2E confirmation for cross-site cookie and multi-instance session behavior.
+
+## Cập nhật 2026-08-04 — Sync UTC và GitHub concurrency
+
+- **Đã hoàn thành / CONFIRMED:** `SyncStatusResponse.Job.startedAt/completedAt` là `Instant`, JSON UTC có `Z`; entity/schema `SyncJobLog` vẫn `LocalDateTime`/`DATETIME(6)` với UTC semantics. Write path SyncJobLog dùng UTC Clock có chủ đích.
+- **Đã hoàn thành / CONFIRMED:** `GitHubSyncJobService` claim cùng GitRepo bằng `PESSIMISTIC_WRITE`; `GitRepoStateService` reload managed row trong `REQUIRES_NEW`; `SyncJobFinalizationService` finalize theo jobId, idempotent và độc lập với degrade; `SyncJobStaleRecoveryScheduler` recover job GitHub stale.
+- **Đã kiểm chứng:** targeted GitHub concurrency/recovery checkpoint 40 tests pass; full Maven hiện tại **70 suites / 299 tests / 0 failures / 0 errors / 0 skipped**.
+- **Chưa hoàn thành / TBD:** xác minh sau deploy rằng row production cũ được recover và không còn optimistic-lock/async uncaught exception. Không migration/schema change; OAuth/session/CSRF/CORS/webhook không đổi.
 
 ## 10. Update — provisioning, invitation, roster và Swagger CSRF
 
@@ -146,4 +156,4 @@ BASE HEAD: `200d866`. Endpoint Student self-scoped đã được commit tại `2
 - **PARTIAL/TBD:** application concurrency guard được test bằng hai thread/hai transaction; database chưa có `UNIQUE(student_id, course_id)`. Roster trả email Student cho ADMIN/Lecturer owner và options trả email Lecturer cho ADMIN, nhưng business/UI justification vẫn TBD; response không chứa cognitoSub, version, token hay credential.
 - **CONFIRMED:** `GET /api/me/courses/{courseId}/team/members` đã được commit tại `250f514` và vẫn có trong HEAD `200d866`: chỉ cho STUDENT; anonymous 401, ADMIN/LECTURER 403, không cần CSRF. Backend resolve Student từ `SagaPrincipal.localProfileId` và Team theo Student+Course; no membership/Course thiếu 404, legacy nhiều Team 409. Response trả resolved teamId cho FE dùng Project/integration flow, Project nullable và page members không email/cognitoSub/version/token.
 - **CONFIRMED:** endpoint roster cũ vẫn giữ ADMIN/LECTURER/STUDENT exact-Team authorization; page member được tái sử dụng trong `TeamRosterService`. Project LEADER/MEMBER authorization không đổi.
-- **Verification hiện tại:** full Maven suite tại checkpoint hiện tại: **60 suites, 278 tests, 0 failures, 0 errors, 0 skipped**. Không thay đổi Jira, GitHub, OAuth callback, role priority, session hay import authorization.
+- **Verification hiện tại:** full Maven suite tại checkpoint hiện tại: **70 suites, 299 tests, 0 failures, 0 errors, 0 skipped**. Không thay đổi OAuth callback, role priority, session hay import authorization.

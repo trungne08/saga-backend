@@ -1,6 +1,6 @@
 # SAGA Backend — Yêu cầu, Dependency, Phân quyền và Ràng buộc
 
-> **Trạng thái audit:** CONFIRMED = được code hiện tại chứng minh; PARTIAL = mới có một phần code/mô hình; TBD = repository không đủ bằng chứng; RECOMMENDED = đề xuất, không phải hành vi hiện tại. Audit dựa trên branch `main`, HEAD thực tế `200d866` (`cập nhật doc`) ngày 2026-08-04. `07ffa38`, `90b1852` và `52a8c71` được giữ là checkpoint lịch sử. Jira labels/components/description, V8/V9 và Contribution đã được commit tại `b9968dc`. Không dùng tài liệu cũ làm bằng chứng chính và không chép giá trị bí mật.
+> **Trạng thái audit:** CONFIRMED = được code hiện tại chứng minh; PARTIAL = mới có một phần code/mô hình; TBD = repository không đủ bằng chứng; RECOMMENDED = đề xuất, không phải hành vi hiện tại. Audit dựa trên branch `main`, HEAD thực tế `0bc30be` ngày 2026-08-04. `200d866`, `a43f05d`, `07ffa38`, `90b1852` và `52a8c71` được giữ là checkpoint lịch sử. Không dùng tài liệu cũ làm bằng chứng chính và không chép giá trị bí mật.
 
 ## 1. Mục đích tài liệu
 
@@ -493,6 +493,15 @@ Không có bằng chứng ADMIN thiếu override: `requireTeamManager` chứng m
 | 13–14 | `integration/provider`, `project`, `sync`, `webhook` | Jira/GitHub flows |
 | 16–17 | `src/test/java/*` và implementation | behavior/risk evidence |
 
+## Cập nhật 2026-08-04 — ràng buộc sync vận hành
+
+- **FR-SYNC-001 / CONFIRMED:** `SyncJobLog` lưu UTC semantics trong `LocalDateTime`/`DATETIME(6)`; write path dùng UTC Clock. API `/api/projects/{projectId}/sync-status` trả `Instant` ISO-8601 có `Z`; frontend chịu trách nhiệm format theo timezone UI.
+- **CONFIRMED:** mỗi GitRepo chỉ có một GitHub sync job active non-stale. Claim và state update khóa `PESSIMISTIC_WRITE` đúng row repository; không khóa table, Course hay repository khác.
+- **CONFIRMED:** complete/degrade reload managed `GitRepo` theo id trong `REQUIRES_NEW`; finalization reload/lock `SyncJobLog` theo jobId trong `REQUIRES_NEW`, idempotent và không bị lỗi degrade chặn.
+- **CONFIRMED:** stale recovery chỉ finalize GitHub `IN_PROGRESS` quá threshold; job fresh không bị động tới. Không retry toàn bộ provider sync, không dùng `synchronized`/`ConcurrentHashMap` làm guard chính.
+- **PARTIAL/TBD:** application guard chỉ bảo vệ production flow tuân thủ claim; external writer của incident cũ và kết quả recovery row production cũ chờ kiểm chứng sau deploy.
+- **Không thay đổi:** không migration, manual-sync endpoint, OAuth/callback/resultId, HttpSession/JSESSIONID, CSRF, CORS, scope, webhook verification hay encryption. Maven: **70 suites / 299 tests / 0 failures / 0 errors / 0 skipped**.
+
 ## Callback result contract update (2026-08-04)
 
 | Route | Authorization / CSRF | Result |
@@ -504,11 +513,11 @@ Không có bằng chứng ADMIN thiếu override: `requireTeamManager` chứng m
 
 ## Biên bản kiểm tra sau khi tạo file
 
-- Quét lại HEAD `200d866`: **15 REST controller có HTTP mapping, 45 controller HTTP methods**; thêm 1 `@RestControllerAdvice` (`GlobalExceptionHandler`) không có endpoint. `POST /api/auth/logout` là framework-managed ngoài controller scan.
+- Quét lại HEAD `0bc30be`: **16 REST controller có HTTP mapping, 46 controller HTTP methods**; thêm 1 `@RestControllerAdvice` (`GlobalExceptionHandler`) không có endpoint. `POST /api/auth/logout` là framework-managed ngoài controller scan.
 - `@PreAuthorize`: **6**; `@Secured`: **0**. Endpoint mới dùng `hasRole('STUDENT')`; permission check chính còn lại không đổi.
 - Đối chiếu `pom.xml`, package Lambda và bảng dependency; có 16 dependency Maven application/test, 2 dependency Flyway plugin và 1 Node Lambda dependency.
 - Đối chiếu properties/placeholders với bảng configuration; không copy password, token, private key hoặc client secret vào tài liệu.
-- Test source Java files/classes: **62**; full Maven checkpoint hiện tại: 60 Surefire suites, **278 tests, 0 failures, 0 errors, 0 skipped**.
+- Test source Java files/classes: **72**; full Maven checkpoint hiện tại: 70 Surefire suites, **299 tests, 0 failures, 0 errors, 0 skipped**.
 - Task documentation hiện tại chỉ sửa sáu file Markdown; không commit/push.
 
 ## Update 2026-08-02 — Student provisioning và invitation outbox (working tree)
@@ -533,4 +542,4 @@ Configuration mới: `app.student-invitation.login-url` lấy từ `STUDENT_INVI
 
 Runtime fact do người dùng cung cấp: Railway từng fail vì DB thiếu `student.version`. V6/V7 phải chạy trước Hibernate `validate`; repository không có production log/dashboard nên migration production vẫn **TBD**, không CONFIRMED.
 
-Full `./mvnw.cmd test` tại checkpoint hiện tại: **60 suites, 278 tests, 0 failures, 0 errors, 0 skipped**. Jira labels/components/description provider/upsert/persistence, Contribution aggregation/calculation, Jira/GitHub/webhook, session/CSRF/OIDC callback, master-data authorization và import authorization đều pass.
+Full `./mvnw.cmd test` tại checkpoint hiện tại: **70 suites, 299 tests, 0 failures, 0 errors, 0 skipped**. Jira/GitHub/webhook, sync UTC serialization, GitHub claim/concurrency/stale recovery, session/CSRF/OIDC callback, master-data authorization và import authorization đều pass.

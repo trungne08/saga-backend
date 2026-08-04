@@ -645,7 +645,7 @@ Provider callback aliases có cùng session flow:
 ```ts
 type JiraProjectLinkRequest = {
   cloudId: string;       // non-blank, max 255
-  jiraProjectId: string; // non-blank, max 255
+  jiraProjectId: string; // Jira numeric project id hoặc project key, non-blank, max 255
 };
 
 type GitHubRepositoriesLinkRequest = {
@@ -699,8 +699,8 @@ type SyncStatusResponse = {
     targetSystem: string;
     type: "JIRA_SYNC" | "GIT_SYNC" | "INITIAL_BACKFILL" | "RECONCILIATION" | "WEBHOOK_PROCESSING" | "OTHER";
     status: "PENDING" | "IN_PROGRESS" | "COMPLETED" | "PARTIAL_FAILURE" | "FAILED";
-    startedAt: string | null;   // LocalDateTime
-    completedAt: string | null; // LocalDateTime
+    startedAt: string | null;   // ISO-8601 Instant UTC, có Z
+    completedAt: string | null; // ISO-8601 Instant UTC, có Z
     itemsProcessed: number | null;
     itemsFailed: number | null;
     errorCategory: string | null;
@@ -709,11 +709,49 @@ type SyncStatusResponse = {
 };
 ```
 
+`jiraProjectId` được trim; backend chấp nhận numeric id hoặc key không phân biệt
+hoa thường, rồi persist id/key canonical từ `JiraProjectInfo` provider. Sai site
+hoặc không match id/key trả `409 JIRA_PROJECT_NOT_ACCESSIBLE` theo contract hiện có.
+
+Ví dụ raw sync-status:
+
+```json
+{
+  "startedAt": "2026-08-04T05:13:49Z",
+  "completedAt": null
+}
+```
+
+FE parse trực tiếp Instant backend trả về; không nối thêm `Z` và không cộng cứng
+UTC+7:
+
+```ts
+export function formatSyncTimestamp(
+  value: string | null | undefined,
+): string {
+  if (!value) return "N/A";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "N/A";
+
+  return new Intl.DateTimeFormat("vi-VN", {
+    dateStyle: "short",
+    timeStyle: "medium",
+    timeZone: "Asia/Ho_Chi_Minh",
+  }).format(date);
+}
+```
+
+`Asia/Ho_Chi_Minh` ở đây chỉ là timezone hiển thị UI. Endpoint, browser session,
+CSRF, authorization và kiểu TypeScript `string | null` không đổi; không cần Bearer
+token.
+
 ### UI flow được backend hỗ trợ
 
-1. Jira: navigate đến `.../jira/connect` -> provider callback trả
-   `JiraAuthorizationResponse` gồm `sites` -> FE để user chọn site/project ->
-   POST `.../jira/link` với `cloudId`, `jiraProjectId` và CSRF -> poll
+1. Jira: navigate đến `.../jira/connect` -> callback redirect về FE với
+   `resultId` -> FE consume result bằng POST có CSRF để nhận safe
+   `JiraAuthorizationResponse` gồm `sites` -> user chọn site/project -> POST
+   `.../jira/link` với `cloudId`, `jiraProjectId` và CSRF -> poll
    `.../sync-status` nếu cần tiến độ backfill.
 2. GitHub: navigate đến `.../github/install` -> GitHub setup/callback ->
    nhận `GitHubInstallationResponse.repositories` -> POST
@@ -820,6 +858,16 @@ và LEADER đều xem được team của mình; quyền tạo Project vẫn là
 dữ liệu legacy không hợp lệ có nhiều Team cho cùng Student/Course; FE không tự chọn
 một Team để retry. Response và từng member không có email, `cognitoSub`, version,
 session, CSRF, token hay credential.
+
+## Độ tin cậy GitHub sync (2026-08-04)
+
+Không có endpoint, `SyncJobStatus` hay request/response mới cho FE. Initial
+backfill, scheduler reconciliation và webhook-triggered reconciliation được
+backend coalesce theo repository; repository khác vẫn sync song song. Backend tự
+finalize/recover job stale, nên FE chỉ poll `/sync-status` và hiển thị status trả
+về; FE không tự đổi `IN_PROGRESS` thành `FAILED`. Runtime recovery production vẫn
+**TBD** tới khi quan sát sau deploy. OAuth callback/resultId, browser session,
+CSRF và webhook contract không đổi.
 
 ## OAuth callback result handoff (2026-08-04)
 
