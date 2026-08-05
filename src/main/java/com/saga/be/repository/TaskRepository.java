@@ -4,14 +4,25 @@ import com.saga.be.entity.Task;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 @Repository
-public interface TaskRepository extends JpaRepository<Task, UUID> {
+public interface TaskRepository extends JpaRepository<Task, UUID>, JpaSpecificationExecutor<Task> {
     Optional<Task> findByProjectIdAndExternalId(UUID projectId, String externalId);
+
+    @EntityGraph(attributePaths = {"sprint", "assignee", "reporter"})
+    Page<Task> findAll(Specification<Task> specification, Pageable pageable);
+
+    @EntityGraph(attributePaths = {"sprint", "assignee", "reporter"})
+    Optional<Task> findByIdAndProjectId(UUID id, UUID projectId);
 
     @Query("select coalesce(sum(case when task.storyPoint is null then 1 else task.storyPoint end), 0) "
             + "from Task task where task.project.id = :projectId and task.sprint.id = :sprintId "
