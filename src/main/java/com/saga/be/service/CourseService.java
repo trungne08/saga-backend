@@ -62,7 +62,7 @@ public class CourseService {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Course code already exists");
         }
 
-        Subject subject = subjectRepository.findById(request.getSubjectId())
+        Subject subject = subjectRepository.findByIdAndDeletedAtIsNull(request.getSubjectId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Subject not found"));
         Class clazz = classRepository.findById(request.getClassId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Class not found"));

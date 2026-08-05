@@ -120,7 +120,7 @@ public class LocalDemoDataSeeder implements ApplicationRunner {
 
         Semester semester = semesterRepository.findByCode(SEMESTER_CODE)
                 .orElseGet(this::createSemester);
-        Subject subject = subjectRepository.findBySubjectCode(SUBJECT_CODE)
+        Subject subject = subjectRepository.findBySubjectCodeAndDeletedAtIsNull(SUBJECT_CODE)
                 .orElseGet(this::createSubject);
         com.saga.be.entity.Class clazz = classRepository.findByClassCode(CLASS_CODE)
                 .orElseGet(this::createClass);

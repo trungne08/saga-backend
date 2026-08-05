@@ -120,7 +120,7 @@ class LocalDemoDataSeederTest {
         when(studentRepository.findByCognitoSub(LEADER_SUB)).thenReturn(Optional.of(leader));
         when(semesterRepository.findByCode(LocalDemoDataSeeder.SEMESTER_CODE))
                 .thenReturn(Optional.empty(), Optional.of(semester));
-        when(subjectRepository.findBySubjectCode(LocalDemoDataSeeder.SUBJECT_CODE))
+        when(subjectRepository.findBySubjectCodeAndDeletedAtIsNull(LocalDemoDataSeeder.SUBJECT_CODE))
                 .thenReturn(Optional.empty(), Optional.of(subject));
         when(classRepository.findByClassCode(LocalDemoDataSeeder.CLASS_CODE))
                 .thenReturn(Optional.empty(), Optional.of(clazz));

@@ -36,6 +36,22 @@ public class SubjectController {
         return ResponseEntity.status(HttpStatus.CREATED).body(subjectService.createSubject(request));
     }
 
+    @PutMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Subject> updateSubject(
+            @PathVariable UUID id,
+            @Valid @RequestBody SubjectRequest request
+    ) {
+        return ResponseEntity.ok(subjectService.updateSubject(id, request));
+    }
+
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Void> deleteSubject(@PathVariable UUID id) {
+        subjectService.softDeleteSubject(id);
+        return ResponseEntity.noContent().build();
+    }
+
     @GetMapping
     public ResponseEntity<Page<Subject>> getSubjects(
             @RequestParam(required = false) String keyword,
