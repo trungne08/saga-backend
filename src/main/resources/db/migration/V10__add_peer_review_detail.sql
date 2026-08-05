@@ -1,3 +1,21 @@
+-- Create rubric_template table first (required by peer_review_detail FK)
+CREATE TABLE rubric_template (
+    id CHAR(36) PRIMARY KEY,
+    created_at DATETIME(6),
+    updated_at DATETIME(6),
+    subject_id CHAR(36) NOT NULL,
+    criteria_name VARCHAR(255) NOT NULL,
+    description TEXT,
+    weight DECIMAL(38,2) NOT NULL DEFAULT 25.00,
+    FOREIGN KEY (subject_id) REFERENCES subject(id)
+) CHARSET=utf8mb4;
+
+ALTER TABLE rubric_template
+ADD CONSTRAINT fk_rubric_template_subject 
+FOREIGN KEY (subject_id) 
+REFERENCES subject(id);
+
+-- Create peer_review_detail table
 CREATE TABLE peer_review_detail (
     id CHAR(36) NOT NULL,
     created_at DATETIME(6) NULL,
