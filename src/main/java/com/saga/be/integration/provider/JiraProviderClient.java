@@ -126,6 +126,11 @@ public interface JiraProviderClient {
         return null;
     }
 
+    /** Returns the Jira Software Sprint custom-field id, or {@code null} when absent. */
+    default String sprintFieldId(String accessToken, String cloudId) {
+        return null;
+    }
+
     String registerWebhook(
             String accessToken,
             String cloudId,
@@ -158,4 +163,23 @@ public interface JiraProviderClient {
             Instant capturedUpperBoundUtc,
             String nextPageToken
     );
+
+    default JiraIssuePage searchIssues(
+            String accessToken,
+            String cloudId,
+            String projectKey,
+            Instant lowerBoundUtc,
+            Instant capturedUpperBoundUtc,
+            String nextPageToken,
+            String sprintFieldId
+    ) {
+        return searchIssues(
+                accessToken,
+                cloudId,
+                projectKey,
+                lowerBoundUtc,
+                capturedUpperBoundUtc,
+                nextPageToken
+        );
+    }
 }

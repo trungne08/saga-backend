@@ -21,9 +21,11 @@ import com.saga.be.integration.provider.GitHubReviewSnapshot;
 import com.saga.be.integration.provider.JiraIssuePage;
 import com.saga.be.integration.provider.JiraIssueSnapshot;
 import com.saga.be.integration.provider.JiraProviderClient;
+import com.saga.be.integration.provider.JiraSprintSnapshot;
 import com.saga.be.repository.GitRepoRepository;
 import com.saga.be.repository.JiraBoardRepository;
 import com.saga.be.repository.SyncJobLogRepository;
+import com.saga.be.repository.SprintRepository;
 import java.time.Duration;
 import java.time.Clock;
 import java.time.Instant;
@@ -31,6 +33,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -55,6 +58,8 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
     private final JiraProviderClient jiraClient;
     private final GitHubProviderClient gitHubClient;
     private final JiraIssueUpsertService jiraUpsertService;
+    private final JiraSprintUpsertService jiraSprintUpsertService;
+    private final SprintRepository sprintRepository;
     private final GitHubDataUpsertService gitHubUpsertService;
     private final GitHubInitialBackfillJobService initialBackfillJobService;
     private final GitHubSyncJobService gitHubSyncJobService;
@@ -76,6 +81,8 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
             JiraProviderClient jiraClient,
             GitHubProviderClient gitHubClient,
             JiraIssueUpsertService jiraUpsertService,
+            JiraSprintUpsertService jiraSprintUpsertService,
+            SprintRepository sprintRepository,
             GitHubDataUpsertService gitHubUpsertService,
             GitHubInitialBackfillJobService initialBackfillJobService,
             GitHubSyncJobService gitHubSyncJobService,
@@ -95,6 +102,8 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
                 jiraClient,
                 gitHubClient,
                 jiraUpsertService,
+                jiraSprintUpsertService,
+                sprintRepository,
                 gitHubUpsertService,
                 initialBackfillJobService,
                 gitHubSyncJobService,
@@ -117,6 +126,8 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
             JiraProviderClient jiraClient,
             GitHubProviderClient gitHubClient,
             JiraIssueUpsertService jiraUpsertService,
+            JiraSprintUpsertService jiraSprintUpsertService,
+            SprintRepository sprintRepository,
             GitHubDataUpsertService gitHubUpsertService,
             GitHubInitialBackfillJobService initialBackfillJobService,
             GitHubSyncJobService gitHubSyncJobService,
@@ -136,6 +147,8 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
         this.jiraClient = jiraClient;
         this.gitHubClient = gitHubClient;
         this.jiraUpsertService = jiraUpsertService;
+        this.jiraSprintUpsertService = jiraSprintUpsertService;
+        this.sprintRepository = sprintRepository;
         this.gitHubUpsertService = gitHubUpsertService;
         this.initialBackfillJobService = initialBackfillJobService;
         this.gitHubSyncJobService = gitHubSyncJobService;
@@ -230,21 +243,38 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
                     ? JiraSyncStage.REFRESH_TOKEN
                     : JiraSyncStage.LOAD_CREDENTIAL;
             String token = jiraCredentialService.validAccessToken(board);
+            stage = JiraSyncStage.DISCOVER_SPRINT_FIELD;
+            String sprintFieldId = jiraClient.sprintFieldId(
+                    token,
+                    board.getCloudId()
+            );
             String nextPageToken = null;
             boolean lastPage;
             Set<String> seenPageTokens = new HashSet<>();
+            Set<String> sprintIds = new LinkedHashSet<>();
+            JiraSyncStage itemFailureStage = null;
             int issuesFetchedFromProvider = 0;
             int issuesAfterUpperBoundFilter = 0;
             do {
                 stage = JiraSyncStage.SEARCH_ISSUES;
-                JiraIssuePage page = jiraClient.searchIssues(
-                        token,
-                        board.getCloudId(),
-                        board.getProjectKey(),
-                        effectiveLowerBound,
-                        capturedUpperBound,
-                        nextPageToken
-                );
+                JiraIssuePage page = sprintFieldId == null
+                        ? jiraClient.searchIssues(
+                                token,
+                                board.getCloudId(),
+                                board.getProjectKey(),
+                                effectiveLowerBound,
+                                capturedUpperBound,
+                                nextPageToken
+                        )
+                        : jiraClient.searchIssues(
+                                token,
+                                board.getCloudId(),
+                                board.getProjectKey(),
+                                effectiveLowerBound,
+                                capturedUpperBound,
+                                nextPageToken,
+                                sprintFieldId
+                        );
                 issuesFetchedFromProvider += page.issues().size();
                 for (JiraIssueSnapshot issue : page.issues()) {
                     if (!JiraSyncWindow.isWithinCapturedUpperBound(
@@ -254,12 +284,16 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
                         continue;
                     }
                     issuesAfterUpperBoundFilter++;
+                    if (issue.sprintId() != null && !issue.sprintId().isBlank()) {
+                        sprintIds.add(issue.sprintId());
+                    }
                     try {
                         stage = JiraSyncStage.UPSERT_ISSUES;
                         jiraUpsertService.upsert(boardId, issue);
                         processed++;
                     } catch (RuntimeException exception) {
                         failed++;
+                        itemFailureStage = JiraSyncStage.UPSERT_ISSUES;
                         logJiraFailure(
                                 "Jira issue upsert failed",
                                 boardId,
@@ -298,6 +332,35 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
                 }
             } while (!lastPage && nextPageToken != null && !nextPageToken.isBlank());
 
+            sprintRepository.findByBoardIdAndDeletedAtIsNull(boardId).stream()
+                    .map(sprint -> sprint.getExternalSprintId())
+                    .filter(id -> id != null && !id.isBlank())
+                    .forEach(sprintIds::add);
+            for (String sprintId : sprintIds) {
+                try {
+                    stage = JiraSyncStage.HYDRATE_SPRINTS;
+                    JiraSprintSnapshot sprint = jiraClient.getSprint(
+                            token,
+                            board.getCloudId(),
+                            sprintId
+                    );
+                    jiraSprintUpsertService.upsert(boardId, sprint);
+                    processed++;
+                } catch (RuntimeException exception) {
+                    failed++;
+                    itemFailureStage = JiraSyncStage.HYDRATE_SPRINTS;
+                    logJiraFailure(
+                            "Jira sprint hydration failed",
+                            boardId,
+                            job,
+                            jobType,
+                            JiraSyncStage.HYDRATE_SPRINTS,
+                            categoryOf(exception),
+                            exception
+                    );
+                }
+            }
+
             if (failed == 0) {
                 LocalDateTime cursorAfter = LocalDateTime.ofInstant(
                         capturedUpperBound,
@@ -324,7 +387,9 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
                         failed,
                         null,
                         "ITEM_UPSERT_FAILED",
-                        JiraSyncStage.UPSERT_ISSUES
+                        itemFailureStage == null
+                                ? JiraSyncStage.UPSERT_ISSUES
+                                : itemFailureStage
                 );
             }
         } catch (IntegrationException exception) {
@@ -879,8 +944,10 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
         LOAD_BOARD,
         LOAD_CREDENTIAL,
         REFRESH_TOKEN,
+        DISCOVER_SPRINT_FIELD,
         SEARCH_ISSUES,
         UPSERT_ISSUES,
+        HYDRATE_SPRINTS,
         COMPLETE_BOARD,
         DEGRADE_BOARD,
         FINALIZE_JOB

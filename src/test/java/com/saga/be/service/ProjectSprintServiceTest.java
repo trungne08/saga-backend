@@ -19,6 +19,7 @@ import com.saga.be.security.ApplicationRole;
 import com.saga.be.security.SagaPrincipal;
 import com.saga.be.entity.enums.AccountStatus;
 import java.util.List;
+import java.time.LocalDateTime;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -73,6 +74,8 @@ class ProjectSprintServiceTest {
 
         Sprint sprintOne = entityWithId(new Sprint(), UUID.randomUUID());
         sprintOne.setName("Sprint 1");
+        sprintOne.setStartDate(LocalDateTime.parse("2026-08-01T02:00:00"));
+        sprintOne.setEndDate(LocalDateTime.parse("2026-08-15T02:00:00"));
         Sprint sprintTwo = entityWithId(new Sprint(), UUID.randomUUID());
         sprintTwo.setName("Sprint 2");
 
@@ -87,6 +90,14 @@ class ProjectSprintServiceTest {
         assertEquals(teamId, response.teamId());
         assertEquals(2, response.sprints().size());
         assertEquals("Sprint 1", response.sprints().get(0).sprintName());
+        assertEquals(
+                LocalDateTime.parse("2026-08-01T02:00:00"),
+                response.sprints().get(0).startDate()
+        );
+        assertEquals(
+                LocalDateTime.parse("2026-08-15T02:00:00"),
+                response.sprints().get(0).endDate()
+        );
     }
 
     @Test

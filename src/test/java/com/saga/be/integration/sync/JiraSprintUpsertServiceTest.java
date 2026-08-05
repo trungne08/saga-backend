@@ -59,6 +59,27 @@ class JiraSprintUpsertServiceTest {
     }
 
     @Test
+    void fullCanonicalNullDatesClearPreviouslyStoredDates() {
+        Sprint existing = Sprint.builder()
+                .startDate(LocalDateTime.parse("2026-08-01T02:00:00"))
+                .endDate(LocalDateTime.parse("2026-08-15T02:00:00"))
+                .completeDate(LocalDateTime.parse("2026-08-15T03:00:00"))
+                .build();
+        when(sprints.findByBoardIdAndExternalSprintId(boardId, "42"))
+                .thenReturn(Optional.of(existing));
+        when(sprints.saveAndFlush(existing)).thenReturn(existing);
+        JiraSprintSnapshot canonical = new JiraSprintSnapshot(
+                "42", "Sprint", "future", null, null, null, null, "7"
+        );
+
+        service.upsert(boardId, canonical);
+
+        assertEquals(null, existing.getStartDate());
+        assertEquals(null, existing.getEndDate());
+        assertEquals(null, existing.getCompleteDate());
+    }
+
+    @Test
     void duplicateTargetConstraintReloadsInNewTransaction() {
         Sprint raced = new Sprint();
         when(sprints.findByBoardIdAndExternalSprintId(boardId, "42"))
@@ -68,6 +89,10 @@ class JiraSprintUpsertServiceTest {
                 .thenAnswer(call -> call.getArgument(0));
         assertEquals(raced, service.upsert(boardId, snapshot("future")));
         assertEquals("Sprint", raced.getName());
+        assertEquals(
+                LocalDateTime.parse("2026-08-01T02:00:00"),
+                raced.getStartDate()
+        );
     }
 
     @Test
@@ -78,7 +103,15 @@ class JiraSprintUpsertServiceTest {
     }
 
     private JiraSprintSnapshot snapshot(String state) {
-        return new JiraSprintSnapshot("42", "Sprint", state, "Goal", LocalDateTime.now(),
-                LocalDateTime.now().plusDays(7), null, "7");
+        return new JiraSprintSnapshot(
+                "42",
+                "Sprint",
+                state,
+                "Goal",
+                LocalDateTime.parse("2026-08-01T02:00:00"),
+                LocalDateTime.parse("2026-08-08T02:00:00"),
+                null,
+                "7"
+        );
     }
 }

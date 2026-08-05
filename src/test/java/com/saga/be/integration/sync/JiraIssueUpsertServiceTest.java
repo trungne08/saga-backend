@@ -14,6 +14,7 @@ import static org.mockito.Mockito.when;
 import com.saga.be.entity.JiraBoard;
 import com.saga.be.entity.Project;
 import com.saga.be.entity.Student;
+import com.saga.be.entity.Sprint;
 import com.saga.be.entity.Task;
 import com.saga.be.entity.value.TaskComponentSnapshot;
 import com.saga.be.entity.enums.Priority;
@@ -43,6 +44,7 @@ class JiraIssueUpsertServiceTest {
     private TaskRepository taskRepository;
     private IdentityMappingService mappingService;
     private TeamContributionRefreshService teamContributionRefreshService;
+    private SprintRepository sprintRepository;
     private JiraIssueUpsertService service;
     private UUID boardId;
     private UUID projectId;
@@ -53,12 +55,13 @@ class JiraIssueUpsertServiceTest {
         taskRepository = mock(TaskRepository.class);
         mappingService = mock(IdentityMappingService.class);
         teamContributionRefreshService = mock(TeamContributionRefreshService.class);
+        sprintRepository = mock(SprintRepository.class);
         PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
         when(transactionManager.getTransaction(any(TransactionDefinition.class))).thenReturn(mock(TransactionStatus.class));
         service = new JiraIssueUpsertService(
                 boardRepository,
                 taskRepository,
-                mock(SprintRepository.class),
+                sprintRepository,
                 mappingService,
                 teamContributionRefreshService,
                 transactionManager
@@ -271,6 +274,38 @@ class JiraIssueUpsertServiceTest {
         assertEquals("jira-10001", raced.getExternalId());
         assertEquals(TaskStatus.DONE, raced.getStatus());
         verify(taskRepository, org.mockito.Mockito.times(2)).saveAndFlush(any(Task.class));
+    }
+
+    @Test
+    void partialIssueSprintAssociationNeverClearsCanonicalDates() {
+        LocalDateTime start = LocalDateTime.parse("2026-08-01T02:00:00");
+        LocalDateTime end = LocalDateTime.parse("2026-08-15T02:00:00");
+        Sprint canonical = Sprint.builder()
+                .externalSprintId("42")
+                .name("Canonical name")
+                .startDate(start)
+                .endDate(end)
+                .build();
+        Task task = new Task();
+        when(taskRepository.findByProjectIdAndExternalId(projectId, "jira-10001"))
+                .thenReturn(Optional.of(task));
+        when(taskRepository.saveAndFlush(task)).thenReturn(task);
+        when(sprintRepository.findByBoardIdAndExternalSprintId(boardId, "42"))
+                .thenReturn(Optional.of(canonical));
+        when(sprintRepository.save(canonical)).thenReturn(canonical);
+        LocalDateTime updatedAt = LocalDateTime.parse("2026-08-04T05:00:00");
+        JiraIssueSnapshot partial = new JiraIssueSnapshot(
+                "jira-10001", "SAGA-1", "task title", "Task", "To Do",
+                "Medium", null, null, null, null, updatedAt.minusDays(1),
+                updatedAt, null, null, "42", "Embedded name"
+        );
+
+        service.upsert(boardId, partial);
+
+        assertSame(canonical, task.getSprint());
+        assertEquals("Embedded name", canonical.getName());
+        assertEquals(start, canonical.getStartDate());
+        assertEquals(end, canonical.getEndDate());
     }
 
     private JiraIssueSnapshot snapshot(

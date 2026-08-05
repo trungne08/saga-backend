@@ -58,6 +58,8 @@ public class JiraProviderClientImpl implements JiraProviderClient {
                     .append(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
                     .appendOffset("+HHMM", "Z")
                     .toFormatter();
+    private static final String JIRA_SPRINT_FIELD_SCHEMA =
+            "com.pyxis.greenhopper.jira:gh-sprint";
     private static final Logger log = LoggerFactory.getLogger(
             JiraProviderClientImpl.class
     );
@@ -498,6 +500,20 @@ public class JiraProviderClientImpl implements JiraProviderClient {
     }
 
     @Override
+    public String sprintFieldId(String accessToken, String cloudId) {
+        JsonNode fields = get(jiraUri(cloudId, "/rest/api/3/field"), accessToken);
+        if (!fields.isArray()) {
+            throw providerResponseInvalid();
+        }
+        for (JsonNode field : fields) {
+            if (JIRA_SPRINT_FIELD_SCHEMA.equals(nestedText(field, "schema", "custom"))) {
+                return requiredStableId(requiredText(field, "id"));
+            }
+        }
+        return null;
+    }
+
+    @Override
     public String registerWebhook(
             String accessToken,
             String cloudId,
@@ -688,6 +704,27 @@ public class JiraProviderClientImpl implements JiraProviderClient {
             Instant capturedUpperBoundUtc,
             String nextPageToken
     ) {
+        return searchIssues(
+                accessToken,
+                cloudId,
+                projectKey,
+                lowerBoundUtc,
+                capturedUpperBoundUtc,
+                nextPageToken,
+                null
+        );
+    }
+
+    @Override
+    public JiraIssuePage searchIssues(
+            String accessToken,
+            String cloudId,
+            String projectKey,
+            Instant lowerBoundUtc,
+            Instant capturedUpperBoundUtc,
+            String nextPageToken,
+            String sprintFieldId
+    ) {
         ZoneId jiraZoneId = jiraZoneId();
         LocalDateTime lowerBoundForJql = JiraSyncWindow.lowerBoundForJql(
                 lowerBoundUtc,
@@ -716,7 +753,7 @@ public class JiraProviderClientImpl implements JiraProviderClient {
                 )
                 .queryParam("jql", jql)
                 .queryParam("maxResults", 100)
-                .queryParam("fields", issueFields());
+                .queryParam("fields", issueFields(null, sprintFieldId));
         if (nextPageToken != null && !nextPageToken.isBlank()) {
             builder.queryParam("nextPageToken", nextPageToken);
         }
@@ -727,7 +764,7 @@ public class JiraProviderClientImpl implements JiraProviderClient {
             throw providerResponseInvalid();
         }
         List<JiraIssueSnapshot> snapshots = new ArrayList<>();
-        issues.forEach(issue -> snapshots.add(toIssue(issue)));
+        issues.forEach(issue -> snapshots.add(toIssue(issue, null, sprintFieldId)));
         String next = text(response, "nextPageToken");
         return new JiraIssuePage(
                 snapshots,
@@ -1284,9 +1321,9 @@ public class JiraProviderClientImpl implements JiraProviderClient {
                 requiredText(sprint, "name"),
                 text(sprint, "state"),
                 text(sprint, "goal"),
-                parseDateOrDateTime(text(sprint, "startDate")),
-                parseDateOrDateTime(text(sprint, "endDate")),
-                parseDateOrDateTime(text(sprint, "completeDate")),
+                parseSprintDateTime(text(sprint, "startDate")),
+                parseSprintDateTime(text(sprint, "endDate")),
+                parseSprintDateTime(text(sprint, "completeDate")),
                 text(sprint, "originBoardId")
         );
     }
@@ -1369,10 +1406,15 @@ public class JiraProviderClientImpl implements JiraProviderClient {
     }
 
     private String issueFields(String estimationFieldId) {
+        return issueFields(estimationFieldId, null);
+    }
+
+    private String issueFields(String estimationFieldId, String sprintFieldId) {
         return "summary,issuetype,status,priority,assignee,reporter,"
                 + "duedate,created,updated,resolutiondate,resolution,"
                 + "labels,components,description"
-                + (estimationFieldId == null ? "" : "," + requiredStableId(estimationFieldId));
+                + (estimationFieldId == null ? "" : "," + requiredStableId(estimationFieldId))
+                + (sprintFieldId == null ? "" : "," + requiredStableId(sprintFieldId));
     }
 
     private JiraIssueSnapshot toIssue(JsonNode issue) {
@@ -1380,7 +1422,16 @@ public class JiraProviderClientImpl implements JiraProviderClient {
     }
 
     private JiraIssueSnapshot toIssue(JsonNode issue, String estimationFieldId) {
+        return toIssue(issue, estimationFieldId, null);
+    }
+
+    private JiraIssueSnapshot toIssue(
+            JsonNode issue,
+            String estimationFieldId,
+            String sprintFieldId
+    ) {
         JsonNode fields = issue.path("fields");
+        JsonNode sprint = sprintValue(fields, sprintFieldId);
         String updatedText = text(fields, "updated");
         LocalDateTime updatedAt = parseDateOrDateTime(updatedText);
         Instant updatedAtUtc = parseInstant(updatedText);
@@ -1402,8 +1453,8 @@ public class JiraProviderClientImpl implements JiraProviderClient {
                 updatedAt,
                 parseDateOrDateTime(text(fields, "resolutiondate")),
                 nestedText(fields, "resolution", "name"),
-                null,
-                null,
+                sprint == null ? null : scalarText(sprint.get("id")),
+                sprint == null ? null : scalarText(sprint.get("name")),
                 updatedAtUtc,
                 labels(fields.path("labels")),
                 description(fields.path("description")),
@@ -1581,6 +1632,56 @@ public class JiraProviderClientImpl implements JiraProviderClient {
             );
         }
         return key;
+    }
+
+    private LocalDateTime parseSprintDateTime(String value) {
+        if (value == null) {
+            return null;
+        }
+        if (value.isBlank()) {
+            throw providerResponseInvalid();
+        }
+        try {
+            return LocalDateTime.ofInstant(
+                    OffsetDateTime.parse(value).toInstant(),
+                    ZoneOffset.UTC
+            );
+        } catch (RuntimeException isoException) {
+            try {
+                return LocalDateTime.ofInstant(
+                        OffsetDateTime.parse(value, JIRA_OFFSET_DATE_TIME).toInstant(),
+                        ZoneOffset.UTC
+                );
+            } catch (RuntimeException jiraOffsetException) {
+                throw providerResponseInvalid();
+            }
+        }
+    }
+
+    private JsonNode sprintValue(JsonNode fields, String sprintFieldId) {
+        if (sprintFieldId == null) {
+            return null;
+        }
+        JsonNode value = fields.path(sprintFieldId);
+        if (value.isMissingNode() || value.isNull()) {
+            return null;
+        }
+        if (value.isObject()) {
+            return scalarText(value.get("id")) == null ? null : value;
+        }
+        if (!value.isArray()) {
+            throw providerResponseInvalid();
+        }
+        for (int index = value.size() - 1; index >= 0; index--) {
+            JsonNode sprint = value.get(index);
+            if (!sprint.isObject()) {
+                throw providerResponseInvalid();
+            }
+            if (scalarText(sprint.get("id")) != null) {
+                return sprint;
+            }
+        }
+        return null;
     }
 
     private String requiredPathSegment(String value) {

@@ -26,6 +26,7 @@ import com.saga.be.entity.GitHubInstallation;
 import com.saga.be.entity.GitRepo;
 import com.saga.be.entity.JiraBoard;
 import com.saga.be.entity.Project;
+import com.saga.be.entity.Sprint;
 import com.saga.be.entity.SyncJobLog;
 import com.saga.be.entity.enums.GitHubInstallationStatus;
 import com.saga.be.entity.enums.IntegrationStatus;
@@ -37,9 +38,11 @@ import com.saga.be.integration.provider.GitHubProviderClient;
 import com.saga.be.integration.provider.JiraIssuePage;
 import com.saga.be.integration.provider.JiraIssueSnapshot;
 import com.saga.be.integration.provider.JiraProviderClient;
+import com.saga.be.integration.provider.JiraSprintSnapshot;
 import com.saga.be.repository.GitRepoRepository;
 import com.saga.be.repository.JiraBoardRepository;
 import com.saga.be.repository.SyncJobLogRepository;
+import com.saga.be.repository.SprintRepository;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -66,6 +69,8 @@ class AutomaticSyncDispatcherImplTest {
     private JiraCredentialService credentialService;
     private JiraProviderClient jiraClient;
     private JiraIssueUpsertService jiraUpsertService;
+    private JiraSprintUpsertService jiraSprintUpsertService;
+    private SprintRepository sprintRepository;
     private GitRepoRepository gitRepoRepository;
     private GitHubProviderClient gitHubClient;
     private GitHubInitialBackfillJobService initialBackfillJobService;
@@ -87,6 +92,8 @@ class AutomaticSyncDispatcherImplTest {
         credentialService = mock(JiraCredentialService.class);
         jiraClient = mock(JiraProviderClient.class);
         jiraUpsertService = mock(JiraIssueUpsertService.class);
+        jiraSprintUpsertService = mock(JiraSprintUpsertService.class);
+        sprintRepository = mock(SprintRepository.class);
         gitRepoRepository = mock(GitRepoRepository.class);
         gitHubClient = mock(GitHubProviderClient.class);
         initialBackfillJobService = mock(
@@ -108,6 +115,8 @@ class AutomaticSyncDispatcherImplTest {
                 jiraClient,
                 gitHubClient,
                 jiraUpsertService,
+                jiraSprintUpsertService,
+                sprintRepository,
                 mock(GitHubDataUpsertService.class),
                 initialBackfillJobService,
                 gitHubSyncJobService,
@@ -259,6 +268,81 @@ class AutomaticSyncDispatcherImplTest {
                 isNull(),
                 isNull()
         );
+    }
+
+    @Test
+    void jiraSyncHydratesEachDistinctIssueSprintExactlyOnce() {
+        JiraIssueSnapshot first = issueInSprint("1", "42", "Sprint 42");
+        JiraIssueSnapshot second = issueInSprint("2", "42", "Sprint 42");
+        JiraSprintSnapshot canonical = new JiraSprintSnapshot(
+                "42",
+                "Sprint 42",
+                "active",
+                "Goal",
+                LocalDateTime.parse("2026-08-01T02:00:00"),
+                LocalDateTime.parse("2026-08-15T02:00:00"),
+                null,
+                "99"
+        );
+        when(jiraClient.sprintFieldId("token", "cloud-id"))
+                .thenReturn("customfield_10020");
+        when(jiraClient.searchIssues(
+                eq("token"), eq("cloud-id"), eq("SAGA"), any(), any(),
+                eq(null), eq("customfield_10020")
+        )).thenReturn(new JiraIssuePage(List.of(first, second), null, true));
+        Sprint alreadyKnown = Sprint.builder()
+                .board(board)
+                .externalSprintId("42")
+                .build();
+        when(sprintRepository.findByBoardIdAndDeletedAtIsNull(boardId))
+                .thenReturn(List.of(alreadyKnown));
+        when(jiraClient.getSprint("token", "cloud-id", "42"))
+                .thenReturn(canonical);
+
+        dispatcher.syncJira(boardId, SyncJobType.RECONCILIATION);
+
+        verify(jiraClient, times(1)).getSprint("token", "cloud-id", "42");
+        verify(jiraSprintUpsertService).upsert(boardId, canonical);
+        verify(syncJobFinalizationService).finalizeJob(
+                eq(jiraJob.getId()),
+                eq(SyncJobStatus.COMPLETED),
+                eq(3),
+                eq(0),
+                any(),
+                isNull(),
+                isNull()
+        );
+    }
+
+    @Test
+    void jiraSyncRepairsAnExistingSprintEvenWhenNoIssueChanged() {
+        Sprint local = Sprint.builder()
+                .board(board)
+                .externalSprintId("42")
+                .name("Sprint 42")
+                .build();
+        JiraSprintSnapshot canonical = new JiraSprintSnapshot(
+                "42",
+                "Sprint 42",
+                "active",
+                null,
+                LocalDateTime.parse("2026-08-01T02:00:00"),
+                LocalDateTime.parse("2026-08-15T02:00:00"),
+                null,
+                "99"
+        );
+        when(jiraClient.searchIssues(
+                eq("token"), eq("cloud-id"), eq("SAGA"), any(), any(), eq(null)
+        )).thenReturn(new JiraIssuePage(List.of(), null, true));
+        when(sprintRepository.findByBoardIdAndDeletedAtIsNull(boardId))
+                .thenReturn(List.of(local));
+        when(jiraClient.getSprint("token", "cloud-id", "42"))
+                .thenReturn(canonical);
+
+        dispatcher.syncJira(boardId, SyncJobType.RECONCILIATION);
+
+        verify(jiraClient).getSprint("token", "cloud-id", "42");
+        verify(jiraSprintUpsertService).upsert(boardId, canonical);
     }
 
     @Test
@@ -714,6 +798,32 @@ class AutomaticSyncDispatcherImplTest {
                 null,
                 null,
                 null
+        );
+    }
+
+    private JiraIssueSnapshot issueInSprint(
+            String id,
+            String sprintId,
+            String sprintName
+    ) {
+        LocalDateTime updatedAt = LocalDateTime.parse("2026-08-04T05:00:00");
+        return new JiraIssueSnapshot(
+                id,
+                "SAGA-" + id,
+                "Issue " + id,
+                "Task",
+                "To Do",
+                "Medium",
+                null,
+                null,
+                null,
+                null,
+                updatedAt.minusDays(1),
+                updatedAt,
+                null,
+                null,
+                sprintId,
+                sprintName
         );
     }
 }

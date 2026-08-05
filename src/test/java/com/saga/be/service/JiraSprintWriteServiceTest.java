@@ -48,6 +48,24 @@ import org.mockito.InOrder;
 
 class JiraSprintWriteServiceTest {
     @Test
+    void detailReturnsCanonicalSprintDates() {
+        Fixture f = new Fixture();
+        Sprint sprint = f.sprint("active");
+        f.stubSprint(sprint);
+
+        var response = f.service.detail(f.actor, f.projectId, sprint.getId());
+
+        assertEquals(
+                LocalDateTime.parse("2026-08-01T02:00:00"),
+                response.startDate()
+        );
+        assertEquals(
+                LocalDateTime.parse("2026-08-08T02:00:00"),
+                response.endDate()
+        );
+    }
+
+    @Test
     void createsRemotelyThenCanonicalizesUsingBoardOwnedOrigin() {
         Fixture f = new Fixture();
         JiraWriteOperation op = f.operation(JiraWriteOperationType.SPRINT_CREATE, JiraWriteOperationStatus.PENDING);
@@ -279,7 +297,8 @@ class JiraSprintWriteServiceTest {
 
         Sprint sprint(String state) {
             Sprint sprint = Sprint.builder().board(board).externalSprintId("42").name("Sprint").state(state)
-                    .startDate(LocalDateTime.now()).endDate(LocalDateTime.now().plusDays(7)).build();
+                    .startDate(LocalDateTime.parse("2026-08-01T02:00:00"))
+                    .endDate(LocalDateTime.parse("2026-08-08T02:00:00")).build();
             sprint.setId(UUID.randomUUID()); return sprint;
         }
 

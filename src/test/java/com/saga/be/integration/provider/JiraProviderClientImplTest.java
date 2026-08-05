@@ -38,6 +38,8 @@ class JiraProviderClientImplTest {
             + "/ex/jira/" + CLOUD_ID + "/rest/api/3/webhook";
     private static final String FIRST_WEBHOOK_PAGE_URL = WEBHOOK_URL
             + "?startAt=0&maxResults=100";
+    private static final String SPRINT_URL = BASE + "/ex/jira/" + CLOUD_ID
+            + "/rest/agile/1.0/sprint/42";
     private static final URI CALLBACK = URI.create(
             "https://callback.test/api/webhooks/jira?token=CALLBACK_SECRET"
     );
@@ -389,6 +391,156 @@ class JiraProviderClientImplTest {
                         + "\"content\":[{\"type\":\"text\",\"text\":\"Heading \"},"
                         + "{\"type\":\"text\",\"text\":\"body\"}]}]}"
         ).description());
+    }
+
+    @Test
+    void normalizesCanonicalSprintOffsetsToUtcAndKeepsNull() {
+        Fixture fixture = fixture();
+        fixture.server.expect(requestTo(SPRINT_URL))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(json("""
+                        {
+                          "id":42,
+                          "name":"Sprint 42",
+                          "state":"active",
+                          "startDate":"2026-08-06T09:15:30.123+07:00",
+                          "endDate":"2026-08-16T02:15:30.123Z",
+                          "completeDate":"2026-08-06T02:15:30.123Z",
+                          "originBoardId":99
+                        }
+                        """));
+
+        JiraSprintSnapshot sprint = fixture.client.getSprint(
+                "ACCESS_TOKEN_SECRET", CLOUD_ID, "42"
+        );
+
+        assertEquals(
+                LocalDateTime.parse("2026-08-06T02:15:30.123"),
+                sprint.startDate()
+        );
+        assertEquals(
+                LocalDateTime.parse("2026-08-16T02:15:30.123"),
+                sprint.endDate()
+        );
+        assertEquals(sprint.startDate(), sprint.completeDate());
+        fixture.server.verify();
+    }
+
+    @Test
+    void acceptsJiraCompactOffsetForCanonicalSprintDates() {
+        Fixture fixture = fixture();
+        fixture.server.expect(requestTo(SPRINT_URL))
+                .andRespond(json("""
+                        {
+                          "id":"42",
+                          "name":"Sprint 42",
+                          "startDate":"2026-08-06T09:15:30.123+0700"
+                        }
+                        """));
+
+        JiraSprintSnapshot sprint = fixture.client.getSprint(
+                "ACCESS_TOKEN_SECRET", CLOUD_ID, "42"
+        );
+
+        assertEquals(
+                LocalDateTime.parse("2026-08-06T02:15:30.123"),
+                sprint.startDate()
+        );
+        assertThat(sprint.endDate()).isNull();
+        assertThat(sprint.completeDate()).isNull();
+        fixture.server.verify();
+    }
+
+    @Test
+    void rejectsMalformedCanonicalSprintDatesWithSanitizedCategory() {
+        Fixture fixture = fixture();
+        fixture.server.expect(requestTo(SPRINT_URL))
+                .andRespond(json("""
+                        {"id":"42","name":"Sprint 42","endDate":"not-a-date"}
+                        """));
+
+        IntegrationException error = assertThrows(
+                IntegrationException.class,
+                () -> fixture.client.getSprint(
+                        "ACCESS_TOKEN_SECRET", CLOUD_ID, "42"
+                )
+        );
+
+        assertEquals("JIRA_RESPONSE_INVALID", error.getCode());
+        assertThat(error.getMessage()).doesNotContain("not-a-date");
+        fixture.server.verify();
+
+        Fixture malformedStart = fixture();
+        malformedStart.server.expect(requestTo(SPRINT_URL))
+                .andRespond(json("""
+                        {"id":"42","name":"Sprint 42","startDate":"not-a-date"}
+                        """));
+        IntegrationException startError = assertThrows(
+                IntegrationException.class,
+                () -> malformedStart.client.getSprint(
+                        "ACCESS_TOKEN_SECRET", CLOUD_ID, "42"
+                )
+        );
+        assertEquals("JIRA_RESPONSE_INVALID", startError.getCode());
+        malformedStart.server.verify();
+    }
+
+    @Test
+    void discoversSprintFieldBySchemaWithoutHardcodedFieldId() {
+        Fixture fixture = fixture();
+        fixture.server.expect(requestTo(
+                        BASE + "/ex/jira/" + CLOUD_ID + "/rest/api/3/field"
+                ))
+                .andRespond(json("""
+                        [
+                          {"id":"customfield_10016","name":"Story point estimate",
+                           "schema":{"custom":"com.atlassian.jira.plugin.system.customfieldtypes:float"}},
+                          {"id":"customfield_10020","name":"Sprint",
+                           "schema":{"custom":"com.pyxis.greenhopper.jira:gh-sprint"}}
+                        ]
+                        """));
+
+        assertEquals(
+                "customfield_10020",
+                fixture.client.sprintFieldId("ACCESS_TOKEN_SECRET", CLOUD_ID)
+        );
+        fixture.server.verify();
+    }
+
+    @Test
+    void mapsPartialIssueSprintWithoutTreatingItAsCanonicalDates() {
+        Fixture fixture = fixture();
+        fixture.server.expect(request -> {
+            String query = URLDecoder.decode(
+                    request.getURI().getRawQuery(), StandardCharsets.UTF_8
+            );
+            assertThat(query).contains("customfield_10020");
+        }).andRespond(json("""
+                {"isLast":true,"issues":[{
+                  "id":"10452","key":"SDP-1",
+                  "fields":{"summary":"Issue","updated":"2026-08-04T05:00:00Z",
+                    "customfield_10020":[
+                      {"id":41,"name":"Old Sprint","state":"closed",
+                       "startDate":"2026-07-01T00:00:00Z"},
+                      {"id":42,"name":"Current Sprint","state":"active",
+                       "startDate":null}
+                    ]}
+                }]}
+                """));
+
+        JiraIssueSnapshot issue = fixture.client.searchIssues(
+                "ACCESS_TOKEN_SECRET",
+                CLOUD_ID,
+                "SDP",
+                null,
+                Instant.parse("2026-08-04T06:00:00Z"),
+                null,
+                "customfield_10020"
+        ).issues().get(0);
+
+        assertEquals("42", issue.sprintId());
+        assertEquals("Current Sprint", issue.sprintName());
+        fixture.server.verify();
     }
 
     @Test
