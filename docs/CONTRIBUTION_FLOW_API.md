@@ -19,43 +19,42 @@ Tài liệu này mô tả đúng các API hiện có trong code để FE tích h
 
 **Mục đích:** FE lấy 4 tiêu chí mặc định trước khi render form đánh giá.
 
-**Response**
 ```json
 {
   "criteria": [
     {
-      "rubricId": "uuid",
-      "criteriaName": "Communication",
+      "rubricId": "11111111-1111-1111-1111-111111111111",
+      "criteriaName": "Hoàn thành & Chất lượng",
       "weight": 25,
-      "description": "Communicate clearly and promptly"
+      "description": "Làm đúng, đủ task được giao; code/chức năng chạy ổn định, ít lỗi."
     },
     {
-      "rubricId": "uuid",
-      "criteriaName": "Teamwork",
+      "rubricId": "22222222-2222-2222-2222-222222222222",
+      "criteriaName": "Tiến độ & Quy trình",
       "weight": 25,
-      "description": "Collaborate and support the team"
+      "description": "Đáp ứng đúng deadline; đẩy/merge code kịp thời, không làm kẹt tiến độ chung."
     },
     {
-      "rubricId": "uuid",
-      "criteriaName": "Quality",
+      "rubricId": "33333333-3333-3333-3333-333333333333",
+      "criteriaName": "Giao tiếp & Hỗ trợ",
       "weight": 25,
-      "description": "Deliver work with good quality"
+      "description": "Dễ liên lạc; chủ động phối hợp và sẵn sàng giúp đỡ đồng đội."
     },
     {
-      "rubricId": "uuid",
-      "criteriaName": "Ownership",
+      "rubricId": "44444444-4444-4444-4444-444444444444",
+      "criteriaName": "Thái độ & Xử lý sự cố",
       "weight": 25,
-      "description": "Take responsibility for assigned work"
+      "description": "Chịu trách nhiệm với công việc được giao; xử lý sự cố kịp thời và hiệu quả, cởi mở tiếp thu góp ý."
     }
   ]
 }
 ```
 
-**4 rubric mặc định trong DB**
-- Communication
-- Teamwork
-- Quality
-- Ownership
+**4 rubric mặc định trong DB (tiếng Việt)**
+- Hoàn thành & Chất lượng (Làm đúng, đủ task được giao; code/chức năng chạy ổn định, ít lỗi.)
+- Tiến độ & Quy trình (Đáp ứng đúng deadline; đẩy/merge code kịp thời, không làm kẹt tiến độ chung.)
+- Giao tiếp & Hỗ trợ (Dễ liên lạc; chủ động phối hợp và sẵn sàng giúp đỡ đồng đội.)
+- Thái độ & Xử lý sự cố (Chịu trách nhiệm với công việc được giao; xử lý sự cố kịp thời và hiệu quả, cởi mở tiếp thu góp ý.)
 
 ### 1.2 Lấy rubric theo team
 
@@ -70,28 +69,28 @@ Tài liệu này mô tả đúng các API hiện có trong code để FE tích h
   "subjectId": "uuid",
   "criteria": [
     {
-      "rubricId": "uuid",
-      "criteriaName": "Communication",
+      "rubricId": "11111111-1111-1111-1111-111111111111",
+      "criteriaName": "Hoàn thành & Chất lượng",
       "weight": 25,
-      "description": "Communicate clearly and promptly"
+      "description": "Làm đúng, đủ task được giao; code/chức năng chạy ổn định, ít lỗi."
     },
     {
-      "rubricId": "uuid",
-      "criteriaName": "Teamwork",
+      "rubricId": "22222222-2222-2222-2222-222222222222",
+      "criteriaName": "Tiến độ & Quy trình",
       "weight": 25,
-      "description": "Collaborate and support the team"
+      "description": "Đáp ứng đúng deadline; đẩy/merge code kịp thời, không làm kẹt tiến độ chung."
     },
     {
-      "rubricId": "uuid",
-      "criteriaName": "Quality",
+      "rubricId": "33333333-3333-3333-3333-333333333333",
+      "criteriaName": "Giao tiếp & Hỗ trợ",
       "weight": 25,
-      "description": "Deliver work with good quality"
+      "description": "Dễ liên lạc; chủ động phối hợp và sẵn sàng giúp đỡ đồng đội."
     },
     {
-      "rubricId": "uuid",
-      "criteriaName": "Ownership",
+      "rubricId": "44444444-4444-4444-4444-444444444444",
+      "criteriaName": "Thái độ & Xử lý sự cố",
       "weight": 25,
-      "description": "Take responsibility for assigned work"
+      "description": "Chịu trách nhiệm với công việc được giao; xử lý sự cố kịp thời và hiệu quả, cởi mở tiếp thu góp ý."
     }
   ]
 }
