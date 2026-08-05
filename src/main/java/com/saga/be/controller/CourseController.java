@@ -2,6 +2,7 @@ package com.saga.be.controller;
 
 import com.saga.be.dto.request.CourseRequest;
 import com.saga.be.dto.response.CourseStudentRosterResponse;
+import com.saga.be.dto.response.CourseStudentBasicInfoResponse;
 import com.saga.be.dto.response.LecturerOptionResponse;
 import com.saga.be.entity.Course;
 import com.saga.be.service.CourseService;
@@ -95,6 +96,20 @@ public class CourseController {
                 sortBy,
                 sortDirection,
                 pageable
+        ));
+    }
+
+    @GetMapping("/{courseId}/students/{studentId}")
+    @PreAuthorize("hasAnyRole('ADMIN', 'LECTURER')")
+    public ResponseEntity<CourseStudentBasicInfoResponse> getCourseStudent(
+            @AuthenticationPrincipal SagaPrincipal principal,
+            @PathVariable UUID courseId,
+            @PathVariable UUID studentId
+    ) {
+        return ResponseEntity.ok(courseService.getCourseStudentBasicInfo(
+                principal,
+                courseId,
+                studentId
         ));
     }
 

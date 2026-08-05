@@ -3,6 +3,7 @@ package com.saga.be.service;
 import com.saga.be.dto.request.CourseRequest;
 import com.saga.be.dto.response.CourseStudentRosterItem;
 import com.saga.be.dto.response.CourseStudentRosterResponse;
+import com.saga.be.dto.response.CourseStudentBasicInfoResponse;
 import com.saga.be.dto.response.CourseStudentTeamSummaryResponse;
 import com.saga.be.dto.response.LecturerOptionResponse;
 import com.saga.be.dto.response.TeamMemberResponse;
@@ -171,6 +172,33 @@ public class CourseService {
         return new CourseStudentRosterResponse(
                 withTeamPage,
                 withoutTeamPage
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public CourseStudentBasicInfoResponse getCourseStudentBasicInfo(
+            SagaPrincipal principal,
+            UUID courseId,
+            UUID studentId
+    ) {
+        courseImportAuthorizationService.requireImportAccess(principal, courseId);
+        List<TeamMember> memberships = teamMemberRepository
+                .findAllByStudentIdAndTeamCourseId(studentId, courseId);
+        if (memberships.isEmpty()) {
+            throw new ResponseStatusException(
+                    HttpStatus.NOT_FOUND,
+                    "Student membership not found"
+            );
+        }
+        if (memberships.size() > 1) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "Multiple team memberships found for this student and course"
+            );
+        }
+        return CourseStudentBasicInfoResponse.from(
+                courseId,
+                memberships.get(0)
         );
     }
 
