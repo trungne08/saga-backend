@@ -1,18 +1,19 @@
 # SAGA Frontend API Integration Guide
 
-## Contribution and Jira task-data status (2026-08-04)
+## Contribution và Jira task-data status (2026-08-05)
 
 - **CONFIRMED:** Jira sync keeps internal Task snapshots for labels, components
   (`id`/`name`) and a canonical plain-text description. Missing/null collection
   fields become empty and each sync replaces the prior snapshot.
-- **PARTIAL:** There is no Task or Contribution HTTP endpoint. The frontend must
-  not request or expect Jira descriptions/components/labels or contribution data
-  yet, and no provider payload, token, or credential is exposed.
-- **TBD:** Product Owner must define Contribution actors/authorization, persisted
-  override policy, peer-config precedence, rounding residuals and zero-base final
-  distribution before an API contract is published.
-- **RECOMMENDED:** add a separate read-only Contribution contract only after those
-  decisions; do not infer it from assessment endpoints.
+- **PARTIAL:** Backend chưa có Task read endpoint nên FE chưa thể đọc trực tiếp Jira
+  descriptions/components/labels. Backend hiện đã có sáu Contribution HTTP API cho
+  current aggregate, manual override và Course slice weights; contract nằm tại mục
+  "Contribution API" cuối tài liệu.
+- **CONFIRMED:** Contribution evaluation là aggregate theo dữ liệu hiện tại, không
+  phải historical committed snapshot. FE không tự suy ra công thức từ assessment
+  endpoint và không nhận provider payload, token hoặc credential.
+- **TBD:** Các backend risk về ownership, actor binding và production migration được
+  ghi rõ trong contract; chúng chưa được xem là đã khắc phục.
 
 Tài liệu này được đối chiếu với controller, DTO, Security, CORS, exception
 handler và integration service hiện tại của backend. Không coi tài liệu này là
@@ -587,10 +588,10 @@ navigation vì trả `302` đến OAuth provider.
 | GET | `/api/me/integrations` | 200 `PersonalIntegrationsResponse` | Danh sách kết nối của chính user. |
 | GET | `/api/me/integrations/jira/connect` | 302 | Dùng `window.location.assign`; bắt đầu Jira OAuth. |
 | GET | `/api/integrations/jira/callback` | 302 | Provider callback; redirects browser to the configured frontend callback with an opaque `resultId` only. Do not call it manually. |
-| DELETE | `/api/me/integrations/jira` | 204 | CSRF required. |
+| DELETE | `/api/me/integrations/jira` | 200 | Controller trả `void` và không gắn `@ResponseStatus`; CSRF required. |
 | GET | `/api/me/integrations/github/connect` | 302 | Dùng browser navigation; bắt đầu GitHub OAuth. |
 | GET | `/api/me/integrations/github/callback` | 302 | Provider callback redirect with an opaque `resultId`; no direct JSON response. |
-| DELETE | `/api/me/integrations/github` | 204 | CSRF required. |
+| DELETE | `/api/me/integrations/github` | 200 | Controller trả `void` và không gắn `@ResponseStatus`; CSRF required. |
 
 ```ts
 type PersonalIntegrationsResponse = {
@@ -885,7 +886,104 @@ SAGA API that creates or updates Jira tasks. Therefore FE label display and
 filtering remain **PARTIAL** until a separately authorized Task read contract is
 implemented. Labels are classification data, not the Jira issue id/key used to
 identify a Task.
+## Project Sprint API
+
+Hai endpoint dùng `JSESSIONID`, `credentials: "include"`; đều là GET nên không cần
+CSRF và không có pagination:
+
+| Method | Exact path | Role annotation | Effective service access | Success |
+| --- | --- | --- | --- | --- |
+| GET | `/api/v1/projects/{projectId}/sprints` | ADMIN, LECTURER, STUDENT | ADMIN: mọi Project; LECTURER: instructor của Course; STUDENT: có Team membership trong cùng Course với Project | `200 SprintListResponse`; Project không tồn tại `404` |
+| GET | `/api/v1/teams/{teamId}/sprints` | ADMIN, LECTURER, STUDENT | ADMIN: mọi Team; LECTURER: instructor của Course; STUDENT: thành viên đúng Team | `200 SprintListResponse`; Team/Team Course không tồn tại hoặc Team chưa có Project `404` |
+
+Danh sách luôn sort theo `startDate` tăng dần. Không có Sprint trả `sprints: []`
+với `200`. Ở route theo Project, `teamId` nullable nếu không resolve được Team.
+
+```ts
+type SprintSummaryResponse = {
+  sprintId: string;
+  sprintName: string;
+  externalSprintId: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  goal: string | null;
+};
+
+type SprintListResponse = {
+  projectId: string;
+  teamId: string | null;
+  sprints: SprintSummaryResponse[];
+};
+```
+
+## Peer Review và default rubric API
+
+| Method | Exact path | Role annotation | Effective service access | Success |
+| --- | --- | --- | --- | --- |
+| GET | `/api/v1/peer-review-rubrics/default` | Không có annotation riêng | Mọi authenticated session; global rubric được ưu tiên, Subject rubric chỉ dùng khi không có global | `200 PeerReviewDefaultRubricResponse` |
+| GET | `/api/v1/teams/{teamId}/peer-review-rubric` | Không có annotation riêng | ADMIN; LECTURER là Course instructor; STUDENT thuộc Team | `200 PeerReviewRubricResponse` |
+| GET | `/api/v1/teams/{teamId}/sprints/{sprintId}/peer-reviews/candidates` | ADMIN, STUDENT | Service thực tế chỉ chấp nhận STUDENT thuộc Team; ADMIN bị `403` | `200 PeerReviewCandidatesResponse` |
+| POST | `/api/v1/teams/{teamId}/sprints/{sprintId}/peer-reviews` | ADMIN, STUDENT | Service thực tế chỉ chấp nhận STUDENT thuộc Team; ADMIN bị `403` | `200 PeerReviewResponse` |
+| GET | `/api/v1/teams/{teamId}/sprints/{sprintId}/peer-reviews` | ADMIN, LECTURER, STUDENT | ADMIN; LECTURER là Course instructor; STUDENT thuộc Team | `200 SprintPeerReviewResponse` |
+
+Candidates dùng `alreadyReviewed`, `existingReviewId` và
+`existingTotalStarRating`. Submit là upsert theo `(sprint, reviewer, reviewee)`;
+self-review và cross-team bị từ chối `400`. Student hiện đọc được toàn bộ reviews
+của Team/Sprint, không chỉ review của chính mình. Đây là behavior/known risk hiện
+tại, không phải bảo đảm về anonymity.
+
+POST submit cần CSRF. Ví dụ tối thiểu:
+
+```ts
+const csrf = await fetch("/api/auth/csrf", {
+  credentials: "include",
+}).then((response) => response.json());
+
+const response = await fetch(
+  `/api/v1/teams/${teamId}/sprints/${sprintId}/peer-reviews`,
+  {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+      [csrf.headerName]: csrf.token,
+    },
+    body: JSON.stringify(request),
+  },
+);
+```
+
+Không gửi `Authorization` header cho application API. Chi tiết request/response
+Peer Review nằm trong `PEER_REVIEW_API_EXAMPLE.md`.
+
+## Contribution API
+
+Contribution API dùng session. Tất cả mutation phải gửi CSRF; GET không cần CSRF.
+
+| Method | Exact path | Role annotation | Effective behavior | Success |
+| --- | --- | --- | --- | --- |
+| GET | `/api/v1/teams/{teamId}/contribution-evaluation` | ADMIN, LECTURER | Trả current aggregate; service hiện chưa kiểm ownership theo principal | `200 TeamContributionEvaluationResponse` |
+| POST | `/api/v1/teams/{teamId}/contribution-override` | ADMIN, LECTURER | ADMIN mọi Team; LECTURER phải là Course instructor | `200 ContributionOverrideResponse` |
+| GET | `/api/v1/courses/{courseId}/contribution-slice-weights` | ADMIN, LECTURER | Service hiện chưa kiểm ownership theo principal | `200 CourseContributionSliceWeightResponse` |
+| POST | `/api/v1/courses/{courseId}/contribution-slice-weight-requests` | LECTURER | Body `lecturerId` phải là instructor; chưa bind actor hoàn toàn với principal | `200 CourseContributionSliceWeightRequestResponse` |
+| GET | `/api/v1/courses/contribution-slice-weight-requests` | ADMIN, LECTURER | ADMIN xem theo filter; LECTURER được scope theo principal/Course của mình | `200` danh sách request |
+| PUT | `/api/v1/courses/contribution-slice-weight-requests/{requestId}/decision` | ADMIN | Decision dùng `adminId` nullable từ body | `200 CourseContributionSliceWeightRequestResponse` |
+
+Các ownership/actor-binding behavior chưa chặt ở trên là known backend risks. FE
+không được khai thác, giả định chúng là authorization contract ổn định hoặc tự gửi
+ID actor thay cho identity của phiên. Contribution evaluation chỉ là current
+aggregate; không hiển thị nó như historical committed snapshot.
+
 ## Lecturer Analytics read APIs — 2026-08-05
+
+Giới hạn semantic bắt buộc khi FE hiển thị:
+
+- Activities chỉ tổng hợp Commit và Document.
+- Contribution Detail là current aggregate, không phải lịch sử theo Sprint.
+- Early Warning hiện chỉ có signal deterministic `OVERDUE_TASK`, không phải AI.
+- Interaction chỉ dựa trên Peer Review, không gồm pull request hay Jira comment.
+- Heatmap chỉ dựa trên Commit và không trả level 1–4.
+- Velocity dùng `currentPlannedPoints`, không phải committed snapshot đầu Sprint.
 
 Tất cả endpoint dưới đây dùng browser session `JSESSIONID`: frontend gọi với
 `credentials: "include"`. Đây đều là GET nên không gửi CSRF header và không dùng

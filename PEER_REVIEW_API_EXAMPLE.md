@@ -1,324 +1,224 @@
-# Peer Review API Examples
+# Peer Review API — contract tích hợp Frontend
 
-## 📌 Sinh viên Đánh Giá Peer Review
+Tài liệu này mô tả contract hiện hành theo controller, service và DTO tại HEAD
+`3eab81d`. Application API dùng Spring Security browser session, không dùng Bearer
+token.
 
-### 1. Lấy danh sách thành viên có thể đánh giá (exclude self)
-```http
-GET /api/v1/teams/{teamId}/sprints/{sprintId}/peer-reviews/candidates
-Authorization: Bearer {student_token}
-```
+## 1. Authentication và CSRF
 
-**Response:**
-```json
-{
-  "teamId": "uuid-team-123",
-  "sprintId": "uuid-sprint-456",
-  "reviewerId": "uuid-student-alice",
-  "candidates": [
+- Mọi request API bên dưới gửi cookie phiên bằng `credentials: "include"`.
+- Các GET không cần CSRF header.
+- POST submit phải gửi `X-XSRF-TOKEN`. FE lấy token qua
+  `GET /api/auth/csrf` và giữ token trong memory.
+- Anonymous nhận `401`; authenticated nhưng không đủ quyền nhận `403`.
+
+```ts
+type CsrfTokenResponse = {
+  token: string;
+  headerName: string;
+  parameterName: string;
+};
+
+async function sagaGet<T>(path: string): Promise<T> {
+  const response = await fetch(path, { credentials: "include" });
+  if (!response.ok) throw new Error(`SAGA API ${response.status}`);
+  return response.json() as Promise<T>;
+}
+
+async function submitPeerReview(
+  teamId: string,
+  sprintId: string,
+  body: PeerReviewRequest,
+): Promise<PeerReviewResponse> {
+  const csrf = await sagaGet<CsrfTokenResponse>("/api/auth/csrf");
+  const response = await fetch(
+    `/api/v1/teams/${teamId}/sprints/${sprintId}/peer-reviews`,
     {
-      "studentId": "uuid-student-bob",
-      "fullName": "Bob Smith",
-      "studentCode": "SV002",
-      "hasReviewed": false,
-      "existingReviewId": null,
-      "existingStarRating": null
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        [csrf.headerName]: csrf.token,
+      },
+      body: JSON.stringify(body),
     },
-    {
-      "studentId": "uuid-student-charlie",
-      "fullName": "Charlie Brown",
-      "studentCode": "SV003",
-      "hasReviewed": true,
-      "existingReviewId": "uuid-review-789",
-      "existingStarRating": 15
-    }
-  ]
+  );
+  if (!response.ok) throw new Error(`SAGA API ${response.status}`);
+  return response.json() as Promise<PeerReviewResponse>;
 }
 ```
 
-### 2. Lấy rubric peer review (4 tiêu chí)
+## 2. Rubric mặc định
+
 ```http
-GET /api/v1/teams/{teamId}/peer-reviews/rubric
-Authorization: Bearer {student_token}
+GET /api/v1/peer-review-rubrics/default
 ```
 
-**Response:**
+- Controller không gắn role annotation riêng; SecurityConfig yêu cầu authenticated
+  session.
+- Service ưu tiên danh sách rubric global (`subjectId = null`). Chỉ khi không có
+  rubric global và có Subject mới dùng rubric của Subject.
+- Response `200 PeerReviewDefaultRubricResponse`:
+
 ```json
 {
-  "teamId": "uuid-team-123",
   "criteria": [
     {
-      "rubricId": "uuid-rubric-1",
-      "criteriaName": "Code Quality",
-      "maxScore": 5,
-      "order": 0
-    },
-    {
-      "rubricId": "uuid-rubric-2",
-      "criteriaName": "Documentation",
-      "maxScore": 5,
-      "order": 1
-    },
-    {
-      "rubricId": "uuid-rubric-3",
-      "criteriaName": "Team Collaboration",
-      "maxScore": 5,
-      "order": 2
-    },
-    {
-      "rubricId": "uuid-rubric-4",
-      "criteriaName": "Initiative & Responsibility",
-      "maxScore": 5,
-      "order": 3
+      "rubricId": "11111111-1111-1111-1111-111111111111",
+      "criteriaName": "Hoàn thành & Chất lượng",
+      "weight": 25,
+      "description": "Mô tả tiêu chí"
     }
   ]
 }
 ```
 
-### 3. Đánh giá 1 thành viên
+`criteria` có thể là danh sách rỗng nếu database không có rubric phù hợp. Việc V13
+seed thành công trên fresh/production database hiện là `TBD`; FE không nên hard-code
+ID rubric.
+
+## 3. Rubric áp dụng cho Team
+
+```http
+GET /api/v1/teams/{teamId}/peer-review-rubric
+```
+
+- Controller không gắn role annotation riêng.
+- Effective service access: ADMIN được đọc mọi Team; LECTURER phải là instructor
+  của Course; STUDENT phải là thành viên Team.
+- Team không tồn tại trả `404`; không đủ quyền trả `403`.
+- Response `200 PeerReviewRubricResponse`:
+
+```json
+{
+  "teamId": "uuid",
+  "subjectId": "uuid-or-null",
+  "criteria": [
+    {
+      "rubricId": "uuid",
+      "criteriaName": "Tên tiêu chí",
+      "weight": 25,
+      "description": "Mô tả tiêu chí"
+    }
+  ]
+}
+```
+
+## 4. Danh sách ứng viên được đánh giá
+
+```http
+GET /api/v1/teams/{teamId}/sprints/{sprintId}/peer-reviews/candidates
+```
+
+- Role annotation: `ADMIN`, `STUDENT`.
+- Effective service access hiện tại: chỉ `STUDENT` thuộc đúng Team. ADMIN qua
+  annotation nhưng vẫn bị service từ chối `403`. Đây là mismatch backend hiện hữu,
+  không phải quyền FE được phép dựa vào.
+- Reviewer được lấy từ session principal và bị loại khỏi candidates.
+- Response `200 PeerReviewCandidatesResponse` dùng đúng các field sau:
+
+```json
+{
+  "teamId": "uuid",
+  "sprintId": "uuid",
+  "reviewerId": "uuid",
+  "candidates": [
+    {
+      "studentId": "uuid",
+      "fullName": "Nguyễn Văn A",
+      "studentCode": "SE001",
+      "alreadyReviewed": false,
+      "existingReviewId": null,
+      "existingTotalStarRating": null
+    }
+  ]
+}
+```
+
+## 5. Gửi hoặc cập nhật Peer Review
+
 ```http
 POST /api/v1/teams/{teamId}/sprints/{sprintId}/peer-reviews
-Authorization: Bearer {student_token}
 Content-Type: application/json
-
-{
-  "revieweeId": "uuid-student-bob",
-  "criteriaRatings": [
-    {
-      "rubricId": "uuid-rubric-1",
-      "starRating": 5  // Code Quality: 5 sao
-    },
-    {
-      "rubricId": "uuid-rubric-2",
-      "starRating": 4  // Documentation: 4 sao
-    },
-    {
-      "rubricId": "uuid-rubric-3",
-      "starRating": 5  // Collaboration: 5 sao
-    },
-    {
-      "rubricId": "uuid-rubric-4",
-      "starRating": 3  // Initiative: 3 sao
-    }
-  ],
-  "comment": "Bob did great work on the backend!"
-}
+X-XSRF-TOKEN: {csrf-token}
 ```
 
-**Response:**
+- Role annotation: `ADMIN`, `STUDENT`.
+- Effective service access hiện tại: chỉ `STUDENT` thuộc đúng Team; ADMIN bị
+  service từ chối `403`.
+- Reviewer luôn lấy từ session principal, không lấy từ body.
+- Submit là upsert theo bộ `(sprint, reviewer, reviewee)`: gửi lại cùng bộ khóa sẽ
+  cập nhật review hiện có.
+- Self-review và reviewer/reviewee khác Team bị từ chối `400`.
+- Sprint phải thuộc Project của Team; Team chưa có Project trả `400`, Sprint không
+  thuộc Project trả `404`.
+
+Request có thể gửi tổng `starRating` từ 0 đến 5 khi không gửi chi tiết, hoặc gửi
+`criteriaRatings`. Khi gửi chi tiết phải chấm mỗi rubric đúng một lần:
+
 ```json
 {
-  "id": "uuid-review-new",
-  "sprintId": "uuid-sprint-456",
-  "sprintName": "Sprint 1",
-  "reviewerId": "uuid-student-alice",
-  "reviewerName": "Alice Johnson",
-  "revieweeId": "uuid-student-bob",
-  "revieweeName": "Bob Smith",
-  "starRating": 17,  // 5+4+5+3 = 17 sao (tổng)
+  "revieweeId": "uuid",
   "criteriaRatings": [
-    {
-      "rubricId": "uuid-rubric-1",
-      "criteriaName": "Code Quality",
-      "starRating": 5
-    },
-    {
-      "rubricId": "uuid-rubric-2",
-      "criteriaName": "Documentation",
-      "starRating": 4
-    },
-    {
-      "rubricId": "uuid-rubric-3",
-      "criteriaName": "Team Collaboration",
-      "starRating": 5
-    },
-    {
-      "rubricId": "uuid-rubric-4",
-      "criteriaName": "Initiative & Responsibility",
-      "starRating": 3
-    }
+    { "rubricId": "uuid-1", "starRating": 5 },
+    { "rubricId": "uuid-2", "starRating": 4 },
+    { "rubricId": "uuid-3", "starRating": 5 },
+    { "rubricId": "uuid-4", "starRating": 4 }
   ],
-  "comment": "Bob did great work on the backend!",
-  "createdAt": "2026-08-04T10:30:00+07:00",
-  "updatedAt": "2026-08-04T10:30:00+07:00"
+  "comment": "Phối hợp tốt trong Sprint"
 }
 ```
 
----
+Response `200 PeerReviewResponse`:
 
-## 👨‍🏫 Giảng viên Xem Kết Quả Peer Review
+```json
+{
+  "id": "uuid",
+  "sprintId": "uuid",
+  "sprintName": "Sprint 1",
+  "reviewerId": "uuid",
+  "reviewerName": "Student A",
+  "revieweeId": "uuid",
+  "revieweeName": "Student B",
+  "starRating": 18,
+  "criteriaRatings": [
+    { "rubricId": "uuid-1", "criteriaName": "Tên tiêu chí", "starRating": 5 }
+  ],
+  "comment": "Phối hợp tốt trong Sprint",
+  "createdAt": "2026-08-04T12:00:00",
+  "updatedAt": "2026-08-04T12:00:00"
+}
+```
 
-### 1. Xem tất cả peer reviews của 1 sprint (có chi tiết 4 tiêu chí)
+## 6. Đọc toàn bộ Peer Review của Team/Sprint
+
 ```http
 GET /api/v1/teams/{teamId}/sprints/{sprintId}/peer-reviews
-Authorization: Bearer {lecturer_token}
 ```
 
-**Response:**
+- Role annotation: `ADMIN`, `LECTURER`, `STUDENT`.
+- Effective service access: ADMIN được đọc mọi Team; LECTURER phải là instructor
+  của Course; STUDENT phải thuộc Team.
+- Student hiện đọc được danh sách review của toàn Team/Sprint, gồm reviewer,
+  reviewee, ratings và comment; backend không giới hạn về “review của chính mình”.
+- Không có review trả `reviews: []` với `200`.
+
 ```json
 {
-  "teamId": "uuid-team-123",
-  "sprintId": "uuid-sprint-456",
+  "teamId": "uuid",
+  "sprintId": "uuid",
   "sprintName": "Sprint 1",
-  "reviews": [
-    {
-      "id": "uuid-review-1",
-      "sprintId": "uuid-sprint-456",
-      "sprintName": "Sprint 1",
-      "reviewerId": "uuid-student-alice",
-      "reviewerName": "Alice Johnson",
-      "revieweeId": "uuid-student-bob",
-      "revieweeName": "Bob Smith",
-      "starRating": 17,
-      "criteriaRatings": [
-        {
-          "rubricId": "uuid-rubric-1",
-          "criteriaName": "Code Quality",
-          "starRating": 5
-        },
-        {
-          "rubricId": "uuid-rubric-2",
-          "criteriaName": "Documentation",
-          "starRating": 4
-        },
-        {
-          "rubricId": "uuid-rubric-3",
-          "criteriaName": "Team Collaboration",
-          "starRating": 5
-        },
-        {
-          "rubricId": "uuid-rubric-4",
-          "criteriaName": "Initiative & Responsibility",
-          "starRating": 3
-        }
-      ],
-      "comment": "Bob did great work on the backend!",
-      "createdAt": "2026-08-04T10:30:00+07:00",
-      "updatedAt": "2026-08-04T10:30:00+07:00"
-    },
-    {
-      "id": "uuid-review-2",
-      "sprintId": "uuid-sprint-456",
-      "sprintName": "Sprint 1",
-      "reviewerId": "uuid-student-bob",
-      "reviewerName": "Bob Smith",
-      "revieweeId": "uuid-student-alice",
-      "revieweeName": "Alice Johnson",
-      "starRating": 19,
-      "criteriaRatings": [
-        {
-          "rubricId": "uuid-rubric-1",
-          "criteriaName": "Code Quality",
-          "starRating": 5
-        },
-        {
-          "rubricId": "uuid-rubric-2",
-          "criteriaName": "Documentation",
-          "starRating": 5
-        },
-        {
-          "rubricId": "uuid-rubric-3",
-          "criteriaName": "Team Collaboration",
-          "starRating": 5
-        },
-        {
-          "rubricId": "uuid-rubric-4",
-          "criteriaName": "Initiative & Responsibility",
-          "starRating": 4
-        }
-      ],
-      "comment": "Alice is a great leader!",
-      "createdAt": "2026-08-04T10:40:00+07:00",
-      "updatedAt": "2026-08-04T10:40:00+07:00"
-    }
-  ]
+  "reviews": []
 }
 ```
 
----
+## 7. Lưu ý tích hợp
 
-## 📊 Tính Toán Contribution Dựa Trên Peer Review
-
-### Công thức:
-```
-peerScore(student) = sum(starRating) từ tất cả reviews nhận về
-peerCoefficient = peerScore(student) / totalPeerScore(team)
-
-finalContribution(student) = 
-  (code% * weight_code + doc% * weight_doc + design% * weight_design) 
-  * peerCoefficient
-  * (1 + override%)
-```
-
-### Ví dụ cho 4 thành viên:
-```
-Team: Alice, Bob, Charlie, Dave
-Slice weights: Code 40%, Doc 30%, Design 30%
-
-Sprint 1 peer review scores:
-- Alice: 5 + 4 + 5 + 5 + 5 + 4 = 28 (từ Bob, Charlie, Dave)
-- Bob: 5 + 4 + 5 + 3 = 17 (từ Alice) + 5 + 5 + 5 + 4 = 19 (từ Charlie) = 36
-- Charlie: 4 + 4 + 4 + 4 = 16 (từ Alice) + 4 + 4 + 4 + 4 = 16 (từ Bob) = 32
-- Dave: 3 + 3 + 3 + 3 = 12 (từ Alice) + 3 + 3 + 3 + 3 = 12 (từ Bob) = 24
-Total: 28 + 36 + 32 + 24 = 120
-
-peerCoefficient:
-- Alice: 28 / 120 = 0.233
-- Bob: 36 / 120 = 0.300
-- Charlie: 32 / 120 = 0.267
-- Dave: 24 / 120 = 0.200
-
-Code contribution (only code & Bob):
-- Alice: 10 points → 50% (of code total)
-- Bob: 20 points → 100% (of code total)
-Total code: 30 points
-
-Doc contribution (only Charlie):
-- Charlie: 15 points → 100% (of doc total)
-Total doc: 15 points
-
-Design contribution (only Dave):
-- Dave: 8 points → 100% (of design total)
-Total design: 8 points
-
-Raw contribution (before peer adjustment):
-- Alice: 50% * 0.4 = 20%
-- Bob: 100% * 0.4 = 40%
-- Charlie: 100% * 0.3 = 30%
-- Dave: 100% * 0.3 = 30%
-
-Adjusted (apply peer coefficient):
-- Alice: 20% * 0.233 = 4.66%
-- Bob: 40% * 0.300 = 12.00%
-- Charlie: 30% * 0.267 = 8.01%
-- Dave: 30% * 0.200 = 6.00%
-Total: 30.67% (đã normalize để = 100%)
-
-Final (normalize to 100%):
-- Alice: 4.66 / 30.67 * 100 = 15.18%
-- Bob: 12.00 / 30.67 * 100 = 39.10%
-- Charlie: 8.01 / 30.67 * 100 = 26.10%
-- Dave: 6.00 / 30.67 * 100 = 19.55%
-```
-
----
-
-## 🔐 Access Control
-
-| Role | Can do |
-|------|--------|
-| **Student** | Submit peer review, view candidates, view their own reviews |
-| **Lecturer** | View all peer reviews of their course's teams (with criteria detail) |
-| **Admin** | View all peer reviews (with criteria detail) |
-
----
-
-## ✅ Chi tiết tiêu chí khi giảng viên xem
-
-**Giảng viên sẽ thấy trong response:**
-- ✅ Tiêu chí 1: "Code Quality" - 5 sao
-- ✅ Tiêu chí 2: "Documentation" - 4 sao  
-- ✅ Tiêu chí 3: "Team Collaboration" - 5 sao
-- ✅ Tiêu chí 4: "Initiative & Responsibility" - 3 sao
-- ✅ **Tổng sao: 17** (5+4+5+3)
-
-FE có thể hiển thị từng tiêu chí riêng hoặc tóm tắt dạng: "17 ⭐ (Code: 5, Doc: 4, Collab: 5, Init: 3)"
+- Không hard-code số lượng hoặc ID rubric; render theo `criteria` backend trả về.
+- Không gửi `reviewerId`; identity luôn đến từ `JSESSIONID`/`SagaPrincipal`.
+- Không dựa vào việc ADMIN xuất hiện trong annotation của candidates/submit; service
+  hiện vẫn từ chối ADMIN.
+- Visibility toàn Team/Sprint là behavior hiện tại và là known backend risk về
+  privacy/anonymity, không phải cam kết rằng thiết kế này sẽ được giữ lâu dài.
+- Tài liệu này không định nghĩa công thức Contribution. FE chỉ hiển thị kết quả từ
+  Contribution API và không tự tính lại từ Peer Review.

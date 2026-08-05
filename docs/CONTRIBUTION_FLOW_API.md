@@ -1,5 +1,31 @@
 # Contribution Flow API
 
+## Authentication và CSRF
+
+- Application API dùng Spring Security browser session qua cookie `JSESSIONID`.
+- Frontend phải gửi `credentials: "include"`; không gửi Bearer token.
+- GET không cần CSRF header.
+- POST/PUT trong tài liệu này phải gửi `X-XSRF-TOKEN`, lấy từ
+  `GET /api/auth/csrf` hoặc cookie `XSRF-TOKEN` theo contract chung.
+- Role annotation trên controller và effective authorization trong service được
+  ghi tách riêng vì hai lớp hiện không luôn đồng nhất.
+
+```ts
+const csrf = await fetch("/api/auth/csrf", {
+  credentials: "include",
+}).then((response) => response.json());
+
+await fetch(path, {
+  method: "POST",
+  credentials: "include",
+  headers: {
+    "Content-Type": "application/json",
+    [csrf.headerName]: csrf.token,
+  },
+  body: JSON.stringify(body),
+});
+```
+
 Tài liệu này mô tả đúng các API hiện có trong code để FE tích hợp luồng:
 
 - Peer review
@@ -15,7 +41,11 @@ Tài liệu này mô tả đúng các API hiện có trong code để FE tích h
 
 `GET /api/v1/peer-review-rubrics/default`
 
-**Role:** ADMIN, LECTURER, STUDENT
+**Controller role annotation:** không có annotation riêng.
+
+**Effective service access:** mọi authenticated session. Service ưu tiên rubric
+global (`subjectId = null`); chỉ khi không có global rubric và có Subject mới dùng
+rubric của Subject.
 
 **Mục đích:** FE lấy 4 tiêu chí mặc định trước khi render form đánh giá.
 
@@ -50,7 +80,11 @@ Tài liệu này mô tả đúng các API hiện có trong code để FE tích h
 }
 ```
 
-**4 rubric mặc định trong DB (tiếng Việt)**
+**Migration seed dự kiến:** V13 khai báo 4 rubric global tiếng Việt. Trạng thái
+seed trên fresh/production database là **TBD**, không được coi bốn ID dưới đây là
+runtime guarantee hoặc hard-code ở FE.
+
+**4 rubric được khai báo trong V13 (tiếng Việt)**
 - Hoàn thành & Chất lượng (Làm đúng, đủ task được giao; code/chức năng chạy ổn định, ít lỗi.)
 - Tiến độ & Quy trình (Đáp ứng đúng deadline; đẩy/merge code kịp thời, không làm kẹt tiến độ chung.)
 - Giao tiếp & Hỗ trợ (Dễ liên lạc; chủ động phối hợp và sẵn sàng giúp đỡ đồng đội.)
@@ -60,7 +94,10 @@ Tài liệu này mô tả đúng các API hiện có trong code để FE tích h
 
 `GET /api/v1/teams/{teamId}/peer-review-rubric`
 
-**Role:** không gắn role cụ thể, nhưng người gọi phải có quyền đọc team.
+**Controller role annotation:** không có annotation riêng.
+
+**Effective service access:** ADMIN đọc mọi Team; LECTURER phải là instructor của
+Course; STUDENT phải là thành viên Team.
 
 **Response**
 ```json
@@ -100,7 +137,9 @@ Tài liệu này mô tả đúng các API hiện có trong code để FE tích h
 
 `GET /api/v1/teams/{teamId}/sprints/{sprintId}/peer-reviews/candidates`
 
-**Role:** ADMIN, STUDENT  
+**Controller role annotation:** ADMIN, STUDENT.
+**Effective service access:** service hiện chỉ chấp nhận STUDENT thuộc đúng Team;
+ADMIN qua annotation vẫn bị từ chối `403`. Đây là mismatch backend hiện hữu.
 **Mục đích:** trả danh sách thành viên để FE render form đánh giá, đã loại reviewer ra khỏi danh sách.
 
 **Response**
@@ -126,7 +165,10 @@ Tài liệu này mô tả đúng các API hiện có trong code để FE tích h
 
 `POST /api/v1/teams/{teamId}/sprints/{sprintId}/peer-reviews`
 
-**Role:** ADMIN, STUDENT
+**Controller role annotation:** ADMIN, STUDENT.
+
+**Effective service access:** service hiện chỉ chấp nhận STUDENT thuộc đúng Team;
+ADMIN qua annotation vẫn bị từ chối `403`.
 
 **Request body**
 ```json
@@ -170,12 +212,19 @@ Tài liệu này mô tả đúng các API hiện có trong code để FE tích h
 - Nếu FE gửi `criteriaRatings` thì phải gửi đủ toàn bộ 4 rubric mặc định.
 - Nếu không gửi `criteriaRatings`, FE phải gửi `starRating` tổng.
 - `starRating` trong `criteriaRatings` là từ `0` đến `5`.
+- Reviewer lấy từ session principal. Submit là upsert theo bộ
+  `(sprint, reviewer, reviewee)`.
+- Self-review và reviewer/reviewee khác Team bị từ chối `400`.
 
 ### 1.5 Xem peer reviews của sprint
 
 `GET /api/v1/teams/{teamId}/sprints/{sprintId}/peer-reviews`
 
-**Role:** ADMIN, LECTURER, STUDENT
+**Controller role annotation:** ADMIN, LECTURER, STUDENT.
+
+**Effective service access:** ADMIN đọc mọi Team; LECTURER phải là instructor của
+Course; STUDENT phải thuộc Team. Student hiện đọc được toàn bộ danh sách review của
+Team/Sprint, không chỉ review của chính mình.
 
 **Response**
 ```json
@@ -215,7 +264,11 @@ Tài liệu này mô tả đúng các API hiện có trong code để FE tích h
 
 `GET /api/v1/teams/{teamId}/contribution-evaluation`
 
-**Role:** ADMIN, LECTURER
+**Controller role annotation:** ADMIN, LECTURER.
+
+**Effective service authorization:** `evaluate(teamId)` hiện không nhận principal
+và không kiểm Course/Team ownership. Đây là known backend risk; FE không được dựa
+vào behavior này để truy cập Team ngoài scope.
 
 **Response**
 ```json
@@ -256,6 +309,8 @@ Tài liệu này mô tả đúng các API hiện có trong code để FE tích h
 ```
 
 **Ghi chú**
+- Đây là **current aggregate** tính từ dữ liệu hiện tại, không phải historical
+  committed snapshot theo thời điểm bắt đầu Sprint.
 - `finalContributionPercentage` là % cuối cùng để hiển thị cho giảng viên.
 - `code/document/design` là breakdown theo slice.
 - `taskContributionPercentage` là % contribution phần task sau normalize.
@@ -269,7 +324,10 @@ Tài liệu này mô tả đúng các API hiện có trong code để FE tích h
 
 `GET /api/v1/courses/{courseId}/contribution-slice-weights`
 
-**Role:** ADMIN, LECTURER
+**Controller role annotation:** ADMIN, LECTURER.
+
+**Effective service authorization:** service hiện chỉ resolve Course theo ID và
+chưa kiểm lecturer ownership. Đây là known backend risk.
 
 **Response**
 ```json
@@ -287,7 +345,10 @@ Tài liệu này mô tả đúng các API hiện có trong code để FE tích h
 
 `POST /api/v1/courses/{courseId}/contribution-slice-weight-requests`
 
-**Role:** LECTURER
+**Controller role annotation:** LECTURER.
+
+**Effective service authorization:** service kiểm `lecturerId` trong body là
+instructor của Course nhưng chưa bind ID đó với principal của phiên.
 
 **Request body**
 ```json
@@ -323,13 +384,19 @@ Tài liệu này mô tả đúng các API hiện có trong code để FE tích h
 
 `GET /api/v1/courses/contribution-slice-weight-requests?status=PENDING&courseId={courseId}`
 
-**Role:** ADMIN, LECTURER
+**Controller role annotation:** ADMIN, LECTURER.
+
+**Effective service authorization:** ADMIN xem theo filter; LECTURER được scope
+theo `SagaPrincipal.localProfileId` và chỉ xem Course của mình.
 
 ### 3.4 Duyệt / từ chối yêu cầu
 
 `PUT /api/v1/courses/contribution-slice-weight-requests/{requestId}/decision`
 
-**Role:** ADMIN
+**Controller role annotation:** ADMIN.
+
+**Effective service behavior:** method dùng `adminId` nullable từ request body để
+resolve người duyệt thay vì bind hoàn toàn với principal. Đây là known backend risk.
 
 **Request body**
 ```json
@@ -367,7 +434,11 @@ Tài liệu này mô tả đúng các API hiện có trong code để FE tích h
 
 `POST /api/v1/teams/{teamId}/contribution-override`
 
-**Role:** ADMIN, LECTURER
+**Controller role annotation:** ADMIN, LECTURER.
+
+**Effective service authorization:** ADMIN được phép; LECTURER phải là instructor
+của Course chứa Team. Với LECTURER, actor lấy từ principal; với ADMIN, optional
+`lecturerId` lấy từ body.
 
 **Request body**
 ```json
@@ -419,6 +490,16 @@ FE nên gọi API list sprint trước để lấy danh sách `sprintId`, sau đ
 **Role:** ADMIN, LECTURER, STUDENT  
 **Response:** `SprintListResponse`
 
+**Effective service access:**
+
+- Route theo Project: ADMIN xem mọi Project; LECTURER phải là instructor của
+  Course; STUDENT phải có Team membership trong cùng Course với Project.
+- Route theo Team: ADMIN xem mọi Team; LECTURER phải là instructor của Course;
+  STUDENT phải thuộc đúng Team.
+- Không có pagination. Sprint sort theo `startDate` tăng dần.
+- Team chưa có Project trả `404`; không có Sprint trả `sprints: []` với `200`.
+- `teamId` trong route theo Project có thể `null`.
+
 ```json
 {
   "projectId": "uuid",
@@ -438,7 +519,28 @@ FE nên gọi API list sprint trước để lấy danh sách `sprintId`, sau đ
 
 ---
 
-## 6) Lưu ý
+## 6) Known backend risks / integration caution
+
+Các điểm dưới đây là behavior/risk hiện tại, chưa được mô tả như đã khắc phục:
+
+- **PARTIAL — Peer Review authorization:** candidates và submit có annotation
+  ADMIN/STUDENT nhưng service chỉ chấp nhận STUDENT thuộc Team.
+- **PARTIAL — Student visibility:** Student thuộc Team hiện đọc được toàn bộ review
+  của Team/Sprint, gồm identity và comment; anonymity/privacy policy chưa được
+  repository chứng minh.
+- **PARTIAL — Contribution ownership:** evaluation và current slice-weight GET chưa
+  kiểm lecturer ownership trong service.
+- **PARTIAL — Actor binding:** slice-weight request lấy `lecturerId`, decision lấy
+  `adminId`, và một nhánh contribution override lấy `lecturerId` từ request body.
+  FE không được khai thác hoặc coi đây là authorization contract ổn định.
+- **TBD — Default rubric database:** V10 tạo
+  `rubric_template.subject_id NOT NULL`, trong khi V13 insert global rubric với
+  `subject_id NULL`. Test profile dùng Hibernate `create-drop` và tắt Flyway, vì vậy
+  test pass không chứng minh V13 seed chạy thành công trên fresh/production DB.
+- **TBD — Production Flyway:** repository không chứa Flyway history hoặc runtime log
+  production. FE phải xử lý `criteria: []` và không hard-code rubric IDs.
+
+## 7) Lưu ý
 
 - File này bám theo code hiện tại, không mô tả endpoint giả định.
 - Các response `Page<>` ở API roster/course không nằm trong tài liệu này.
