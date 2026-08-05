@@ -38,6 +38,94 @@ public interface JiraProviderClient {
             String issueIdOrKey
     );
 
+    /**
+     * Loads an issue together with the board-configured estimation field. The
+     * default keeps provider fakes compatible; the Jira implementation adds
+     * the field only after discovering its id from the board configuration.
+     */
+    default JiraIssueSnapshot getIssue(
+            String accessToken,
+            String cloudId,
+            String issueIdOrKey,
+            String estimationFieldId
+    ) {
+        return getIssue(accessToken, cloudId, issueIdOrKey);
+    }
+
+    List<JiraCreateField> getEditMetadata(
+            String accessToken, String cloudId, String issueIdOrKey
+    );
+
+    JiraIssueReference createIssue(
+            String accessToken, String cloudId, java.util.Map<String, Object> fields
+    );
+
+    void updateIssue(
+            String accessToken, String cloudId, String issueIdOrKey, java.util.Map<String, Object> fields
+    );
+
+    void deleteIssue(String accessToken, String cloudId, String issueIdOrKey);
+
+    List<JiraTransition> getTransitions(String accessToken, String cloudId, String issueIdOrKey);
+
+    void transitionIssue(
+            String accessToken, String cloudId, String issueIdOrKey, String transitionId
+    );
+
+    void assignIssue(
+            String accessToken, String cloudId, String issueIdOrKey, String accountId
+    );
+
+    JiraSprintSnapshot getSprint(String accessToken, String cloudId, String sprintId);
+
+    JiraSprintSnapshot createSprint(
+            String accessToken,
+            String cloudId,
+            String boardId,
+            String name,
+            String goal,
+            String startDate,
+            String endDate
+    );
+
+    JiraSprintSnapshot updateSprint(
+            String accessToken,
+            String cloudId,
+            String sprintId,
+            java.util.Map<String, Object> changes
+    );
+
+    void deleteSprint(String accessToken, String cloudId, String sprintId);
+
+    void moveIssuesToSprint(
+            String accessToken,
+            String cloudId,
+            String sprintId,
+            List<String> issueIdsOrKeys
+    );
+
+    void moveIssuesToBacklog(
+            String accessToken,
+            String cloudId,
+            String boardId,
+            List<String> issueIdsOrKeys
+    );
+
+    void estimateIssue(
+            String accessToken,
+            String cloudId,
+            String boardId,
+            String issueIdOrKey,
+            Integer value
+    );
+
+    boolean supportsEstimation(String accessToken, String cloudId, String boardId);
+
+    /** Returns the configured estimation field id, or {@code null} when absent. */
+    default String estimationFieldId(String accessToken, String cloudId, String boardId) {
+        return null;
+    }
+
     String registerWebhook(
             String accessToken,
             String cloudId,

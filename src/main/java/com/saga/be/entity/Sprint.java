@@ -40,4 +40,13 @@ public class Sprint extends BaseEntity {
 
     @Column(name = "goal")
     private String goal;
+
+    @Column(name = "state")
+    private String state;
+
+    @Column(name = "complete_date")
+    private LocalDateTime completeDate;
+
+    @Column(name = "deleted_at")
+    private LocalDateTime deletedAt;
 }

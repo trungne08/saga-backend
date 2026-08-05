@@ -1,8 +1,12 @@
 package com.saga.be.controller;
 
 import com.saga.be.dto.response.SprintListResponse;
+import com.saga.be.dto.response.JiraSprintResponse;
+import com.saga.be.dto.request.JiraSprintCreateRequest;
+import com.saga.be.dto.request.JiraSprintUpdateRequest;
 import com.saga.be.security.SagaPrincipal;
 import com.saga.be.service.ProjectSprintService;
+import com.saga.be.service.JiraSprintWriteService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -15,6 +19,11 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -27,6 +36,42 @@ import org.springframework.web.bind.annotation.RestController;
 public class ProjectSprintController {
 
     private final ProjectSprintService projectSprintService;
+    private final JiraSprintWriteService sprintWriteService;
+
+    @GetMapping("/projects/{projectId}/sprints/{sprintId}")
+    @PreAuthorize("hasAnyRole('ADMIN', 'LECTURER', 'STUDENT')")
+    public ResponseEntity<JiraSprintResponse> detail(@AuthenticationPrincipal SagaPrincipal principal, @PathVariable UUID projectId, @PathVariable UUID sprintId) {
+        return ResponseEntity.ok(sprintWriteService.detail(principal, projectId, sprintId));
+    }
+
+    @PostMapping("/projects/{projectId}/sprints")
+    @PreAuthorize("hasAnyRole('ADMIN', 'LECTURER', 'STUDENT')")
+    public ResponseEntity<JiraSprintResponse> create(@AuthenticationPrincipal SagaPrincipal principal, @PathVariable UUID projectId,
+            @RequestHeader("Idempotency-Key") String key, @jakarta.validation.Valid @RequestBody JiraSprintCreateRequest request) {
+        return ResponseEntity.status(org.springframework.http.HttpStatus.CREATED).body(sprintWriteService.create(principal, projectId, key, request));
+    }
+
+    @PutMapping("/projects/{projectId}/sprints/{sprintId}")
+    @PreAuthorize("hasAnyRole('ADMIN', 'LECTURER', 'STUDENT')")
+    public ResponseEntity<JiraSprintResponse> update(@AuthenticationPrincipal SagaPrincipal principal, @PathVariable UUID projectId, @PathVariable UUID sprintId,
+            @RequestHeader("Idempotency-Key") String key, @RequestBody JiraSprintUpdateRequest request) {
+        return ResponseEntity.ok(sprintWriteService.update(principal, projectId, sprintId, key, request));
+    }
+
+    @PostMapping("/projects/{projectId}/sprints/{sprintId}/start")
+    @PreAuthorize("hasAnyRole('ADMIN', 'LECTURER', 'STUDENT')")
+    public ResponseEntity<JiraSprintResponse> start(@AuthenticationPrincipal SagaPrincipal principal, @PathVariable UUID projectId, @PathVariable UUID sprintId,
+            @RequestHeader("Idempotency-Key") String key) { return ResponseEntity.ok(sprintWriteService.start(principal, projectId, sprintId, key)); }
+
+    @PostMapping("/projects/{projectId}/sprints/{sprintId}/close")
+    @PreAuthorize("hasAnyRole('ADMIN', 'LECTURER', 'STUDENT')")
+    public ResponseEntity<JiraSprintResponse> close(@AuthenticationPrincipal SagaPrincipal principal, @PathVariable UUID projectId, @PathVariable UUID sprintId,
+            @RequestHeader("Idempotency-Key") String key) { return ResponseEntity.ok(sprintWriteService.close(principal, projectId, sprintId, key)); }
+
+    @DeleteMapping("/projects/{projectId}/sprints/{sprintId}")
+    @PreAuthorize("hasAnyRole('ADMIN', 'LECTURER', 'STUDENT')")
+    public ResponseEntity<Void> delete(@AuthenticationPrincipal SagaPrincipal principal, @PathVariable UUID projectId, @PathVariable UUID sprintId,
+            @RequestHeader("Idempotency-Key") String key) { sprintWriteService.delete(principal, projectId, sprintId, key); return ResponseEntity.noContent().build(); }
 
     @GetMapping("/projects/{projectId}/sprints")
     @Operation(summary = "List sprints by project")

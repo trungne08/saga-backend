@@ -311,16 +311,190 @@ public class JiraProviderClientImpl implements JiraProviderClient {
             String cloudId,
             String issueIdOrKey
     ) {
+        return getIssue(accessToken, cloudId, issueIdOrKey, null);
+    }
+
+    @Override
+    public JiraIssueSnapshot getIssue(
+            String accessToken,
+            String cloudId,
+            String issueIdOrKey,
+            String estimationFieldId
+    ) {
         String issue = requiredPathSegment(issueIdOrKey);
         URI uri = UriComponentsBuilder.fromUri(jiraUri(
                         cloudId,
                         "/rest/api/3/issue/" + issue
                 ))
-                .queryParam("fields", issueFields())
+                .queryParam("fields", issueFields(estimationFieldId))
                 .build()
                 .encode()
                 .toUri();
-        return toIssue(get(uri, accessToken));
+        return toIssue(get(uri, accessToken), estimationFieldId);
+    }
+
+    @Override
+    public List<JiraCreateField> getEditMetadata(String accessToken, String cloudId, String issueIdOrKey) {
+        JsonNode fields = get(jiraUri(cloudId, "/rest/api/3/issue/"
+                + requiredPathSegment(issueIdOrKey) + "/editmeta"), accessToken).path("fields");
+        if (!fields.isObject()) throw providerResponseInvalid();
+        List<JiraCreateField> result = new ArrayList<>();
+        fields.properties().forEach(entry -> {
+            JsonNode field = entry.getValue().deepCopy();
+            if (!field.hasNonNull("key")) ((tools.jackson.databind.node.ObjectNode) field).put("key", entry.getKey());
+            result.add(toCreateField(field));
+        });
+        return List.copyOf(result);
+    }
+
+    @Override
+    public JiraIssueReference createIssue(String accessToken, String cloudId, Map<String, Object> fields) {
+        if (fields == null || fields.isEmpty()) throw IntegrationException.invalid("JIRA_REQUEST_INVALID", "Jira issue fields are required");
+        JsonNode response = postJson(jiraUri(cloudId, "/rest/api/3/issue"), accessToken, Map.of("fields", fields));
+        return new JiraIssueReference(requiredText(response, "id"), requiredText(response, "key"));
+    }
+
+    @Override
+    public void updateIssue(String accessToken, String cloudId, String issueIdOrKey, Map<String, Object> fields) {
+        if (fields == null || fields.isEmpty()) throw IntegrationException.invalid("JIRA_REQUEST_INVALID", "Jira issue fields are required");
+        putNoContent(jiraUri(cloudId, "/rest/api/3/issue/" + requiredPathSegment(issueIdOrKey)), accessToken, Map.of("fields", fields));
+    }
+
+    @Override
+    public void deleteIssue(String accessToken, String cloudId, String issueIdOrKey) {
+        delete(jiraUri(cloudId, "/rest/api/3/issue/" + requiredPathSegment(issueIdOrKey)), accessToken);
+    }
+
+    @Override
+    public List<JiraTransition> getTransitions(String accessToken, String cloudId, String issueIdOrKey) {
+        JsonNode values = get(jiraUri(cloudId, "/rest/api/3/issue/"
+                + requiredPathSegment(issueIdOrKey) + "/transitions"), accessToken).path("transitions");
+        if (!values.isArray()) throw providerResponseInvalid();
+        List<JiraTransition> transitions = new ArrayList<>();
+        values.forEach(value -> transitions.add(new JiraTransition(requiredText(value, "id"), requiredText(value, "name"),
+                nestedText(value, "to", "id"), nestedText(value, "to", "name"))));
+        return List.copyOf(transitions);
+    }
+
+    @Override
+    public void transitionIssue(String accessToken, String cloudId, String issueIdOrKey, String transitionId) {
+        postNoContent(jiraUri(cloudId, "/rest/api/3/issue/" + requiredPathSegment(issueIdOrKey)
+                + "/transitions"), accessToken, Map.of("transition", Map.of("id", requiredPathSegment(transitionId))));
+    }
+
+    @Override
+    public void assignIssue(String accessToken, String cloudId, String issueIdOrKey, String accountId) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("accountId", accountId == null ? null : requiredStableId(accountId));
+        putNoContent(jiraUri(cloudId, "/rest/api/3/issue/" + requiredPathSegment(issueIdOrKey)
+                + "/assignee"), accessToken, body);
+    }
+
+    @Override
+    public JiraSprintSnapshot getSprint(String accessToken, String cloudId, String sprintId) {
+        return toSprint(get(jiraUri(
+                cloudId, "/rest/agile/1.0/sprint/" + requiredPathSegment(sprintId)
+        ), accessToken));
+    }
+
+    @Override
+    public JiraSprintSnapshot createSprint(
+            String accessToken,
+            String cloudId,
+            String boardId,
+            String name,
+            String goal,
+            String startDate,
+            String endDate
+    ) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("originBoardId", requiredPathSegment(boardId));
+        body.put("name", requiredNonBlank(name));
+        if (goal != null) body.put("goal", goal);
+        if (startDate != null) body.put("startDate", startDate);
+        if (endDate != null) body.put("endDate", endDate);
+        return toSprint(postJson(jiraUri(
+                cloudId, "/rest/agile/1.0/sprint"
+        ), accessToken, body));
+    }
+
+    @Override
+    public JiraSprintSnapshot updateSprint(
+            String accessToken,
+            String cloudId,
+            String sprintId,
+            Map<String, Object> changes
+    ) {
+        if (changes == null || changes.isEmpty()) {
+            throw IntegrationException.invalid("JIRA_SPRINT_UPDATE_EMPTY", "No sprint changes were supplied");
+        }
+        return toSprint(patchJson(jiraUri(
+                cloudId, "/rest/agile/1.0/sprint/" + requiredPathSegment(sprintId)
+        ), accessToken, changes));
+    }
+
+    @Override
+    public void deleteSprint(String accessToken, String cloudId, String sprintId) {
+        delete(jiraUri(cloudId, "/rest/agile/1.0/sprint/" + requiredPathSegment(sprintId)), accessToken);
+    }
+
+    @Override
+    public void moveIssuesToSprint(
+            String accessToken, String cloudId, String sprintId, List<String> issueIdsOrKeys
+    ) {
+        postNoContent(jiraUri(
+                cloudId, "/rest/agile/1.0/sprint/" + requiredPathSegment(sprintId) + "/issue"
+        ), accessToken, Map.of("issues", safeIssueIds(issueIdsOrKeys)));
+    }
+
+    @Override
+    public void moveIssuesToBacklog(
+            String accessToken, String cloudId, String boardId, List<String> issueIdsOrKeys
+    ) {
+        postNoContent(jiraUri(
+                cloudId, "/rest/agile/1.0/backlog/" + requiredPathSegment(boardId) + "/issue"
+        ), accessToken, Map.of("issues", safeIssueIds(issueIdsOrKeys)));
+    }
+
+    @Override
+    public void estimateIssue(
+            String accessToken,
+            String cloudId,
+            String boardId,
+            String issueIdOrKey,
+            Integer value
+    ) {
+        if (value == null || value < 0) {
+            throw IntegrationException.invalid("JIRA_ESTIMATION_INVALID", "The Jira estimation is invalid");
+        }
+        URI uri = UriComponentsBuilder.fromUri(jiraUri(
+                        cloudId,
+                        "/rest/agile/1.0/issue/" + requiredPathSegment(issueIdOrKey)
+                                + "/estimation"
+                ))
+                .queryParam("boardId", requiredPathSegment(boardId))
+                .build().encode().toUri();
+        putNoContent(uri, accessToken, Map.of("value", value));
+    }
+
+    @Override
+    public boolean supportsEstimation(String accessToken, String cloudId, String boardId) {
+        JsonNode estimation = estimation(accessToken, cloudId, boardId);
+        if (estimation.isMissingNode() || estimation.isNull() || !estimation.isObject()) {
+            return false;
+        }
+        String type = text(estimation, "type");
+        return type != null && !type.isBlank() && !"none".equalsIgnoreCase(type);
+    }
+
+    @Override
+    public String estimationFieldId(String accessToken, String cloudId, String boardId) {
+        JsonNode estimation = estimation(accessToken, cloudId, boardId);
+        String type = text(estimation, "type");
+        if (type == null || type.isBlank() || "none".equalsIgnoreCase(type)) {
+            return null;
+        }
+        return nestedText(estimation, "field", "fieldId");
     }
 
     @Override
@@ -642,6 +816,59 @@ public class JiraProviderClientImpl implements JiraProviderClient {
                 throw providerResponseInvalid();
             }
             return response;
+        } catch (RestClientResponseException exception) {
+            throw translate(exception);
+        } catch (RestClientException exception) {
+            throw providerUnavailable();
+        }
+    }
+
+    private JsonNode patchJson(URI uri, String token, Object body) {
+        try {
+            JsonNode response = restClient.patch()
+                    .uri(uri)
+                    .headers(headers -> bearer(headers, token))
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(body)
+                    .retrieve()
+                    .body(JsonNode.class);
+            if (response == null) throw providerResponseInvalid();
+            return response;
+        } catch (RestClientResponseException exception) {
+            throw translate(exception);
+        } catch (RestClientException exception) {
+            throw providerUnavailable();
+        }
+    }
+
+    private void postNoContent(URI uri, String token, Object body) {
+        try {
+            restClient.post().uri(uri).headers(headers -> bearer(headers, token))
+                    .contentType(MediaType.APPLICATION_JSON).body(body).retrieve()
+                    .toBodilessEntity();
+        } catch (RestClientResponseException exception) {
+            throw translate(exception);
+        } catch (RestClientException exception) {
+            throw providerUnavailable();
+        }
+    }
+
+    private void putNoContent(URI uri, String token, Object body) {
+        try {
+            restClient.put().uri(uri).headers(headers -> bearer(headers, token))
+                    .contentType(MediaType.APPLICATION_JSON).body(body).retrieve()
+                    .toBodilessEntity();
+        } catch (RestClientResponseException exception) {
+            throw translate(exception);
+        } catch (RestClientException exception) {
+            throw providerUnavailable();
+        }
+    }
+
+    private void delete(URI uri, String token) {
+        try {
+            restClient.delete().uri(uri).headers(headers -> bearer(headers, token))
+                    .retrieve().toBodilessEntity();
         } catch (RestClientResponseException exception) {
             throw translate(exception);
         } catch (RestClientException exception) {
@@ -1051,6 +1278,19 @@ public class JiraProviderClientImpl implements JiraProviderClient {
         );
     }
 
+    private JiraSprintSnapshot toSprint(JsonNode sprint) {
+        return new JiraSprintSnapshot(
+                requiredText(sprint, "id"),
+                requiredText(sprint, "name"),
+                text(sprint, "state"),
+                text(sprint, "goal"),
+                parseDateOrDateTime(text(sprint, "startDate")),
+                parseDateOrDateTime(text(sprint, "endDate")),
+                parseDateOrDateTime(text(sprint, "completeDate")),
+                text(sprint, "originBoardId")
+        );
+    }
+
     private String schemaText(JsonNode schema, String field) {
         if (schema == null || schema.isMissingNode() || schema.isNull()) {
             return null;
@@ -1118,15 +1358,29 @@ public class JiraProviderClientImpl implements JiraProviderClient {
         return maxResults > 0 && returned == maxResults;
     }
 
+    private JsonNode estimation(String accessToken, String cloudId, String boardId) {
+        return get(jiraUri(
+                cloudId, "/rest/agile/1.0/board/" + requiredPathSegment(boardId) + "/configuration"
+        ), accessToken).path("estimation");
+    }
+
     private String issueFields() {
+        return issueFields(null);
+    }
+
+    private String issueFields(String estimationFieldId) {
         return "summary,issuetype,status,priority,assignee,reporter,"
                 + "duedate,created,updated,resolutiondate,resolution,"
-                + "customfield_10016,customfield_10020,labels,components,description";
+                + "labels,components,description"
+                + (estimationFieldId == null ? "" : "," + requiredStableId(estimationFieldId));
     }
 
     private JiraIssueSnapshot toIssue(JsonNode issue) {
+        return toIssue(issue, null);
+    }
+
+    private JiraIssueSnapshot toIssue(JsonNode issue, String estimationFieldId) {
         JsonNode fields = issue.path("fields");
-        JsonNode sprint = first(fields.path("customfield_10020"));
         String updatedText = text(fields, "updated");
         LocalDateTime updatedAt = parseDateOrDateTime(updatedText);
         Instant updatedAtUtc = parseInstant(updatedText);
@@ -1140,7 +1394,7 @@ public class JiraProviderClientImpl implements JiraProviderClient {
                 nestedText(fields, "issuetype", "name"),
                 nestedText(fields, "status", "name"),
                 nestedText(fields, "priority", "name"),
-                nullableInt(fields.path("customfield_10016")),
+                estimationFieldId == null ? null : integer(fields.path(estimationFieldId)),
                 nestedText(fields, "assignee", "accountId"),
                 nestedText(fields, "reporter", "accountId"),
                 parseDateOrDateTime(text(fields, "duedate")),
@@ -1148,13 +1402,23 @@ public class JiraProviderClientImpl implements JiraProviderClient {
                 updatedAt,
                 parseDateOrDateTime(text(fields, "resolutiondate")),
                 nestedText(fields, "resolution", "name"),
-                sprint == null ? null : text(sprint, "id"),
-                sprint == null ? null : text(sprint, "name"),
+                null,
+                null,
                 updatedAtUtc,
                 labels(fields.path("labels")),
                 description(fields.path("description")),
                 components(fields.path("components"))
         );
+    }
+
+    private Integer integer(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return null;
+        }
+        if (!node.isInt()) {
+            throw providerResponseInvalid();
+        }
+        return node.asInt();
     }
 
     private List<String> labels(JsonNode node) {
@@ -1327,6 +1591,27 @@ public class JiraProviderClientImpl implements JiraProviderClient {
             );
         }
         return value;
+    }
+
+    private String requiredNonBlank(String value) {
+        if (value == null || value.isBlank()) {
+            throw IntegrationException.invalid("JIRA_REQUEST_INVALID", "A required Jira value is missing");
+        }
+        return value.trim();
+    }
+
+    private String requiredStableId(String value) {
+        if (value == null || value.isBlank() || value.length() > 255 || value.chars().anyMatch(Character::isISOControl)) {
+            throw IntegrationException.invalid("JIRA_IDENTIFIER_INVALID", "The Jira identifier is invalid");
+        }
+        return value.trim();
+    }
+
+    private List<String> safeIssueIds(List<String> values) {
+        if (values == null || values.isEmpty() || values.size() > 50) {
+            throw IntegrationException.invalid("JIRA_ISSUE_LIST_INVALID", "Between 1 and 50 Jira issues are required");
+        }
+        return values.stream().map(this::requiredPathSegment).toList();
     }
 
     private boolean retryable(RestClientResponseException exception) {

@@ -18,8 +18,11 @@ import com.saga.be.service.TeamContributionRefreshService;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.UUID;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
 public class JiraIssueUpsertService {
@@ -29,23 +32,39 @@ public class JiraIssueUpsertService {
     private final SprintRepository sprintRepository;
     private final IdentityMappingService identityMappingService;
     private final TeamContributionRefreshService teamContributionRefreshService;
+    private final TransactionTemplate transactionTemplate;
 
     public JiraIssueUpsertService(
             JiraBoardRepository boardRepository,
             TaskRepository taskRepository,
             SprintRepository sprintRepository,
             IdentityMappingService identityMappingService,
-            TeamContributionRefreshService teamContributionRefreshService
+            TeamContributionRefreshService teamContributionRefreshService,
+            PlatformTransactionManager transactionManager
     ) {
         this.boardRepository = boardRepository;
         this.taskRepository = taskRepository;
         this.sprintRepository = sprintRepository;
         this.identityMappingService = identityMappingService;
         this.teamContributionRefreshService = teamContributionRefreshService;
+        this.transactionTemplate = new TransactionTemplate(transactionManager);
+        this.transactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
-    @Transactional
     public boolean upsert(UUID boardId, JiraIssueSnapshot issue) {
+        try {
+            Boolean changed = transactionTemplate.execute(status -> upsertAttempt(boardId, issue));
+            if (Boolean.TRUE.equals(changed)) teamContributionRefreshService.refreshFromBoard(boardId);
+            return Boolean.TRUE.equals(changed);
+        } catch (DataIntegrityViolationException exception) {
+            if (!isTargetDuplicate(exception)) throw exception;
+            Boolean changed = transactionTemplate.execute(status -> reloadAndApply(boardId, issue));
+            if (Boolean.TRUE.equals(changed)) teamContributionRefreshService.refreshFromBoard(boardId);
+            return Boolean.TRUE.equals(changed);
+        }
+    }
+
+    private boolean upsertAttempt(UUID boardId, JiraIssueSnapshot issue) {
         JiraBoard board = boardRepository.findById(boardId)
                 .orElseThrow(() -> IntegrationException.invalid(
                         "JIRA_LINK_NOT_FOUND",
@@ -65,6 +84,43 @@ public class JiraIssueUpsertService {
             return false;
         }
 
+        applySnapshot(task, board, issue);
+        taskRepository.saveAndFlush(task);
+        return true;
+    }
+
+    private boolean reloadAndApply(UUID boardId, JiraIssueSnapshot issue) {
+        JiraBoard board = boardRepository.findById(boardId).orElseThrow(() -> IntegrationException.conflict(
+                "JIRA_TASK_UPSERT_CONFLICT", "The Jira task snapshot could not be reconciled"));
+        Task raced = taskRepository.findByProjectIdAndExternalId(board.getProject().getId(), issue.id())
+                .orElseThrow(() -> IntegrationException.conflict("JIRA_TASK_UPSERT_CONFLICT", "The Jira task snapshot could not be reconciled"));
+        if (isStale(raced, issue)) return false;
+        applySnapshot(raced, board, issue);
+        taskRepository.saveAndFlush(raced);
+        return true;
+    }
+
+    private boolean isTargetDuplicate(DataIntegrityViolationException exception) {
+        Throwable current = exception;
+        while (current != null) {
+            String message = current.getMessage();
+            if (message != null && message.toLowerCase(Locale.ROOT).contains("uk_task_project_external")) return true;
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    private boolean isStale(Task task, JiraIssueSnapshot issue) {
+        return task.getExternalUpdatedAt() != null
+                && issue.updatedAt() != null
+                && task.getExternalUpdatedAt().isAfter(issue.updatedAt());
+    }
+
+    private void applySnapshot(
+            Task task,
+            JiraBoard board,
+            JiraIssueSnapshot issue
+    ) {
         task.setProject(board.getProject());
         task.setExternalId(issue.id());
         task.setExternalKey(issue.key());
@@ -72,7 +128,9 @@ public class JiraIssueUpsertService {
         task.setType(taskType(issue.issueType()));
         task.setStatus(taskStatus(issue.status()));
         task.setPriority(priority(issue.priority()));
-        task.setStoryPoint(issue.storyPoints());
+        if (issue.storyPoints() != null) {
+            task.setStoryPoint(issue.storyPoints());
+        }
         task.setDueDate(issue.dueDate());
         task.setExternalUpdatedAt(issue.updatedAt());
         task.setResolvedAt(issue.resolvedAt());
@@ -93,10 +151,13 @@ public class JiraIssueUpsertService {
                 issue.reporterAccountId()
         ));
         task.setReporterExternalId(issue.reporterAccountId());
-        task.setSprint(sprint(board, issue));
-        taskRepository.saveAndFlush(task);
-        teamContributionRefreshService.refreshFromBoard(boardId);
-        return true;
+        // A normal Jira issue response does not contain Agile-only sprint
+        // data. Keep an already reconciled placement unless the provider
+        // explicitly supplied one; backlog moves clear it in their dedicated
+        // Jira Software reconciliation path.
+        if (issue.sprintId() != null) {
+            task.setSprint(sprint(board, issue));
+        }
     }
 
     private Sprint sprint(JiraBoard board, JiraIssueSnapshot issue) {

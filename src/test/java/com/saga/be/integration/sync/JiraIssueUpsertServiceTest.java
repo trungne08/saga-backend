@@ -29,9 +29,13 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.TransactionStatus;
 
 class JiraIssueUpsertServiceTest {
 
@@ -49,12 +53,15 @@ class JiraIssueUpsertServiceTest {
         taskRepository = mock(TaskRepository.class);
         mappingService = mock(IdentityMappingService.class);
         teamContributionRefreshService = mock(TeamContributionRefreshService.class);
+        PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
+        when(transactionManager.getTransaction(any(TransactionDefinition.class))).thenReturn(mock(TransactionStatus.class));
         service = new JiraIssueUpsertService(
                 boardRepository,
                 taskRepository,
                 mock(SprintRepository.class),
                 mappingService,
-                teamContributionRefreshService
+                teamContributionRefreshService,
+                transactionManager
         );
         boardId = UUID.randomUUID();
         projectId = UUID.randomUUID();
@@ -246,6 +253,24 @@ class JiraIssueUpsertServiceTest {
         assertEquals(List.of(), existing.getComponents());
         assertEquals("jira-10001", existing.getExternalId());
         assertEquals("SAGA-1", existing.getExternalKey());
+    }
+
+    @Test
+    void duplicateInsertFromConcurrentReconciliationReloadsAndAppliesCanonicalSnapshot() {
+        Task raced = new Task();
+        when(taskRepository.findByProjectIdAndExternalId(projectId, "jira-10001"))
+                .thenReturn(Optional.empty(), Optional.of(raced));
+        when(taskRepository.saveAndFlush(any(Task.class)))
+                .thenThrow(new DataIntegrityViolationException("Duplicate entry for key uk_task_project_external"))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        assertTrue(service.upsert(boardId, snapshot(
+                "jira-10001", "Done", LocalDateTime.parse("2026-07-29T12:00:00")
+        )));
+
+        assertEquals("jira-10001", raced.getExternalId());
+        assertEquals(TaskStatus.DONE, raced.getStatus());
+        verify(taskRepository, org.mockito.Mockito.times(2)).saveAndFlush(any(Task.class));
     }
 
     private JiraIssueSnapshot snapshot(

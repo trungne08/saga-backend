@@ -95,6 +95,9 @@ public class Task extends BaseEntity {
     @Column(name = "resolution")
     private String resolution;
 
+    @Column(name = "deleted_at")
+    private LocalDateTime deletedAt;
+
     @Column(name = "description", columnDefinition = "TEXT")
     private String description;
 

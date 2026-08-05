@@ -92,6 +92,7 @@ public class ProjectTaskReadService {
     public TaskReadResponse getTask(SagaPrincipal principal, UUID projectId, UUID taskId) {
         requireProjectAccess(principal, projectId);
         return taskRepository.findByIdAndProjectId(taskId, projectId)
+                .filter(task -> task.getDeletedAt() == null)
                 .map(TaskReadResponse::from)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Task not found"));
     }
@@ -127,7 +128,10 @@ public class ProjectTaskReadService {
     }
 
     private Specification<Task> projectSpecification(UUID projectId) {
-        return (root, query, builder) -> builder.equal(root.get("project").get("id"), projectId);
+        return (root, query, builder) -> builder.and(
+                builder.equal(root.get("project").get("id"), projectId),
+                builder.isNull(root.get("deletedAt"))
+        );
     }
 
     private void validatePage(int page, int size) {

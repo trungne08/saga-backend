@@ -11,6 +11,7 @@ import com.saga.be.security.ApplicationRole;
 import com.saga.be.security.SagaPrincipal;
 import com.saga.be.service.AuthenticationAuditService;
 import java.util.UUID;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -37,7 +38,8 @@ public class ProjectIntegrationAuthorizationService {
     @Transactional(readOnly = true)
     public Project requireProjectManager(SagaPrincipal principal, UUID projectId) {
         Project project = projectRepository.findById(projectId)
-                .orElseThrow(() -> IntegrationException.invalid(
+                .orElseThrow(() -> new IntegrationException(
+                        HttpStatus.NOT_FOUND,
                         "PROJECT_NOT_FOUND",
                         "The project does not exist"
                 ));

@@ -39,6 +39,7 @@ public class ProjectSprintService {
                 resolveTeamId(projectId),
                 sprintRepository.findByBoardProjectIdOrderByStartDateAsc(projectId)
                         .stream()
+                        .filter(sprint -> sprint.getDeletedAt() == null)
                         .map(SprintSummaryResponse::from)
                         .toList()
         );
@@ -57,6 +58,7 @@ public class ProjectSprintService {
                 teamId,
                 sprintRepository.findByBoardProjectIdOrderByStartDateAsc(team.getProject().getId())
                         .stream()
+                        .filter(sprint -> sprint.getDeletedAt() == null)
                         .map(SprintSummaryResponse::from)
                         .toList()
         );

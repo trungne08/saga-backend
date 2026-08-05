@@ -16,8 +16,14 @@ public interface SprintRepository extends JpaRepository<Sprint, UUID> {
     );
 
     List<Sprint> findByBoardProjectId(UUID projectId);
+
+    List<Sprint> findByBoardProjectIdAndDeletedAtIsNull(UUID projectId);
     
     List<Sprint> findByBoardProjectIdOrderByStartDateAsc(UUID projectId);
 
+    List<Sprint> findByBoardProjectIdAndDeletedAtIsNullOrderByStartDateAsc(UUID projectId);
+
     Optional<Sprint> findByIdAndBoardProjectId(UUID id, UUID projectId);
+
+    Optional<Sprint> findByIdAndBoardProjectIdAndDeletedAtIsNull(UUID id, UUID projectId);
 }
