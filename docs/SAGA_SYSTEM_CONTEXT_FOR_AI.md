@@ -7,17 +7,65 @@
 | Mục | Giá trị |
 |---|---|
 | Branch | `main` |
-| Commit | `0bc30bedff6cef4f065e5eef559404987f53d045` (`0bc30be`); `200d866`, `a43f05d` và `07ffa38` là checkpoint lịch sử |
-| Thời điểm audit | 2026-08-04 (Asia/Saigon, UTC+07:00) |
-| Working tree | Chỉ sáu Markdown đang được đồng bộ trong task tài liệu; source/test/config/migration sạch so với HEAD. |
+| Commit | `4f3dee969ebd7ee03a94eb1b8133987ad622c66d` (`4f3dee9`); các SHA được nêu ở phần lịch sử chỉ là checkpoint cũ |
+| Thời điểm audit | 2026-08-06 (Asia/Saigon, UTC+07:00) |
+| Working tree | Sạch trước task; task documentation-only chỉ cập nhật bốn Markdown được chỉ định, không sửa source/test/config/migration. |
 | Java / Spring Boot | Java 17 / Spring Boot 4.1.0 |
 | Profile tìm thấy | mặc định, `local`, `prod`, `test` |
 | Phạm vi | `src/main`, `src/test`, `pom.xml`, cấu hình, Railway, Lambda Cognito, scripts và docs hiện hữu |
 
 Evidence: `pom.xml`; `src/main/resources/application*.properties`; `railway.json`.
 
-> Lưu ý lịch sử: các đoạn bên dưới có cụm “HEAD `200d866` hiện tại” phản ánh đúng
-> thời điểm audit cũ; HEAD hiện hành của tài liệu này là `0bc30be`.
+> Lưu ý lịch sử: các đoạn bên dưới gắn với SHA cũ phản ánh đúng snapshot tại thời
+> điểm viết nhưng đã bị mục cập nhật 2026-08-06 supersede khi mô tả trạng thái hiện hành.
+
+## Update 2026-08-06 — Jira Task/Sprint và Student profile
+
+- **CONFIRMED:** repository `D:/SAGA_BE/be-clean`, branch `main`, HEAD
+  `4f3dee969ebd7ee03a94eb1b8133987ad622c66d`; HEAD bằng `origin/main` và working
+  tree sạch trước task. Migration mới nhất là V17. Source hiện khai báo trực tiếp
+  73 HTTP route trong 20 controller; `POST /api/auth/logout` là route do Spring
+  Security quản lý, không nằm trong số này.
+- **CONFIRMED:** Surefire reports hiện có 90 suite, 504 test, 0 failure, 0 error,
+  0 skipped. Đây là số liệu từ full Maven gần nhất; task tài liệu không chạy Maven lại.
+- **CONFIRMED:** browser API tiếp tục dùng HTTP session `JSESSIONID`; frontend gửi
+  `credentials: "include"`, không dùng Bearer. GET không cần CSRF; POST/PUT/PATCH/
+  DELETE cần CSRF, ngoại trừ đúng hai provider webhook được cấu hình miễn.
+- **CONFIRMED:** Jira là source of truth cho Task/Sprint; database SAGA là canonical
+  snapshot/read model cục bộ. Mutation gọi Jira trước, sau đó fetch canonical issue
+  hoặc Sprint và upsert local trước khi trả response. Source production không
+  hardcode `customfield_*`; sprint/estimation field id được discovery từ Jira.
+- **CONFIRMED:** mọi Task/Sprint mutation route bắt buộc `Idempotency-Key`; actor lấy
+  từ `SagaPrincipal.localProfileId`. `JiraWriteOperation` persist fingerprint,
+  trạng thái `PENDING`, `REMOTE_SUCCEEDED`, `COMPLETED`, `FAILED`, `UNKNOWN` và chỉ
+  safe error code/remote identity; không persist token hay raw provider payload.
+  Duplicate claim rollback transaction insert rồi reload canonical operation trong
+  transaction `REQUIRES_NEW` khác. Recovery chỉ hoàn tất remote success đã persist,
+  không blind retry mutation có outcome không rõ.
+- **CONFIRMED:** Task delete gọi Jira rồi soft-delete local bằng `deletedAt`. Sprint
+  delete gọi Jira, gỡ `Task.sprint`, flush association rồi soft-delete Sprint; không
+  hard-delete audit, Contribution hay Peer Review data.
+- **CONFIRMED:** canonical Jira Agile Sprint response có quyền replace cả
+  `startDate`, `endDate`, `completeDate`, kể cả null; provider normalize offset về
+  UTC `LocalDateTime`. Embedded Sprint trong issue chỉ cập nhật reference/name nên
+  không clear canonical dates. Backfill, reconciliation và webhook cùng shared sync/
+  hydration; distinct Sprint id được fetch tối đa một lần mỗi job, kể cả local Sprint
+  còn null dates. Vì Jira Sprint snapshot không có remote `updated/version`, hai
+  canonical snapshot cạnh tranh theo last-processed-wins.
+- **CONFIRMED:** UUID scalar `actor_profile_id` dùng explicit JDBC `CHAR` mapping
+  phù hợp V17 `CHAR(36)`; fingerprint dạng chuỗi dùng JDBC `CHAR` phù hợp
+  `request_fingerprint CHAR(64)`. Giữ nguyên V17; không có V18.
+- **CONFIRMED:** `GET /api/v1/courses/{courseId}/students/{studentId}` trả
+  `courseId`, `studentId`, `studentCode`, `fullName`, `email`, `avatarUrl`,
+  `accountStatus` và `team { teamId, teamName, roleInTeam }`. ADMIN đọc mọi Course;
+  LECTURER chỉ Course được phân công; STUDENT 403; anonymous 401. Membership được
+  xác định qua `TeamMember -> Team -> Course`; không có membership trả 404, legacy
+  nhiều membership trả 409. `avatarUrl` hiện luôn null vì `Student` chưa có nguồn
+  avatar; `accountStatus` là trạng thái tài khoản, không phải Course enrollment.
+  Model chưa hỗ trợ Student thuộc Course nhưng chưa có Team vì không có
+  `CourseEnrollment` độc lập.
+- **TBD:** runtime production sau V17 chưa được repository chứng minh bằng đủ log
+  `Initialized JPA EntityManagerFactory`, `Started BeApplication` và health HTTP 200.
 
 ### Privacy Policy public (2026-08-03)
 
@@ -34,9 +82,9 @@ Evidence: `pom.xml`; `src/main/resources/application*.properties`; `railway.json
 - **CONFIRMED:** `ContributionCalculationService` is a read-only internal service.
   It aggregates mapped GitHub commits, SAGA Documents by type, DONE Jira tasks
   (null story point = 1) and peer reviews scoped to the Project/Team.
-- **PARTIAL/TBD:** Jira story-point/sprint fields are currently tenant-specific
-  ids in `JiraProviderClientImpl`; no discovery/configuration exists. Peer-review
-  config precedence and a persistent contribution-override model are absent.
+- **SUPERSEDED 2026-08-06:** nhận định story-point/sprint field dùng tenant-specific
+  id không còn đúng; source hiện discovery field id từ Jira và không hardcode
+  `customfield_*`. Peer-review config precedence của snapshot này vẫn là lịch sử.
 - **TBD:** final-distribution policy for invalid per-student overrides,
   all-overridden remainder, positive remainder with zero base and rounding.
 - **RECOMMENDED:** classifier stays deferred; raw Jira fields are available for a
@@ -46,7 +94,9 @@ Evidence: `pom.xml`; `src/main/resources/application*.properties`; `railway.json
 
 - **CONFIRMED:** Jira enhanced search request thêm `labels`; `JiraIssueSnapshot.labels` là immutable `List<String>`. Missing/null/empty array thành empty list; non-array hoặc phần tử không phải string bị xử lý như provider response invalid, không stringify im lặng. Labels không thay thế `issue.id`/`issue.key` làm định danh Task.
 - **CONFIRMED:** `Task.labels` lưu JSON array trong cột `task.labels_json` kiểu `TEXT` qua `StringListJsonConverter`; getter/setter dùng defensive immutable copy. V8 chỉ thêm cột nullable nên Task hiện hữu đọc thành empty list. `JiraIssueUpsertService` replace toàn bộ snapshot labels; empty snapshot xóa labels local, không merge/append.
-- **CONFIRMED:** Jira webhook vẫn chỉ trigger shared `reconcileJira`; không parse labels webhook riêng. Backfill và reconciliation cùng đi qua provider → snapshot → upsert. Không có normalized Label entity, Task HTTP API, Jira task create/update API, hay labels response cho frontend.
+- **CONFIRMED/PARTLY SUPERSEDED:** Jira webhook vẫn trigger shared `reconcileJira`,
+  không parse labels riêng; không có normalized Label entity. Từ 2026-08-06 đã có
+  Task list/detail, labels response và Jira Task create/update write-through API.
 
 ## 2. Tóm tắt nhanh hệ thống
 
@@ -85,7 +135,7 @@ flowchart LR
 |---|---|---|---|
 | `config` | security, CORS, OpenAPI, property binding, Mongo health, local seed | `SecurityConfig`, `CorsConfig`, `IntegrationPublicUrlValidator` | CONFIRMED |
 | `security`, `auth`, `service` | OIDC claims, role, local profile, session/login/logout | `CognitoAuthenticationSuccessHandler`, `AuthenticatedProfileService` | CONFIRMED |
-| `controller` | HTTP API | 15 REST controllers có 45 HTTP methods và 1 `@RestControllerAdvice` không endpoint | CONFIRMED tại HEAD `200d866` |
+| `controller` | HTTP API | 20 controller có 73 HTTP route khai báo trực tiếp và 1 `@RestControllerAdvice` không endpoint | CONFIRMED tại HEAD `4f3dee9` |
 | `entity`, `repository` | JPA/MySQL domain và Mongo audit | `Student`, `Team`, `Project`, `SystemAuditLog` | CONFIRMED |
 | `integration/identity` | personal identity mapping/review | `IdentityMappingService`, `IdentityMappingReviewService` | CONFIRMED |
 | `integration/project` | team project, Jira/GitHub link flow | `ProjectIntegrationService`, `TeamProjectService` | CONFIRMED |
@@ -163,7 +213,12 @@ Application role khác team role. Một Student có thể là `LEADER`; điều 
 
 ## 6. API endpoint matrix
 
-Có 45 HTTP methods được khai báo trực tiếp trong 15 REST controllers tại HEAD `200d866`. `GlobalExceptionHandler` là 1 `@RestControllerAdvice`, không khai báo endpoint. `POST /api/auth/logout` là endpoint framework-managed, không phải controller method. Mặc định `Auth` nghĩa authenticated session theo SecurityConfig. CSRF: `Có` cho POST/PUT/PATCH/DELETE, `Không áp dụng` cho GET, `Miễn` chỉ hai webhook POST.
+Bảng dưới là baseline lịch sử tại HEAD `200d866` và không còn exhaustive. Tại HEAD
+`4f3dee9`, source có 73 HTTP route khai báo trực tiếp trong 20 controller;
+Task/Sprint và Course Student Basic Info deltas được ghi trong update 2026-08-06.
+`GlobalExceptionHandler` là `@RestControllerAdvice`, không khai báo endpoint.
+`POST /api/auth/logout` là endpoint framework-managed, không phải controller method.
+CSRF áp dụng cho POST/PUT/PATCH/DELETE, không áp dụng cho GET và chỉ miễn hai webhook POST.
 
 | Method | Path | Controller#Method | Public/Auth | Role/scope | CSRF | Request → Response | Evidence |
 |---|---|---|---|---|---|---|---|
@@ -310,7 +365,9 @@ Key classes: `ProjectIntegrationService#beginGitHubInstallation/#linkGitHubRepos
 - **CONFIRMED:** `SyncJobLog.startedAt`/`completedAt` vẫn là `LocalDateTime` và schema vẫn dùng `DATETIME(6)`, nhưng các write path production của SyncJobLog dùng `Clock.systemUTC()` và `LocalDateTime.ofInstant(..., ZoneOffset.UTC)`.
 - **CONFIRMED:** `SyncStatusResponse.Job` map hai field này sang `Instant`; JSON trả UTC offset rõ ràng, ví dụ `2026-08-04T05:13:49Z`. `null` vẫn là `null`.
 - **CONFIRMED:** không cộng cứng UTC+7, không đổi timezone JVM/Railway hay `JIRA_TIME_ZONE`. Các `LocalDateTime` nghiệp vụ khác không được suy diễn là UTC chỉ từ contract này.
-- **CONFIRMED:** quét source tại `0bc30be` có 16 REST controller chứa HTTP mapping, 46 controller HTTP methods và 72 test source Java classes. Full Maven: 70 suites / 299 tests / 0 failures / 0 errors / 0 skipped.
+- **HISTORICAL/SUPERSEDED:** quét source tại `0bc30be` từng có 16 REST controller,
+  46 controller HTTP methods và full Maven 70 suites/299 tests. Số hiện hành tại
+  `4f3dee9` là 20 controller/73 routes và 90 suites/504 tests như update 2026-08-06.
 
 ## 12. Deployment
 

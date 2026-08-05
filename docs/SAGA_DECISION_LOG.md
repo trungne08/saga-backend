@@ -2,10 +2,107 @@
 
 Tài liệu ghi lại quyết định đã được code/runtime fact chứng minh và các đề xuất còn mở. `ACCEPTED` không có nghĩa production đã được kiểm chứng; evidence của từng quyết định xác định phạm vi xác nhận.
 
-> Metadata audit hiện tại: branch `main`, HEAD thực tế `0bc30be` (`0bc30bedff6cef4f065e5eef559404987f53d045`). `200d866`, `a43f05d`, `07ffa38`, `90b1852` và `52a8c71` là checkpoint lịch sử. Full Maven checkpoint: 70 suites, 299 tests pass, 0 failures/errors/skips.
+> Metadata audit hiện tại: branch `main`, HEAD thực tế `4f3dee9` (`4f3dee969ebd7ee03a94eb1b8133987ad622c66d`). Các SHA cũ bên dưới là checkpoint lịch sử. Full Maven gần nhất: 90 suites, 504 tests pass, 0 failures/errors/skips.
 
 > Các DEC cũ có diễn đạt “HEAD hiện tại `200d866`” là mô tả tại thời điểm quyết
 > định lịch sử; không thay thế metadata audit hiện tại ở trên.
+
+> Audit ID: DEC-028 bị trùng trong lịch sử. Không renumber; ID lớn nhất đã dùng là
+> DEC-031, vì vậy các quyết định ngày 2026-08-06 bắt đầu từ DEC-032.
+
+## DEC-032 — Master Data DELETE dùng soft delete
+
+- Ngày: 2026-08-06.
+- Trạng thái: ACCEPTED / CONFIRMED cho Subject và Class; TBD cho Semester/Course.
+- Quyết định: `DELETE` Subject/Class đặt `deletedAt`, không hard delete/cascade;
+  active reads loại tombstone, Course dependency chặn delete và code tombstone
+  không được tái sử dụng. Không suy rộng sang Semester/Course khi source chưa có.
+- Hệ quả: quan hệ lịch sử được giữ; FE phải coi 409 dependency là domain guard.
+- Evidence: `SubjectService`, `ClassService`, `SubjectRepository`, `ClassRepository`,
+  `CourseRepository`, `SubjectUpdateSoftDeleteIntegrationTest`,
+  `ClassUpdateSoftDeleteIntegrationTest`, V15, V16.
+
+## DEC-033 — Jira Task/Sprint mutation dùng write-through
+
+- Ngày: 2026-08-06.
+- Trạng thái: ACCEPTED / CONFIRMED từ source và test.
+- Quyết định: Jira là source of truth; mutation remote xảy ra trước, sau đó backend
+  fetch canonical Jira issue/Sprint và upsert local. FE dùng session/JSESSIONID và
+  CSRF, không Bearer; actor lấy từ `SagaPrincipal.localProfileId`.
+- Hệ quả: SAGA database là canonical snapshot/read model cục bộ, không phải nguồn
+  phát sinh trạng thái Jira độc lập. Production source discovery Jira field id và
+  không hardcode `customfield_*`.
+- Evidence: `ProjectTaskReadController`, `ProjectSprintController`,
+  `JiraTaskWriteService`, `JiraSprintWriteService`, `JiraProviderClientImpl`,
+  `JiraMutationControllerSecurityIntegrationTest`.
+
+## DEC-034 — Jira mutation có persisted idempotency và recovery không blind retry
+
+- Ngày: 2026-08-06.
+- Trạng thái: ACCEPTED / CONFIRMED từ source và persistence tests.
+- Quyết định: mọi Task/Sprint mutation bắt buộc `Idempotency-Key`; operation persist
+  type, canonical SHA-256 fingerprint, actor, remote identity, trạng thái và safe
+  error code. Không lưu token/raw provider payload. Nếu insert đụng unique constraint,
+  transaction thứ nhất rollback hoàn toàn; transaction `REQUIRES_NEW` thứ hai reload
+  theo project/key rồi kiểm type/fingerprint/status.
+- Hệ quả: key dùng lại khác request trả conflict. `PENDING`/`UNKNOWN` không bị replay;
+  recovery chỉ reconcile operation `REMOTE_SUCCEEDED`, không blind retry Create,
+  Delete hoặc Transition có remote outcome chưa rõ.
+- Evidence: `JiraWriteOperationService`, `JiraWriteRecoveryService`,
+  `JiraWriteOperation`, `JiraWriteOperationStatus`,
+  `JiraWriteOperationServiceTest`, `JiraWriteOperationPersistenceTest`, V17.
+
+## DEC-035 — Task/Sprint delete giữ dữ liệu liên quan bằng tombstone/cleanup
+
+- Ngày: 2026-08-06.
+- Trạng thái: ACCEPTED / CONFIRMED từ source và tests.
+- Quyết định: Task delete gọi Jira trước rồi đặt `Task.deletedAt`. Sprint delete gọi
+  Jira, set `Task.sprint = null`, flush association rồi đặt `Sprint.deletedAt`.
+  Recovery `REMOTE_SUCCEEDED` áp dụng cùng local semantics.
+- Hệ quả: read paths active-only không trả tombstone; không hard-delete audit,
+  Contribution hoặc Peer Review data và không phá foreign-key bằng xóa Sprint vật lý.
+- Evidence: `JiraTaskWriteService#delete`, `JiraSprintWriteService#delete`,
+  `JiraWriteRecoveryService`, `Task`, `Sprint`, write/recovery tests, V17.
+
+## DEC-036 — Chỉ canonical Jira Sprint được replace dates
+
+- Ngày: 2026-08-06.
+- Trạng thái: ACCEPTED / CONFIRMED; concurrency ordering limitation được ghi nhận.
+- Quyết định: full Agile Sprint response có quyền cập nhật hoặc clear `startDate`,
+  `endDate`, `completeDate`; provider normalize offset về UTC. Embedded Sprint từ
+  Issue chỉ hỗ trợ association/reference/name và không clear canonical dates.
+- Hệ quả: backfill, reconciliation và webhook dùng shared hydration; distinct Sprint
+  id được fetch tối đa một lần/job, kể cả local row có date null. Do Jira response
+  không có remote updated/version, canonical snapshots cạnh tranh theo
+  last-processed-wins.
+- Evidence: `JiraProviderClientImpl#toSprint`, `#parseSprintDateTime`,
+  `JiraSprintUpsertService`, `JiraIssueUpsertService#resolveSprint`,
+  `AutomaticSyncDispatcherImpl`, provider/upsert/dispatcher tests.
+
+## DEC-037 — UUID scalar của JiraWriteOperation tuân theo convention JDBC CHAR
+
+- Ngày: 2026-08-06.
+- Trạng thái: ACCEPTED / CONFIRMED từ entity, migration và persistence test.
+- Quyết định: UUID scalar `actorProfileId` cần explicit JDBC `CHAR` để khớp
+  `actor_profile_id CHAR(36)`; chuỗi `requestFingerprint` cũng dùng JDBC `CHAR` để
+  khớp `request_fingerprint CHAR(64)`. Giữ nguyên V17, không tạo V18 chỉ để sửa ORM.
+- Hệ quả: startup/schema validation và persistence dùng cùng convention CHAR hiện có.
+- Evidence: `JiraWriteOperation`, `JiraWriteOperationPersistenceTest`, V17.
+
+## DEC-038 — Course Student Basic Info dựa trên Team membership
+
+- Ngày: 2026-08-06.
+- Trạng thái: ACCEPTED / CONFIRMED; avatar data source và enrollment độc lập là PARTIAL.
+- Quyết định: `GET /api/v1/courses/{courseId}/students/{studentId}` xác định membership
+  bằng `TeamMember -> Team -> Course`. ADMIN đọc mọi Course; assigned LECTURER được
+  đọc; STUDENT 403; anonymous 401. Không có membership trả 404, nhiều legacy
+  membership trả 409 và không tự mutate dữ liệu.
+- Hệ quả: response trả basic account/team info; `accountStatus` là trạng thái tài
+  khoản, không phải enrollment status. `team` không nullable; Student chưa Team chưa
+  được hỗ trợ vì không có `CourseEnrollment`. `avatarUrl` nullable và hiện luôn null.
+- Evidence: `CourseController#getCourseStudent`, `CourseService#getCourseStudentBasicInfo`,
+  `CourseStudentBasicInfoResponse`, `TeamMemberRepository`,
+  `CourseStudentBasicInfoIntegrationTest` (7 tests pass).
 
 ## DEC-028 — Contribution calculation reads source-of-truth; unresolved policies fail closed
 
@@ -24,8 +121,8 @@ Tài liệu ghi lại quyết định đã được code/runtime fact chứng mi
   persisted Contribution override model. Per-value negative or above-100
   overrides, all-overridden remainder, positive remaining budget with zero base,
   and rounding residuals remain Product Owner policy decisions.
-- **RECOMMENDED:** replace the tenant-specific Jira story-point/sprint field ids
-  with configured discovery before treating Jira field coverage as portable.
+- **SUPERSEDED 2026-08-06:** field discovery hiện đã được triển khai; production
+  source không hardcode `customfield_*`. Các policy Contribution còn lại vẫn mở.
 
 ## DEC-001 — Dùng Spring Security OAuth2/OIDC và server-side session
 
@@ -343,7 +440,10 @@ Không có secret hoặc thông tin đăng nhập thật trong decision log này
 - Ngày: 2026-08-04
 - Trạng thái: ACCEPTED (labels/components/description và Contribution được commit tại `b9968dc`; tài liệu liên quan được commit tại `200d866`)
 - Quyết định: Jira search yêu cầu `labels`; provider parse `List<String>` immutable, missing/null/empty thành empty và invalid type trả provider response invalid. `Task.labels_json` là TEXT chứa JSON array, ánh xạ bằng converter defensive; V8 thêm cột nullable nên Task cũ đọc empty.
-- Hệ quả: Jira upsert replace toàn bộ labels mỗi snapshot, empty snapshot clear local và sync cùng snapshot không duplicate. Jira webhook giữ semantics chỉ trigger shared reconciliation; không thêm payload parser labels riêng. Không tạo Label entity/bảng normalized, Task HTTP API, frontend labels response hoặc API tạo/cập nhật Jira task.
+- Hệ quả tại thời điểm quyết định: Jira upsert replace toàn bộ labels mỗi snapshot,
+  empty snapshot clear local và webhook chỉ trigger shared reconciliation. Claim
+  “không có Task HTTP/API write” đã bị DEC-033 và trạng thái 2026-08-06 supersede;
+  quyết định không tạo Label entity/bảng normalized vẫn giữ nguyên.
 - Evidence: `JiraProviderClientImpl#searchIssues/#toIssue`, `JiraIssueSnapshot`, `JiraIssueUpsertService#upsert`, `Task`, `StringListJsonConverter`, `V8__add_task_jira_labels_snapshot.sql`, labels tests.
 ## DEC-028 — Lecturer Analytics là read-only, course-scoped và deterministic
 

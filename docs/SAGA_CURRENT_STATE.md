@@ -5,13 +5,111 @@
 | Mục | Giá trị |
 |---|---|
 | Branch được audit | `main` |
-| Commit được audit | `0bc30be` (`0bc30bedff6cef4f065e5eef559404987f53d045`); `200d866`, `a43f05d` và `07ffa38` là checkpoint lịch sử |
-| Ngày cập nhật | 2026-08-04 (Asia/Saigon, UTC+07:00) |
-| Working tree hiện tại | Chỉ sáu Markdown được đồng bộ trong task tài liệu; không sửa source/test/config/migration |
+| Commit được audit | `4f3dee9` (`4f3dee969ebd7ee03a94eb1b8133987ad622c66d`); các SHA cũ bên dưới là checkpoint lịch sử |
+| Ngày cập nhật | 2026-08-06 (Asia/Saigon, UTC+07:00) |
+| Working tree hiện tại | Sạch trước task; task chỉ cập nhật bốn Markdown, không sửa source/test/config/migration |
 | Phạm vi thay đổi của task | Source/config/test ở HEAD và working tree là bằng chứng mạnh nhất |
 
-> Lưu ý lịch sử: các đoạn phía dưới ghi “HEAD hiện tại `200d866`” là snapshot của
-> audit cũ; không phải mô tả HEAD `0bc30be`.
+> Lưu ý lịch sử: các đoạn phía dưới gắn với SHA và test count cũ là snapshot của
+> audit cũ; mục 2026-08-06 dưới đây supersede chúng khi mô tả trạng thái hiện hành.
+
+## Update 2026-08-06 — Admin master data, Jira Task/Sprint và Student profile
+
+### A. Admin Master Data
+
+- **CONFIRMED:** Subject và Class có ADMIN-only `PUT /api/v1/subjects/{id}`,
+  `DELETE /api/v1/subjects/{id}`, `PUT /api/v1/classes/{id}` và
+  `DELETE /api/v1/classes/{id}`. DELETE là soft delete bằng `deletedAt`, không
+  cascade/hard delete. GET detail/list và lookup chỉ trả record active.
+- **CONFIRMED:** Course dependency guard trả 409 khi Subject/Class còn được Course
+  sử dụng. Code đã tombstone vẫn bị unique check chặn tái sử dụng. V15 thêm
+  `subject.deleted_at`; V16 thêm `class.deleted_at`.
+- **TBD:** Semester/Course Update + soft delete chưa có trong controller/service.
+  Manual Course student add/remove và Course enrollment độc lập cũng chưa có.
+
+### B. Jira Task Read
+
+- **CONFIRMED:** `GET /api/v1/projects/{projectId}/tasks` và
+  `GET /api/v1/projects/{projectId}/tasks/{taskId}` đọc local canonical Task snapshot.
+- List hỗ trợ `keyword` (externalKey/title), `sprintId`, `assigneeId`, `status`;
+  `sortBy` chỉ nhận `externalKey|title|status|priority|storyPoint|dueDate|externalUpdatedAt`,
+  `sortDirection=asc|desc`, mặc định `externalKey/asc`; `page=0`, `size=20`, size
+  hợp lệ 1..100. Sort có tie-break `id`; Task soft-deleted bị loại khỏi list/detail.
+- ADMIN đọc mọi Project; LECTURER đọc Project thuộc Course mình phụ trách; STUDENT
+  đọc Project của Team mình. Anonymous 401; ngoài scope 403.
+
+### C. Jira Task/Sprint Management
+
+**Task routes được source xác nhận:**
+
+- `POST /api/v1/projects/{projectId}/tasks`
+- `PUT /api/v1/projects/{projectId}/tasks/{taskId}`
+- `DELETE /api/v1/projects/{projectId}/tasks/{taskId}`
+- `GET|POST /api/v1/projects/{projectId}/tasks/{taskId}/transitions`
+- `PUT /api/v1/projects/{projectId}/tasks/{taskId}/assignee`
+- `PUT /api/v1/projects/{projectId}/tasks/{taskId}/sprint` (Sprint hoặc backlog)
+- `PUT /api/v1/projects/{projectId}/tasks/{taskId}/estimation`
+
+**Sprint routes được source xác nhận:**
+
+- `GET|PUT|DELETE /api/v1/projects/{projectId}/sprints/{sprintId}`
+- `POST /api/v1/projects/{projectId}/sprints`
+- `POST /api/v1/projects/{projectId}/sprints/{sprintId}/start`
+- `POST /api/v1/projects/{projectId}/sprints/{sprintId}/close`
+- `GET /api/v1/projects/{projectId}/sprints`
+- `GET /api/v1/teams/{teamId}/sprints`
+
+- **CONFIRMED:** Jira là source of truth; SAGA DB là canonical snapshot/read model.
+  Mutation dùng browser session + CSRF, bắt buộc `Idempotency-Key`, lấy actor từ
+  `SagaPrincipal`, gọi Jira trước rồi canonical fetch/upsert local. Provider dùng
+  metadata/discovery, không hardcode `customfield_*` trong production source.
+- **CONFIRMED:** persisted Jira write operation hỗ trợ recovery; không blind retry
+  Create/Delete/Transition khi outcome không rõ và không lưu token/raw provider
+  payload. Duplicate idempotency claim reload trong transaction mới sau transaction
+  insert bị rollback.
+- **CONFIRMED:** Task delete tombstone Task. Sprint delete gỡ association `Task.sprint`
+  rồi tombstone Sprint; audit, Contribution và Peer Review data không bị hard-delete.
+
+### D. Sprint date sync
+
+- **CONFIRMED:** `startDate`, `endDate`, `completeDate` từ full Jira Agile Sprint
+  response được normalize UTC. Canonical full snapshot được phép set/null cả ba ngày;
+  embedded Sprint trong Issue chỉ cập nhật association/reference và không clear ngày.
+- Backfill, reconciliation và webhook dùng chung sync/hydration; tập Sprint id là
+  distinct nên mỗi ID fetch tối đa một lần/job, đồng thời local Sprint hiện hữu có
+  null dates vẫn được repair.
+- **Known limitation:** Jira canonical Sprint response không có `updated/version`;
+  hai canonical snapshot cạnh tranh dùng last-processed-wins.
+
+### E. Production startup schema fix
+
+- **CONFIRMED từ source/schema:** V17 tạo `jira_write_operation`, thêm Sprint state/
+  complete date và Task/Sprint tombstone. Entity mapping của `actor_profile_id` và
+  `request_fingerprint` dùng explicit JDBC `CHAR`, khớp convention CHAR của V17.
+  Không sửa V17 và không có V18.
+- **TBD runtime production:** repository không có deploy log chứng minh đủ
+  `Initialized JPA EntityManagerFactory`, `Started BeApplication` và health HTTP 200.
+
+### F. Student Basic Info
+
+- **CONFIRMED:** `GET /api/v1/courses/{courseId}/students/{studentId}` dùng browser
+  session, GET không cần CSRF. ADMIN đọc mọi Course; LECTURER chỉ Course mình được
+  phân công; STUDENT 403; anonymous hoặc Bearer-only 401.
+- DTO: `courseId`, `studentId`, `studentCode`, `fullName`, `email`, nullable
+  `avatarUrl`, `accountStatus`, `team { teamId, teamName, roleInTeam }`.
+  `avatarUrl` luôn null vì `Student` chưa có nguồn avatar. `accountStatus` là
+  `ACTIVE|INACTIVE|SUSPENDED|PENDING`, không phải Course enrollment status;
+  `roleInTeam` là `LEADER|MEMBER|MENTOR`.
+- Membership chỉ được xác định qua `TeamMember -> Team -> Course`: Course/student/
+  membership không phù hợp trả 404; nhiều legacy membership trong cùng Course trả
+  409 và không tự sửa dữ liệu. Không dùng Contribution. Student thuộc Course nhưng
+  chưa có Team chưa được hỗ trợ vì không có `CourseEnrollment` độc lập.
+
+### G. Tests
+
+- **CONFIRMED từ Surefire reports:** full Maven gần nhất có **90 suites, 504 tests,
+  0 failures, 0 errors, 0 skipped**. Targeted Course Student Basic Info + roster có
+  19/19 test đạt. Task documentation-only này không chạy Maven lại.
 
 ## Update 2026-08-04 — Contribution engine and Jira task snapshots
 
@@ -22,14 +120,15 @@
   from mapped commits, Documents, DONE Tasks and PeerReview, with `BigDecimal`.
   Null Task story point contributes one. Results are calculated on demand and
   are not persisted.
-- **PARTIAL:** existing Jira story-point and sprint source fields are hard-coded
-  tenant ids. No configurable discovery was found, so portability is blocked.
+- **SUPERSEDED 2026-08-06:** nhận định field id bị hard-code là trạng thái cũ;
+  source hiện discovery Jira sprint/estimation field id và không hardcode
+  `customfield_*` trong production code.
 - **TBD:** peer config precedence, persisted contribution overrides, specified
   final-distribution edge cases, classification rules and Contribution API actor
   policy.
-- **Verification:** targeted Jira/persistence/repository/calculation tests pass:
-  5 suites, 33 tests, 0 failures/errors/skips. Full Maven working tree passes
-  70 suites, 299 tests, 0 failures, 0 errors and 0 skipped.
+- **Historical verification tại checkpoint 2026-08-04:** targeted Jira/persistence/
+  repository/calculation tests: 5 suites, 33 tests; full Maven: 70 suites, 299 tests.
+  Số liệu hiện hành nằm tại mục G của update 2026-08-06.
 
 ## 2. Đã hoàn thành
 
@@ -40,7 +139,10 @@
 - **CONFIRMED:** Jira và GitHub có code OAuth/App, linking, webhook, sync/backfill, reconciliation và encrypted secret handling. Evidence: `integration/callback`, `integration/project`, `integration/provider`, `integration/webhook`, `integration/sync`, `IntegrationSecretCipher`.
 - **CONFIRMED:** MySQL/JPA là store domain chính; MongoDB lưu `SystemAuditLog`. Evidence: `application.properties`, entities/repositories.
 - **CONFIRMED:** `GET /privacy` public cho anonymous và mọi role, trả HTML UTF-8 từ `static/privacy.html`; exact matcher trong `SecurityConfig` không mở wildcard, không đổi OAuth/session/CSRF/CORS. Contact public được validate từ `app.privacy.contact-url` / `PRIVACY_CONTACT_URL`; deploy phải cấu hình URL contact thực. Evidence: `PrivacyPolicyController`, `SecurityConfig`, `PrivacyPolicyIntegrationTest`.
-- **CONFIRMED:** Jira issue labels được fetch/parse thành immutable snapshot, persist `Task.labels_json` TEXT JSON và replace-all khi Jira issue cập nhật; missing legacy DB value đọc thành empty list. Webhook vẫn dùng shared reconciliation. Không có Label entity, Task HTTP API, frontend labels API hay SAGA→Jira task create/update. Evidence: `JiraProviderClientImpl`, `JiraIssueSnapshot`, `JiraIssueUpsertService`, `Task`, V8, labels tests.
+- **CONFIRMED/PARTLY SUPERSEDED:** Jira issue labels vẫn là immutable replace-all
+  snapshot và webhook dùng shared reconciliation; không có Label entity. Từ
+  2026-08-06 đã có Task HTTP list/detail, frontend labels response và SAGA→Jira
+  Task create/update write-through API. Evidence hiện hành nằm tại update phía trên.
 - **PARTIAL:** import Excel sinh viên có authorization course scope, transaction rollback, identity bind an toàn, invitation outbox và application guard một Student/một Team/mỗi Course. Parser/header-preview/error DTO và database invariant trực tiếp Student+Course chưa hoàn chỉnh. Evidence: `CourseController#importStudents`, `CourseImportAuthorizationService`, `ExcelImportService#importStudentsToCourse`, `AuthenticatedProfileService`, `StudentInvitationOutboxService`.
 
 ## 3. Đã kiểm chứng
@@ -49,7 +151,7 @@
 |---|---|---|
 | Import authorization integration test | `-Dtest=CourseImportSecurityIntegrationTest test` | 13 tests, 0 failures/errors/skips; `BUILD SUCCESS` |
 | Existing Security integration test | `-Dtest=SecurityIntegrationTest test` (three repeated runs) | 13 tests/run, all pass |
-| Maven test suite (working tree hiện tại) | `./mvnw.cmd test` | 70 suites, 299 tests, 0 failures, 0 errors, 0 skipped; `BUILD SUCCESS` |
+| Maven test suite (checkpoint lịch sử 2026-08-04) | `./mvnw.cmd test` | 70 suites, 299 tests; đã bị số liệu update 2026-08-06 supersede |
 | Jira labels targeted regression | provider, upsert, H2 persistence, dispatcher, webhook processor | 37 tests, 0 failures/errors/skips; `BUILD SUCCESS` |
 | Privacy/security/integration regression | `PrivacyPolicyIntegrationTest`, `PrivacyPolicyControllerTest`, `SecurityIntegrationTest`, `SwaggerUiCsrfIntegrationTest`, Jira/GitHub callback/security tests | 32 tests, 0 failures/errors/skips; `BUILD SUCCESS` |
 | Checkpoint trước Swagger-CSRF commit | mốc audit trước đó | 51 suites, 228 tests, 0 failures, 0 errors, 0 skipped; không phải số liệu hiện tại |
@@ -116,12 +218,12 @@ Không lưu username, password, token hoặc secret của tài khoản test tron
 
 ```text
 ĐÃ HOÀN THÀNH: OIDC/session/profile/roles; master data; team authorization; Jira/GitHub integration; CSRF/CORS; health/OpenAPI configuration.
-ĐÃ KIỂM CHỨNG: full Maven tại checkpoint hiện tại 70 suites / 299 tests / 0 failures / 0 errors / 0 skipped; targeted GitHub concurrency/recovery 40 tests pass; self-team/roster/security là checkpoint lịch sử.
+ĐÃ KIỂM CHỨNG (snapshot lịch sử): full Maven 70 suites / 299 tests; số hiện hành là 90 suites / 504 tests / 0 failures / 0 errors / 0 skipped theo update 2026-08-06.
 ĐANG LÀM: Xác minh runtime production sau deploy cho stale GitHub job và optimistic locking.
 CHƯA LÀM: Import production-ready validation/provider delivery; browser E2E localhost→Railway; session scaling/redeploy verification.
 VẤN ĐỀ ĐANG MỞ: Import validation/identity; third-party cookie; error contract; session store; hạ tầng Cognito/Railway còn TBD.
 BƯỚC TIẾP THEO: Chốt parser/error DTO, policy email exposure và provider email, chạy E2E cookie/CSRF.
-BASE HEAD: `0bc30be`. Endpoint Student self-scoped đã được commit tại `250f514`; `200d866` là checkpoint tài liệu lịch sử.
+BASE HEAD của snapshot cũ: `0bc30be`. HEAD audit hiện hành là `4f3dee9`; endpoint Student self-scoped tại `250f514` và `200d866` là checkpoint lịch sử.
 ```
 
 ## Update 2026-08-04 — OAuth completion callback redirect
@@ -134,7 +236,7 @@ BASE HEAD: `0bc30be`. Endpoint Student self-scoped đã được commit tại `2
 
 - **Đã hoàn thành / CONFIRMED:** `SyncStatusResponse.Job.startedAt/completedAt` là `Instant`, JSON UTC có `Z`; entity/schema `SyncJobLog` vẫn `LocalDateTime`/`DATETIME(6)` với UTC semantics. Write path SyncJobLog dùng UTC Clock có chủ đích.
 - **Đã hoàn thành / CONFIRMED:** `GitHubSyncJobService` claim cùng GitRepo bằng `PESSIMISTIC_WRITE`; `GitRepoStateService` reload managed row trong `REQUIRES_NEW`; `SyncJobFinalizationService` finalize theo jobId, idempotent và độc lập với degrade; `SyncJobStaleRecoveryScheduler` recover job GitHub stale.
-- **Đã kiểm chứng:** targeted GitHub concurrency/recovery checkpoint 40 tests pass; full Maven hiện tại **70 suites / 299 tests / 0 failures / 0 errors / 0 skipped**.
+- **Đã kiểm chứng tại checkpoint lịch sử:** targeted GitHub concurrency/recovery 40 tests; full Maven 70/299. Số full Maven hiện hành là **90 suites / 504 tests / 0 failures / 0 errors / 0 skipped**.
 - **Chưa hoàn thành / TBD:** xác minh sau deploy rằng row production cũ được recover và không còn optimistic-lock/async uncaught exception. Không migration/schema change; OAuth/session/CSRF/CORS/webhook không đổi.
 
 ## 10. Update — provisioning, invitation, roster và Swagger CSRF
@@ -156,7 +258,7 @@ BASE HEAD: `0bc30be`. Endpoint Student self-scoped đã được commit tại `2
 - **PARTIAL/TBD:** application concurrency guard được test bằng hai thread/hai transaction; database chưa có `UNIQUE(student_id, course_id)`. Roster trả email Student cho ADMIN/Lecturer owner và options trả email Lecturer cho ADMIN, nhưng business/UI justification vẫn TBD; response không chứa cognitoSub, version, token hay credential.
 - **CONFIRMED:** `GET /api/me/courses/{courseId}/team/members` đã được commit tại `250f514` và vẫn có trong HEAD `200d866`: chỉ cho STUDENT; anonymous 401, ADMIN/LECTURER 403, không cần CSRF. Backend resolve Student từ `SagaPrincipal.localProfileId` và Team theo Student+Course; no membership/Course thiếu 404, legacy nhiều Team 409. Response trả resolved teamId cho FE dùng Project/integration flow, Project nullable và page members không email/cognitoSub/version/token.
 - **CONFIRMED:** endpoint roster cũ vẫn giữ ADMIN/LECTURER/STUDENT exact-Team authorization; page member được tái sử dụng trong `TeamRosterService`. Project LEADER/MEMBER authorization không đổi.
-- **Verification hiện tại:** full Maven suite tại checkpoint hiện tại: **70 suites, 299 tests, 0 failures, 0 errors, 0 skipped**. Không thay đổi OAuth callback, role priority, session hay import authorization.
+- **Verification của snapshot lịch sử:** full Maven 70 suites/299 tests; update 2026-08-06 supersede bằng **90 suites/504 tests/0 failures/0 errors/0 skipped**. OAuth callback, role priority, session và import authorization không đổi.
 ## Cập nhật 2026-08-05 — Lecturer Analytics read APIs
 
 - **CONFIRMED:** thêm tám GET route cho Team detail, Student progress/activities,

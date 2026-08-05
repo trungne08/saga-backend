@@ -5,10 +5,10 @@
 - **CONFIRMED:** Jira sync keeps internal Task snapshots for labels, components
   (`id`/`name`) and a canonical plain-text description. Missing/null collection
   fields become empty and each sync replaces the prior snapshot.
-- **PARTIAL:** Backend chưa có Task read endpoint nên FE chưa thể đọc trực tiếp Jira
-  descriptions/components/labels. Backend hiện đã có sáu Contribution HTTP API cho
-  current aggregate, manual override và Course slice weights; contract nằm tại mục
-  "Contribution API" cuối tài liệu.
+- **CONFIRMED (supersedes trạng thái cũ):** Backend có Task list/detail và Task/Sprint
+  write-through API; `TaskReadResponse` expose description, components và labels.
+  Backend vẫn có sáu Contribution HTTP API cho current aggregate, manual override
+  và Course slice weights; contract nằm tại mục "Contribution API" cuối tài liệu.
 - **CONFIRMED:** Contribution evaluation là aggregate theo dữ liệu hiện tại, không
   phải historical committed snapshot. FE không tự suy ra công thức từ assessment
   endpoint và không nhận provider payload, token hoặc credential.
@@ -20,6 +20,99 @@ handler và integration service hiện tại của backend. Không coi tài li�
 nơi lưu credentials: frontend **không** cần và không được nhận OAuth token,
 client secret, private key, webhook secret, database credential hoặc token đã
 mã hóa.
+
+## Jira Task và Sprint Management — 2026-08-06
+
+### Contract chung
+
+- Mọi request nghiệp vụ dùng browser session: `credentials: "include"`; không gửi
+  `Authorization: Bearer`.
+- GET không cần CSRF. POST/PUT/DELETE cần token/header CSRF theo utility hiện có.
+- Mọi Task/Sprint mutation dưới đây bắt buộc header `Idempotency-Key` (không rỗng,
+  tối đa 128 ký tự). FE tạo một key cho một intent và giữ nguyên key khi retry cùng
+  request; không tái sử dụng key cho payload/operation khác.
+- Không gửi `actorId`, `adminId`, `lecturerId`, Jira token/account credential hay raw
+  provider payload. Backend lấy actor từ session `SagaPrincipal`.
+- Flow write-through: `FE -> SAGA -> Jira -> canonical fetch -> local upsert -> response`.
+  Jira là source of truth; local DB là canonical snapshot/read model.
+- Safe domain error có `code`/`message`; backend không trả raw Jira payload hoặc
+  credential. Không blind retry mutation khi nhận lỗi outcome-unknown/in-progress;
+  giữ key và để recovery hoàn tất.
+
+Quyền mutation/detail Sprint và transition metadata: ADMIN, LECTURER phụ trách
+Course, hoặc STUDENT có `LEADER` membership của owning Team. Task list/detail read
+cho ADMIN, assigned LECTURER và mọi STUDENT thuộc owning Team; ngoài scope trả 403.
+
+### Task routes
+
+| Method | Exact path | Mục đích | CSRF / Idempotency |
+| --- | --- | --- | --- |
+| GET | `/api/v1/projects/{projectId}/tasks` | List Task local canonical | Không / không |
+| GET | `/api/v1/projects/{projectId}/tasks/{taskId}` | Task detail | Không / không |
+| POST | `/api/v1/projects/{projectId}/tasks` | Tạo Jira Task | Có / có |
+| PUT | `/api/v1/projects/{projectId}/tasks/{taskId}` | Cập nhật Task | Có / có |
+| DELETE | `/api/v1/projects/{projectId}/tasks/{taskId}` | Xóa Jira rồi tombstone local | Có / có |
+| GET | `/api/v1/projects/{projectId}/tasks/{taskId}/transitions` | Transition metadata | Không / không |
+| POST | `/api/v1/projects/{projectId}/tasks/{taskId}/transitions` | Transition Task | Có / có |
+| PUT | `/api/v1/projects/{projectId}/tasks/{taskId}/assignee` | Assign/unassign | Có / có |
+| PUT | `/api/v1/projects/{projectId}/tasks/{taskId}/sprint` | Move Sprint/Backlog | Có / có |
+| PUT | `/api/v1/projects/{projectId}/tasks/{taskId}/estimation` | Set estimation | Có / có |
+
+Task list query: `keyword` tìm `externalKey`/`title`; filter `sprintId`, `assigneeId`,
+`status`; `sortBy=externalKey|title|status|priority|storyPoint|dueDate|externalUpdatedAt`,
+`sortDirection=asc|desc`, mặc định `externalKey/asc`; `page=0`, `size=20`, size 1..100.
+Task tombstone không xuất hiện. Assignee request phải chọn đúng một trong
+`assigneeId` hoặc `unassign: true`; Sprint request chọn đúng một trong `sprintId`
+hoặc `backlog: true`; estimation `value` là integer không âm. Create/update dùng
+Jira metadata thực tế; FE không tự dựng `customfield_*`.
+
+### Sprint routes
+
+| Method | Exact path | Mục đích | CSRF / Idempotency |
+| --- | --- | --- | --- |
+| GET | `/api/v1/projects/{projectId}/sprints` | List theo Project | Không / không |
+| GET | `/api/v1/teams/{teamId}/sprints` | List theo Team | Không / không |
+| GET | `/api/v1/projects/{projectId}/sprints/{sprintId}` | Sprint detail | Không / không |
+| POST | `/api/v1/projects/{projectId}/sprints` | Tạo Sprint | Có / có |
+| PUT | `/api/v1/projects/{projectId}/sprints/{sprintId}` | Cập nhật Sprint | Có / có |
+| POST | `/api/v1/projects/{projectId}/sprints/{sprintId}/start` | Start future Sprint có dates | Có / có |
+| POST | `/api/v1/projects/{projectId}/sprints/{sprintId}/close` | Close active Sprint | Có / có |
+| DELETE | `/api/v1/projects/{projectId}/sprints/{sprintId}` | Xóa Jira, detach Task, tombstone local | Có / có |
+
+`JiraSprintResponse` gồm `id`, `externalSprintId`, `name`, `state`, `goal`,
+`startDate`, `endDate`, `completeDate`. Ba date là ISO local datetime đã normalize
+về UTC ở backend; FE đổi sang timezone hiển thị. Null là hợp lệ khi Jira không có
+dữ liệu; FE không tự dựng ngày. Embedded Sprint trong Task không có quyền clear
+canonical dates.
+
+### Course Student Basic Info
+
+`GET /api/v1/courses/{courseId}/students/{studentId}` dùng session, không cần CSRF:
+ADMIN đọc mọi Course, LECTURER chỉ Course được phân công, STUDENT 403, anonymous 401.
+Không có membership qua `TeamMember -> Team -> Course` trả 404; nhiều legacy
+membership trả 409. Endpoint chưa hỗ trợ Student thuộc Course nhưng chưa có Team.
+
+```ts
+type AccountStatus = "ACTIVE" | "INACTIVE" | "SUSPENDED" | "PENDING";
+type RoleInTeam = "LEADER" | "MEMBER" | "MENTOR";
+
+type CourseStudentBasicInfoResponse = {
+  courseId: string;
+  studentId: string;
+  studentCode: string;
+  fullName: string;
+  email: string;
+  avatarUrl: string | null; // hiện luôn null: Student chưa có nguồn avatar
+  accountStatus: AccountStatus; // không phải Course enrollment status
+  team: {
+    teamId: string;
+    teamName: string;
+    roleInTeam: RoleInTeam;
+  };
+};
+```
+
+`team` không nullable theo model hiện tại; không gửi/hiển thị giả định Course status.
 
 ## Base URL và tài liệu API
 
@@ -881,15 +974,16 @@ Deployment: `INTEGRATION_CALLBACK_REDIRECT_URI` is a required absolute HTTP(S) f
 ### Jira labels status
 
 Jira labels are fetched and stored only as an internal Task snapshot. There is
-currently no Task read endpoint, no labels field exposed to frontend, and no
-SAGA API that creates or updates Jira tasks. Therefore FE label display and
-filtering remain **PARTIAL** until a separately authorized Task read contract is
-implemented. Labels are classification data, not the Jira issue id/key used to
-identify a Task.
-## Project Sprint API
+now a Task list/detail contract exposing `labels`, plus SAGA write-through APIs
+for creating and updating Jira tasks. This paragraph supersedes the pre-2026-08-06
+PARTIAL status. Labels remain classification data, not the Jira issue id/key used
+to identify a Task.
 
-Hai endpoint dùng `JSESSIONID`, `credentials: "include"`; đều là GET nên không cần
-CSRF và không có pagination:
+## Project Sprint list API
+
+Hai endpoint list dưới đây dùng `JSESSIONID`, `credentials: "include"`; đều là GET
+nên không cần CSRF và không có pagination. Sprint detail/mutation được mô tả trong
+mục “Jira Task và Sprint Management — 2026-08-06” phía trên:
 
 | Method | Exact path | Role annotation | Effective service access | Success |
 | --- | --- | --- | --- | --- |
