@@ -19,6 +19,25 @@ public interface JiraProviderClient {
 
     List<JiraProjectInfo> projects(String accessToken, String cloudId);
 
+    List<JiraCreateIssueType> getCreateIssueTypes(
+            String accessToken,
+            String cloudId,
+            String projectIdOrKey
+    );
+
+    List<JiraCreateField> getCreateFields(
+            String accessToken,
+            String cloudId,
+            String projectIdOrKey,
+            String issueTypeId
+    );
+
+    JiraIssueSnapshot getIssue(
+            String accessToken,
+            String cloudId,
+            String issueIdOrKey
+    );
+
     String registerWebhook(
             String accessToken,
             String cloudId,

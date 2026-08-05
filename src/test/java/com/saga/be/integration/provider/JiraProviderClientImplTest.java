@@ -16,6 +16,7 @@ import com.saga.be.entity.value.TaskComponentSnapshot;
 import com.saga.be.exception.IntegrationException;
 import java.net.URI;
 import java.net.URLDecoder;
+import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.Instant;
@@ -25,6 +26,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
+import org.springframework.test.web.client.ExpectedCount;
 import org.springframework.web.client.RestClient;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -387,6 +389,185 @@ class JiraProviderClientImplTest {
                         + "\"content\":[{\"type\":\"text\",\"text\":\"Heading \"},"
                         + "{\"type\":\"text\",\"text\":\"body\"}]}]}"
         ).description());
+    }
+
+    @Test
+    void mapsCreateMetadataIntoSanitizedProviderDtos() {
+        Fixture fixture = fixture();
+        String issueTypesUrl = BASE + "/ex/jira/" + CLOUD_ID
+                + "/rest/api/3/issue/createmeta/10000/issuetypes?startAt=0&maxResults=100";
+        String fieldsUrl = BASE + "/ex/jira/" + CLOUD_ID
+                + "/rest/api/3/issue/createmeta/10000/issuetypes/3?startAt=0&maxResults=100";
+        fixture.server.expect(requestTo(issueTypesUrl)).andRespond(json("""
+                {"startAt":0,"maxResults":100,"total":1,"issueTypes":[{
+                  "id":"3","name":"Task","subtask":false,
+                  "description":"A delivery item","unexpected":{"raw":"payload"}
+                }]}
+                """));
+        fixture.server.expect(requestTo(fieldsUrl)).andRespond(json("""
+                {"startAt":0,"maxResults":100,"total":2,"fields":[
+                  {"key":"summary","name":"Summary","required":true,
+                   "schema":{"type":"string"},"allowedValues":["one"]},
+                  {"key":"customfield_10001","name":"Release","required":false,
+                   "schema":{"type":"array","items":"option"},"allowedValues":[
+                     {"id":"10","value":"1.0","name":"Release 1.0","secret":"ignored"}
+                   ]}
+                ]}
+                """));
+
+        assertThat(fixture.client.getCreateIssueTypes(
+                "ACCESS_TOKEN_SECRET", CLOUD_ID, "10000"
+        )).containsExactly(new JiraCreateIssueType(
+                "3", "Task", false, "A delivery item"
+        ));
+        assertThat(fixture.client.getCreateFields(
+                "ACCESS_TOKEN_SECRET", CLOUD_ID, "10000", "3"
+        )).containsExactly(
+                new JiraCreateField(
+                        "summary", "Summary", true, "string", null,
+                        List.of(new JiraCreateFieldAllowedValue(null, "one", null))
+                ),
+                new JiraCreateField(
+                        "customfield_10001", "Release", false, "array", "option",
+                        List.of(new JiraCreateFieldAllowedValue(
+                                "10", "1.0", "Release 1.0"
+                        ))
+                )
+        );
+        fixture.server.verify();
+    }
+
+    @Test
+    void acceptsEmptyCreateMetadata() {
+        Fixture fixture = fixture();
+        fixture.server.expect(request -> { }).andRespond(json(
+                "{\"startAt\":0,\"maxResults\":100,\"total\":0,\"issueTypes\":[]}"
+        ));
+
+        assertThat(fixture.client.getCreateIssueTypes(
+                "ACCESS_TOKEN_SECRET", CLOUD_ID, "SDP"
+        )).isEmpty();
+        fixture.server.verify();
+    }
+
+    @Test
+    void getIssueUsesTheCanonicalSearchSnapshotMapper() {
+        Fixture fixture = fixture();
+        fixture.server.expect(request -> {
+            assertEquals(
+                    "/ex/jira/" + CLOUD_ID + "/rest/api/3/issue/SDP-42",
+                    request.getURI().getPath()
+            );
+            assertThat(URLDecoder.decode(
+                    request.getURI().getRawQuery(), StandardCharsets.UTF_8
+            )).contains("labels").contains("components").contains("description");
+        }).andRespond(json("""
+                {"id":"10452","key":"SDP-42","fields":{
+                  "summary":"Canonical issue","issuetype":{"name":"Task"},
+                  "status":{"name":"To Do"},"priority":{"name":"High"},
+                  "updated":"2026-07-31T00:30:57.360+0700",
+                  "labels":["Backend"],"components":[{"id":"10","name":"API"}],
+                  "description":{"type":"doc","content":[{"type":"paragraph",
+                    "content":[{"type":"text","text":"Safe description"}]}]}
+                }}
+                """));
+
+        JiraIssueSnapshot issue = fixture.client.getIssue(
+                "ACCESS_TOKEN_SECRET", CLOUD_ID, "SDP-42"
+        );
+
+        assertEquals("10452", issue.id());
+        assertEquals("SDP-42", issue.key());
+        assertEquals("Canonical issue", issue.title());
+        assertThat(issue.labels()).containsExactly("Backend");
+        assertThat(issue.components()).containsExactly(
+                new TaskComponentSnapshot("10", "API")
+        );
+        assertEquals("Safe description", issue.description());
+        assertThat(issue.assigneeAccountId()).isNull();
+        assertThat(issue.sprintId()).isNull();
+        assertThat(issue.storyPoints()).isNull();
+        fixture.server.verify();
+    }
+
+    @Test
+    void mapsProviderHttpFailuresWithoutExposingProviderBody() {
+        assertProviderFailure(org.springframework.http.HttpStatus.BAD_REQUEST,
+                "JIRA_REQUEST_REJECTED", 1);
+        assertProviderFailure(org.springframework.http.HttpStatus.UNAUTHORIZED,
+                "JIRA_ACCESS_REVOKED", 1);
+        assertProviderFailure(org.springframework.http.HttpStatus.FORBIDDEN,
+                "JIRA_ACCESS_FORBIDDEN", 1);
+        assertProviderFailure(org.springframework.http.HttpStatus.NOT_FOUND,
+                "JIRA_RESOURCE_NOT_FOUND", 1);
+        assertProviderFailure(org.springframework.http.HttpStatus.TOO_MANY_REQUESTS,
+                "JIRA_RATE_LIMITED", 3);
+        assertProviderFailure(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,
+                "JIRA_PROVIDER_UNAVAILABLE", 3);
+    }
+
+    @Test
+    void mapsTimeoutAndMalformedMetadataResponsesSafely() {
+        Fixture timeout = fixture();
+        timeout.server.expect(request -> { }).andRespond(
+                org.springframework.test.web.client.response.MockRestResponseCreators
+                        .withException(new SocketTimeoutException("timeout"))
+        );
+        assertEquals("JIRA_PROVIDER_UNAVAILABLE", assertThrows(
+                IntegrationException.class,
+                () -> timeout.client.getCreateIssueTypes(
+                        "ACCESS_TOKEN_SECRET", CLOUD_ID, "SDP"
+                )
+        ).getCode());
+
+        Fixture malformed = fixture();
+        malformed.server.expect(request -> { }).andRespond(json(
+                "{\"issueTypes\":[{\"id\":\"3\"}"
+        ));
+        assertEquals("JIRA_RESPONSE_INVALID", assertThrows(
+                IntegrationException.class,
+                () -> malformed.client.getCreateIssueTypes(
+                        "ACCESS_TOKEN_SECRET", CLOUD_ID, "SDP"
+                )
+        ).getCode());
+        timeout.server.verify();
+        malformed.server.verify();
+    }
+
+    @Test
+    void requiresTheClassicWriteScopeBeforeFutureWriteCalls() {
+        JiraWriteScope.requireGranted("read:jira-work write:jira-work");
+
+        IntegrationException exception = assertThrows(
+                IntegrationException.class,
+                () -> JiraWriteScope.requireGranted("read:jira-work")
+        );
+
+        assertEquals("JIRA_WRITE_SCOPE_MISSING", exception.getCode());
+        assertThat(exception.getMessage()).doesNotContain("ACCESS_TOKEN_SECRET");
+    }
+
+    private void assertProviderFailure(
+            org.springframework.http.HttpStatus status,
+            String expectedCode,
+            int calls
+    ) {
+        Fixture fixture = fixture();
+        fixture.server.expect(ExpectedCount.times(calls), request -> { })
+                .andRespond(withStatus(status)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"error\":\"PROVIDER_SECRET\"}"));
+
+        IntegrationException exception = assertThrows(
+                IntegrationException.class,
+                () -> fixture.client.getCreateIssueTypes(
+                        "ACCESS_TOKEN_SECRET", CLOUD_ID, "SDP"
+                )
+        );
+
+        assertEquals(expectedCode, exception.getCode());
+        assertThat(exception.getMessage()).doesNotContain("PROVIDER_SECRET");
+        fixture.server.verify();
     }
 
     private JiraIssueSnapshot searchFirstIssue(String labelsJson) {

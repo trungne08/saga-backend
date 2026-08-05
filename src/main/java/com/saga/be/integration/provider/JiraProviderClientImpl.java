@@ -36,6 +36,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.util.UriComponentsBuilder;
 
@@ -235,6 +236,94 @@ public class JiraProviderClientImpl implements JiraProviderClient {
     }
 
     @Override
+    public List<JiraCreateIssueType> getCreateIssueTypes(
+            String accessToken,
+            String cloudId,
+            String projectIdOrKey
+    ) {
+        String project = requiredPathSegment(projectIdOrKey);
+        List<JiraCreateIssueType> issueTypes = new ArrayList<>();
+        int startAt = 0;
+        while (true) {
+            JsonNode response = get(UriComponentsBuilder.fromUri(jiraUri(
+                            cloudId,
+                            "/rest/api/3/issue/createmeta/" + project + "/issuetypes"
+                    ))
+                    .queryParam("startAt", startAt)
+                    .queryParam("maxResults", 100)
+                    .build()
+                    .encode()
+                    .toUri(), accessToken);
+            JsonNode values = response.path("issueTypes");
+            if (!values.isArray()) {
+                throw providerResponseInvalid();
+            }
+            values.forEach(value -> issueTypes.add(new JiraCreateIssueType(
+                    requiredText(value, "id"),
+                    requiredText(value, "name"),
+                    value.path("subtask").asBoolean(false),
+                    text(value, "description")
+            )));
+            if (!nextMetadataPage(response, values.size(), startAt)) {
+                return List.copyOf(issueTypes);
+            }
+            startAt += values.size();
+        }
+    }
+
+    @Override
+    public List<JiraCreateField> getCreateFields(
+            String accessToken,
+            String cloudId,
+            String projectIdOrKey,
+            String issueTypeId
+    ) {
+        String project = requiredPathSegment(projectIdOrKey);
+        String issueType = requiredPathSegment(issueTypeId);
+        List<JiraCreateField> fields = new ArrayList<>();
+        int startAt = 0;
+        while (true) {
+            JsonNode response = get(UriComponentsBuilder.fromUri(jiraUri(
+                            cloudId,
+                            "/rest/api/3/issue/createmeta/" + project
+                                    + "/issuetypes/" + issueType
+                    ))
+                    .queryParam("startAt", startAt)
+                    .queryParam("maxResults", 100)
+                    .build()
+                    .encode()
+                    .toUri(), accessToken);
+            JsonNode values = response.path("fields");
+            if (!values.isArray()) {
+                throw providerResponseInvalid();
+            }
+            values.forEach(value -> fields.add(toCreateField(value)));
+            if (!nextMetadataPage(response, values.size(), startAt)) {
+                return List.copyOf(fields);
+            }
+            startAt += values.size();
+        }
+    }
+
+    @Override
+    public JiraIssueSnapshot getIssue(
+            String accessToken,
+            String cloudId,
+            String issueIdOrKey
+    ) {
+        String issue = requiredPathSegment(issueIdOrKey);
+        URI uri = UriComponentsBuilder.fromUri(jiraUri(
+                        cloudId,
+                        "/rest/api/3/issue/" + issue
+                ))
+                .queryParam("fields", issueFields())
+                .build()
+                .encode()
+                .toUri();
+        return toIssue(get(uri, accessToken));
+    }
+
+    @Override
     public String registerWebhook(
             String accessToken,
             String cloudId,
@@ -411,6 +500,8 @@ public class JiraProviderClientImpl implements JiraProviderClient {
             throw providerResponseInvalid();
         } catch (RestClientResponseException exception) {
             throw translate(exception);
+        } catch (RestClientException exception) {
+            throw providerUnavailable();
         }
     }
 
@@ -451,12 +542,7 @@ public class JiraProviderClientImpl implements JiraProviderClient {
                 )
                 .queryParam("jql", jql)
                 .queryParam("maxResults", 100)
-                .queryParam(
-                        "fields",
-                        "summary,issuetype,status,priority,assignee,reporter,"
-                                + "duedate,created,updated,resolutiondate,resolution,"
-                                + "customfield_10016,customfield_10020,labels,components,description"
-                );
+                .queryParam("fields", issueFields());
         if (nextPageToken != null && !nextPageToken.isBlank()) {
             builder.queryParam("nextPageToken", nextPageToken);
         }
@@ -503,28 +589,44 @@ public class JiraProviderClientImpl implements JiraProviderClient {
             );
         } catch (RestClientResponseException exception) {
             throw translate(exception);
+        } catch (RestClientException exception) {
+            throw providerUnavailable();
         }
     }
 
     private JsonNode get(URI uri, String token) {
         for (int attempt = 1; attempt <= MAX_GET_ATTEMPTS; attempt++) {
             try {
-                JsonNode response = restClient.get()
+                String response = restClient.get()
                         .uri(uri)
                         .headers(headers -> bearer(headers, token))
                         .retrieve()
-                        .body(JsonNode.class);
-                if (response == null) {
-                    throw providerResponseInvalid();
-                }
-                return response;
+                        .body(String.class);
+                return parsedJson(response);
             } catch (RestClientResponseException exception) {
                 if (attempt == MAX_GET_ATTEMPTS || !retryable(exception)) {
                     throw translate(exception);
                 }
+            } catch (RestClientException exception) {
+                throw providerUnavailable();
             }
         }
         throw IntegrationException.unavailable("JIRA_PROVIDER_UNAVAILABLE");
+    }
+
+    private JsonNode parsedJson(String response) {
+        if (response == null || response.isBlank()) {
+            throw providerResponseInvalid();
+        }
+        try {
+            JsonNode json = objectMapper.readTree(response);
+            if (json == null) {
+                throw providerResponseInvalid();
+            }
+            return json;
+        } catch (RuntimeException exception) {
+            throw providerResponseInvalid();
+        }
     }
 
     private JsonNode postJson(URI uri, String token, Object body) {
@@ -542,6 +644,8 @@ public class JiraProviderClientImpl implements JiraProviderClient {
             return response;
         } catch (RestClientResponseException exception) {
             throw translate(exception);
+        } catch (RestClientException exception) {
+            throw providerUnavailable();
         }
     }
 
@@ -929,6 +1033,97 @@ public class JiraProviderClientImpl implements JiraProviderClient {
                 .toUri();
     }
 
+    private JiraCreateField toCreateField(JsonNode field) {
+        if (!field.isObject()) {
+            throw providerResponseInvalid();
+        }
+        JsonNode schema = field.path("schema");
+        if (!schema.isMissingNode() && !schema.isNull() && !schema.isObject()) {
+            throw providerResponseInvalid();
+        }
+        return new JiraCreateField(
+                requiredText(field, "key"),
+                requiredText(field, "name"),
+                field.path("required").asBoolean(false),
+                schemaText(schema, "type"),
+                schemaText(schema, "items"),
+                allowedValues(field.path("allowedValues"))
+        );
+    }
+
+    private String schemaText(JsonNode schema, String field) {
+        if (schema == null || schema.isMissingNode() || schema.isNull()) {
+            return null;
+        }
+        return scalarText(schema.get(field));
+    }
+
+    private List<JiraCreateFieldAllowedValue> allowedValues(JsonNode values) {
+        if (values == null || values.isMissingNode() || values.isNull()) {
+            return List.of();
+        }
+        if (!values.isArray()) {
+            throw providerResponseInvalid();
+        }
+        List<JiraCreateFieldAllowedValue> sanitized = new ArrayList<>();
+        for (JsonNode value : values) {
+            if (value.isValueNode()) {
+                sanitized.add(new JiraCreateFieldAllowedValue(
+                        null, scalarText(value), null
+                ));
+                continue;
+            }
+            if (!value.isObject()) {
+                throw providerResponseInvalid();
+            }
+            String id = scalarText(value.get("id"));
+            String displayValue = scalarText(value.get("value"));
+            String name = scalarText(value.get("name"));
+            if (id == null && displayValue == null && name == null) {
+                throw providerResponseInvalid();
+            }
+            sanitized.add(new JiraCreateFieldAllowedValue(
+                    id, displayValue, name
+            ));
+        }
+        return List.copyOf(sanitized);
+    }
+
+    private String scalarText(JsonNode value) {
+        if (value == null || value.isMissingNode() || value.isNull()) {
+            return null;
+        }
+        if (!value.isValueNode()) {
+            throw providerResponseInvalid();
+        }
+        return value.asText();
+    }
+
+    private boolean nextMetadataPage(
+            JsonNode response,
+            int returned,
+            int requestedStartAt
+    ) {
+        if (returned == 0) {
+            return false;
+        }
+        int total = response.path("total").asInt(-1);
+        if (total >= 0) {
+            if (total < requestedStartAt + returned) {
+                throw providerResponseInvalid();
+            }
+            return requestedStartAt + returned < total;
+        }
+        int maxResults = response.path("maxResults").asInt(-1);
+        return maxResults > 0 && returned == maxResults;
+    }
+
+    private String issueFields() {
+        return "summary,issuetype,status,priority,assignee,reporter,"
+                + "duedate,created,updated,resolutiondate,resolution,"
+                + "customfield_10016,customfield_10020,labels,components,description";
+    }
+
     private JiraIssueSnapshot toIssue(JsonNode issue) {
         JsonNode fields = issue.path("fields");
         JsonNode sprint = first(fields.path("customfield_10020"));
@@ -1124,6 +1319,16 @@ public class JiraProviderClientImpl implements JiraProviderClient {
         return key;
     }
 
+    private String requiredPathSegment(String value) {
+        if (value == null || !value.matches("[A-Za-z0-9][A-Za-z0-9_.-]{0,254}")) {
+            throw IntegrationException.invalid(
+                    "JIRA_IDENTIFIER_INVALID",
+                    "The Jira identifier is invalid"
+            );
+        }
+        return value;
+    }
+
     private boolean retryable(RestClientResponseException exception) {
         return exception.getStatusCode().is5xxServerError()
                 || exception.getStatusCode().value() == 429;
@@ -1131,10 +1336,23 @@ public class JiraProviderClientImpl implements JiraProviderClient {
 
     private IntegrationException translate(RestClientResponseException exception) {
         int status = exception.getStatusCode().value();
-        if (status == 401 || status == 403) {
+        if (status == 400) {
+            return IntegrationException.invalid(
+                    "JIRA_REQUEST_REJECTED",
+                    "Jira rejected the request"
+            );
+        }
+        if (status == 401) {
             return IntegrationException.conflict(
                     "JIRA_ACCESS_REVOKED",
                     "Jira access is invalid or has been revoked"
+            );
+        }
+        if (status == 403) {
+            return new IntegrationException(
+                    HttpStatus.FORBIDDEN,
+                    "JIRA_ACCESS_FORBIDDEN",
+                    "Jira denied access to the requested resource"
             );
         }
         if (status == 429) {
@@ -1150,11 +1368,15 @@ public class JiraProviderClientImpl implements JiraProviderClient {
                     "The selected Jira resource is no longer accessible"
             );
         }
-        return IntegrationException.unavailable("JIRA_PROVIDER_UNAVAILABLE");
+        return providerUnavailable();
     }
 
     private IntegrationException providerResponseInvalid() {
         return IntegrationException.unavailable("JIRA_RESPONSE_INVALID");
+    }
+
+    private IntegrationException providerUnavailable() {
+        return IntegrationException.unavailable("JIRA_PROVIDER_UNAVAILABLE");
     }
 
     private String requireConfigured(String value, String name) {
