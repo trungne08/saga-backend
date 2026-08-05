@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -122,7 +123,7 @@ class LocalDemoDataSeederTest {
                 .thenReturn(Optional.empty(), Optional.of(semester));
         when(subjectRepository.findBySubjectCodeAndDeletedAtIsNull(LocalDemoDataSeeder.SUBJECT_CODE))
                 .thenReturn(Optional.empty(), Optional.of(subject));
-        when(classRepository.findByClassCode(LocalDemoDataSeeder.CLASS_CODE))
+        when(classRepository.findByClassCodeAndDeletedAtIsNull(LocalDemoDataSeeder.CLASS_CODE))
                 .thenReturn(Optional.empty(), Optional.of(clazz));
         when(semesterService.createSemester(any())).thenReturn(semester);
         when(subjectService.createSubject(any())).thenReturn(subject);
@@ -169,6 +170,9 @@ class LocalDemoDataSeederTest {
         verify(semesterService).createSemester(any());
         verify(subjectService).createSubject(any());
         verify(classService).createClass(any());
+        verify(classRepository, times(2))
+                .findByClassCodeAndDeletedAtIsNull(LocalDemoDataSeeder.CLASS_CODE);
+        verify(classRepository, never()).findByClassCode(LocalDemoDataSeeder.CLASS_CODE);
         verify(courseService).createCourse(any());
         verify(teamRepository).save(any(Team.class));
         verify(teamMemberRepository).save(any(TeamMember.class));

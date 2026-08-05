@@ -64,7 +64,7 @@ public class CourseService {
 
         Subject subject = subjectRepository.findByIdAndDeletedAtIsNull(request.getSubjectId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Subject not found"));
-        Class clazz = classRepository.findById(request.getClassId())
+        Class clazz = classRepository.findByIdAndDeletedAtIsNull(request.getClassId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Class not found"));
         Semester semester = semesterRepository.findById(request.getSemesterId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Semester not found"));

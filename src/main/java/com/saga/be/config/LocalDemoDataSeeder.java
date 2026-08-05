@@ -122,7 +122,7 @@ public class LocalDemoDataSeeder implements ApplicationRunner {
                 .orElseGet(this::createSemester);
         Subject subject = subjectRepository.findBySubjectCodeAndDeletedAtIsNull(SUBJECT_CODE)
                 .orElseGet(this::createSubject);
-        com.saga.be.entity.Class clazz = classRepository.findByClassCode(CLASS_CODE)
+        com.saga.be.entity.Class clazz = classRepository.findByClassCodeAndDeletedAtIsNull(CLASS_CODE)
                 .orElseGet(this::createClass);
         Lecturer instructor = lecturerRepository.findByEmailIgnoreCase(DEMO_INSTRUCTOR_EMAIL)
                 .orElseGet(() -> lecturerRepository.save(Lecturer.builder()
