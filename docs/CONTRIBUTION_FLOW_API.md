@@ -1,630 +1,446 @@
-# Hướng dẫn API Tính % Đóng Góp (Contribution Flow)
+# Contribution Flow API
 
-Tài liệu này giúp FE team tích hợp các API tính toán và quản lý phần trăm đóng góp của sinh viên trong dự án nhóm.
+Tài liệu này mô tả đúng các API hiện có trong code để FE tích hợp luồng:
 
-## Tổng quan luồng
-
-1. **Sinh viên đánh giá peer review** → Lưu data
-2. **Giảng viên xem kết quả peer review chi tiết** → Hiển thị 4 tiêu chí + sao
-3. **Giảng viên lấy % đóng góp** → Hiển thị phần trăm từng thành viên
-4. **Giảng viên yêu cầu thay đổi trọng số slice** → Gửi đơn + admin duyệt
-5. **Giảng viên override % đóng góp ngay lập tức** → Áp dụng cho lớp
+- Peer review
+- Xem đánh giá đóng góp
+- Xem/đề nghị thay đổi trọng số slice theo course
+- Duyệt đơn đổi trọng số
 
 ---
 
-## 1. Lấy Kết Quả Peer Review Chi Tiết (Giảng viên xem)
+## 1) Peer review
 
-### Endpoint
-```
-GET /api/v1/peer-review/team/{teamId}/detail?sprintId={sprintId}
-```
+### 1.1 Lấy 4 rubric mặc định
 
-### Mục đích
-- Giảng viên xem **chi tiết từng tiêu chí** + số sao của peer review mỗi sprint
-- Hiển thị 4 tiêu chí: Chất lượng kỹ thuật, Cộng tác, Giao tiếp, Quản lý thời gian
+`GET /api/v1/peer-review-rubrics/default`
 
-### Request
-```bash
-curl -X GET \
-  'http://localhost:8080/api/v1/peer-review/team/1/detail?sprintId=5' \
-  -H 'Authorization: Bearer {token}' \
-  -H 'Accept: application/json'
-```
+**Role:** ADMIN, LECTURER, STUDENT
 
-### Response (Status 200)
+**Mục đích:** FE lấy 4 tiêu chí mặc định trước khi render form đánh giá.
+
+**Response**
 ```json
 {
-  "teamId": 1,
-  "teamName": "Nhóm A",
-  "sprintId": 5,
-  "sprintName": "Sprint 1",
-  "evaluations": [
+  "criteria": [
     {
-      "reviewedStudentId": 101,
-      "reviewedStudentName": "Nguyễn Văn A",
-      "studentCode": "SV001",
-      "criteria": [
-        {
-          "id": 1,
-          "name": "Chất lượng kỹ thuật",
-          "stars": 4,
-          "maxStars": 5
-        },
-        {
-          "id": 2,
-          "name": "Cộng tác",
-          "stars": 5,
-          "maxStars": 5
-        },
-        {
-          "id": 3,
-          "name": "Giao tiếp",
-          "stars": 3,
-          "maxStars": 5
-        },
-        {
-          "id": 4,
-          "name": "Quản lý thời gian",
-          "stars": 4,
-          "maxStars": 5
-        }
-      ],
-      "totalStars": 16,
-      "maxTotalStars": 20,
-      "reviewCount": 3,
-      "averageStars": 5.33,
-      "notes": "Sinh viên này có tác phong tốt"
+      "rubricId": "uuid",
+      "criteriaName": "Communication",
+      "weight": 25,
+      "description": "Communicate clearly and promptly"
+    },
+    {
+      "rubricId": "uuid",
+      "criteriaName": "Teamwork",
+      "weight": 25,
+      "description": "Collaborate and support the team"
+    },
+    {
+      "rubricId": "uuid",
+      "criteriaName": "Quality",
+      "weight": 25,
+      "description": "Deliver work with good quality"
+    },
+    {
+      "rubricId": "uuid",
+      "criteriaName": "Ownership",
+      "weight": 25,
+      "description": "Take responsibility for assigned work"
     }
   ]
 }
 ```
 
-### Lỗi
-- **404**: Team không tồn tại
-- **403**: Sinh viên không có quyền xem
-- **400**: sprintId không hợp lệ
+**4 rubric mặc định trong DB**
+- Communication
+- Teamwork
+- Quality
+- Ownership
+
+### 1.2 Lấy rubric theo team
+
+`GET /api/v1/teams/{teamId}/peer-review-rubric`
+
+**Role:** không gắn role cụ thể, nhưng người gọi phải có quyền đọc team.
+
+**Response**
+```json
+{
+  "teamId": "uuid",
+  "subjectId": "uuid",
+  "criteria": [
+    {
+      "rubricId": "uuid",
+      "criteriaName": "Communication",
+      "weight": 25,
+      "description": "Communicate clearly and promptly"
+    },
+    {
+      "rubricId": "uuid",
+      "criteriaName": "Teamwork",
+      "weight": 25,
+      "description": "Collaborate and support the team"
+    },
+    {
+      "rubricId": "uuid",
+      "criteriaName": "Quality",
+      "weight": 25,
+      "description": "Deliver work with good quality"
+    },
+    {
+      "rubricId": "uuid",
+      "criteriaName": "Ownership",
+      "weight": 25,
+      "description": "Take responsibility for assigned work"
+    }
+  ]
+}
+```
+
+### 1.3 Lấy danh sách thành viên có thể đánh giá
+
+`GET /api/v1/teams/{teamId}/sprints/{sprintId}/peer-reviews/candidates`
+
+**Role:** ADMIN, STUDENT  
+**Mục đích:** trả danh sách thành viên để FE render form đánh giá, đã loại reviewer ra khỏi danh sách.
+
+**Response**
+```json
+{
+  "teamId": "uuid",
+  "sprintId": "uuid",
+  "reviewerId": "uuid",
+  "candidates": [
+    {
+      "studentId": "uuid",
+      "fullName": "Nguyen Van A",
+      "studentCode": "SE001",
+      "alreadyReviewed": false,
+      "existingReviewId": null,
+      "existingTotalStarRating": null
+    }
+  ]
+}
+```
+
+### 1.4 Gửi peer review
+
+`POST /api/v1/teams/{teamId}/sprints/{sprintId}/peer-reviews`
+
+**Role:** ADMIN, STUDENT
+
+**Request body**
+```json
+{
+  "revieweeId": "uuid",
+  "starRating": 18,
+  "criteriaRatings": [
+    { "rubricId": "uuid", "starRating": 5 },
+    { "rubricId": "uuid", "starRating": 4 },
+    { "rubricId": "uuid", "starRating": 5 },
+    { "rubricId": "uuid", "starRating": 4 }
+  ],
+  "comment": "Lam viec tot"
+}
+```
+
+**Response**
+```json
+{
+  "id": "uuid",
+  "sprintId": "uuid",
+  "sprintName": "Sprint 1",
+  "reviewerId": "uuid",
+  "reviewerName": "Student A",
+  "revieweeId": "uuid",
+  "revieweeName": "Student B",
+  "starRating": 18,
+  "criteriaRatings": [
+    { "rubricId": "uuid", "criteriaName": "Communication", "starRating": 5 },
+    { "rubricId": "uuid", "criteriaName": "Teamwork", "starRating": 4 },
+    { "rubricId": "uuid", "criteriaName": "Quality", "starRating": 5 },
+    { "rubricId": "uuid", "criteriaName": "Ownership", "starRating": 4 }
+  ],
+  "comment": "Lam viec tot",
+  "createdAt": "2026-08-04T12:00:00",
+  "updatedAt": "2026-08-04T12:00:00"
+}
+```
+
+**Ghi chú**
+- Nếu FE gửi `criteriaRatings` thì phải gửi đủ toàn bộ 4 rubric mặc định.
+- Nếu không gửi `criteriaRatings`, FE phải gửi `starRating` tổng.
+- `starRating` trong `criteriaRatings` là từ `0` đến `5`.
+
+### 1.5 Xem peer reviews của sprint
+
+`GET /api/v1/teams/{teamId}/sprints/{sprintId}/peer-reviews`
+
+**Role:** ADMIN, LECTURER, STUDENT
+
+**Response**
+```json
+{
+  "teamId": "uuid",
+  "sprintId": "uuid",
+  "sprintName": "Sprint 1",
+  "reviews": [
+    {
+      "id": "uuid",
+      "sprintId": "uuid",
+      "sprintName": "Sprint 1",
+      "reviewerId": "uuid",
+      "reviewerName": "Student A",
+      "revieweeId": "uuid",
+      "revieweeName": "Student B",
+      "starRating": 18,
+      "criteriaRatings": [
+        { "rubricId": "uuid", "criteriaName": "Communication", "starRating": 5 },
+        { "rubricId": "uuid", "criteriaName": "Teamwork", "starRating": 4 },
+        { "rubricId": "uuid", "criteriaName": "Quality", "starRating": 5 },
+        { "rubricId": "uuid", "criteriaName": "Ownership", "starRating": 4 }
+      ],
+      "comment": "Lam viec tot",
+      "createdAt": "2026-08-04T12:00:00",
+      "updatedAt": "2026-08-04T12:00:00"
+    }
+  ]
+}
+```
 
 ---
 
-## 2. Lấy % Đóng Góp (Giảng viên xem)
+## 2) Contribution evaluation
 
-### Endpoint
-```
-GET /api/v1/teams/{teamId}/contribution-evaluation?sprintId={sprintId}
-```
+### Lấy kết quả % đóng góp của team
 
-### Mục đích
-- Giảng viên xem **% đóng góp** của từng thành viên
-- Hiển thị breakdown: Code %, Document %, Design %
-- Hiển thị chi tiết: task score, peer review score, evidence count
+`GET /api/v1/teams/{teamId}/contribution-evaluation`
 
-### Request
-```bash
-curl -X GET \
-  'http://localhost:8080/api/v1/teams/1/contribution-evaluation?sprintId=5' \
-  -H 'Authorization: Bearer {token}' \
-  -H 'Accept: application/json'
-```
+**Role:** ADMIN, LECTURER
 
-### Response (Status 200)
+**Response**
 ```json
 {
-  "teamId": 1,
-  "teamName": "Nhóm A",
-  "evaluationDate": "2026-08-04T18:08:09Z",
+  "teamId": "uuid",
+  "projectId": "uuid",
+  "evaluatedAt": "2026-08-04T12:00:00",
   "members": [
     {
-      "studentId": 101,
-      "studentName": "Nguyễn Văn A",
-      "studentCode": "SV001",
-      "email": "a@example.com",
-      "role": "Developer",
-      "codeContributionScore": 85,
-      "codeContributionPercentage": 45.5,
-      "documentContributionScore": 20,
-      "documentContributionPercentage": 10.7,
-      "designContributionScore": 0,
+      "studentId": "uuid",
+      "fullName": "Nguyen Van A",
+      "studentCode": "SE001",
+      "codeContributionScore": 12.5,
+      "documentContributionScore": 4.0,
+      "designContributionScore": 0.0,
+      "codeContributionPercentage": 32.1,
+      "documentContributionPercentage": 10.2,
       "designContributionPercentage": 0.0,
-      "finalContributionPercentage": 56.2,
-      "taskContributionScore": 85,
-      "peerReviewScore": 16,
-      "evidenceCount": 12,
-      "warnings": [],
+      "peerReviewScore": 18.0,
+      "taskContributionScore": 16.5,
+      "taskContributionPercentage": 42.3,
+      "finalContributionPercentage": 42.3,
+      "evidenceCount": 7,
       "sprintBreakdowns": [
         {
-          "sprintId": 5,
+          "sprintId": "uuid",
           "sprintName": "Sprint 1",
-          "taskScore": 85,
+          "taskScore": 8.5,
           "retrospectiveMultiplier": 1.0,
-          "adjustedTaskScore": 85,
-          "peerReviewCount": 3,
-          "peerReviewAverageScore": 5.33
+          "adjustedTaskScore": 8.5,
+          "peerReviewCount": 3
         }
-      ]
-    },
-    {
-      "studentId": 102,
-      "studentName": "Trần Thị B",
-      "studentCode": "SV002",
-      "email": "b@example.com",
-      "role": "Documentor",
-      "codeContributionScore": 20,
-      "codeContributionPercentage": 10.7,
-      "documentContributionScore": 60,
-      "documentContributionPercentage": 32.1,
-      "designContributionScore": 0,
-      "designContributionPercentage": 0.0,
-      "finalContributionPercentage": 42.8,
-      "taskContributionScore": 60,
-      "peerReviewScore": 14,
-      "evidenceCount": 8,
-      "warnings": [],
-      "sprintBreakdowns": [
-        {
-          "sprintId": 5,
-          "sprintName": "Sprint 1",
-          "taskScore": 60,
-          "retrospectiveMultiplier": 1.0,
-          "adjustedTaskScore": 60,
-          "peerReviewCount": 3,
-          "peerReviewAverageScore": 4.67
-        }
-      ]
+      ],
+      "warnings": []
     }
   ]
 }
 ```
 
-### Ghi chú
-- **codeContributionPercentage**: % đóng góp phần Code
-- **documentContributionPercentage**: % đóng góp phần Document
-- **designContributionPercentage**: % đóng góp phần Design
-- **finalContributionPercentage**: Tổng % đóng góp cuối cùng
-- **Tổng % tất cả thành viên = 100%**
-
-### Lỗi
-- **404**: Team không tồn tại
-- **403**: Không có quyền xem
-- **400**: sprintId không hợp lệ
+**Ghi chú**
+- `finalContributionPercentage` là % cuối cùng để hiển thị cho giảng viên.
+- `code/document/design` là breakdown theo slice.
+- `taskContributionPercentage` là % contribution phần task sau normalize.
+- Response DTO thực tế chỉ gồm các field trong `TeamContributionMemberResponse`.
 
 ---
 
-## 3. Xem Trọng Số Slices Hiện Tại
+## 3) Slice weight theo course
 
-### Endpoint
-```
-GET /api/v1/courses/{courseId}/contribution-weights
-```
+### 3.1 Xem trọng số hiện tại
 
-### Mục đích
-- Lấy trọng số hiện tại của từng slice (Code, Document, Design, Testing)
-- Dùng để hiển thị thông tin hoặc chuẩn bị gửi yêu cầu thay đổi
+`GET /api/v1/courses/{courseId}/contribution-slice-weights`
 
-### Request
-```bash
-curl -X GET \
-  'http://localhost:8080/api/v1/courses/10/contribution-weights' \
-  -H 'Authorization: Bearer {token}' \
-  -H 'Accept: application/json'
-```
+**Role:** ADMIN, LECTURER
 
-### Response (Status 200)
+**Response**
 ```json
 {
-  "courseId": 10,
-  "courseCode": "CS101",
-  "courseName": "Nhập môn lập trình",
-  "codeWeight": 40,
-  "documentWeight": 30,
-  "designWeight": 20,
-  "testingWeight": 10
+  "courseId": "uuid",
+  "courseCode": "SAGA101",
+  "courseName": "Software Engineering",
+  "codeWeight": 33.3333333333,
+  "documentWeight": 33.3333333333,
+  "designWeight": 33.3333333333
 }
 ```
 
-### Lỗi
-- **404**: Course không tồn tại
+### 3.2 Gửi yêu cầu đổi trọng số
 
----
+`POST /api/v1/courses/{courseId}/contribution-slice-weight-requests`
 
-## 4. Gửi Yêu Cầu Thay Đổi Trọng Số Slices (Giảng viên)
+**Role:** LECTURER
 
-### Endpoint
-```
-POST /api/v1/courses/{courseId}/contribution-weight-request
-```
-
-### Mục đích
-- Giảng viên gửi yêu cầu thay đổi trọng số slice của course
-- Cần kèm lý do + số liệu mới
-- Admin sẽ review và duyệt/từ chối
-
-### Request Body
+**Request body**
 ```json
 {
-  "reason": "Dự án này nặng về thiết kế giao diện, code ít hơn",
-  "proposedCodeWeight": 30,
-  "proposedDocumentWeight": 20,
-  "proposedDesignWeight": 40,
-  "proposedTestingWeight": 10
+  "lecturerId": "uuid",
+  "reason": "Course nay nhieu design hon code",
+  "codeWeight": 30,
+  "documentWeight": 20,
+  "designWeight": 50
 }
 ```
 
-### Request
-```bash
-curl -X POST \
-  'http://localhost:8080/api/v1/courses/10/contribution-weight-request' \
-  -H 'Authorization: Bearer {token}' \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "reason": "Dự án này nặng về thiết kế giao diện, code ít hơn",
-    "proposedCodeWeight": 30,
-    "proposedDocumentWeight": 20,
-    "proposedDesignWeight": 40,
-    "proposedTestingWeight": 10
-  }'
-```
-
-### Response (Status 201)
+**Response**
 ```json
 {
-  "requestId": 123,
-  "courseId": 10,
-  "courseCode": "CS101",
-  "courseName": "Nhập môn lập trình",
-  "requestedBy": {
-    "userId": 201,
-    "fullName": "TS. Nguyễn Văn Giảng Viên",
-    "email": "lecturer@example.com"
-  },
-  "reason": "Dự án này nặng về thiết kế giao diện, code ít hơn",
-  "currentCodeWeight": 40,
-  "currentDocumentWeight": 30,
-  "currentDesignWeight": 20,
-  "currentTestingWeight": 10,
+  "requestId": "uuid",
+  "courseId": "uuid",
+  "courseCode": "SAGA101",
+  "courseName": "Software Engineering",
+  "lecturerId": "uuid",
+  "lecturerName": "Dr. A",
   "proposedCodeWeight": 30,
   "proposedDocumentWeight": 20,
-  "proposedDesignWeight": 40,
-  "proposedTestingWeight": 10,
+  "proposedDesignWeight": 50,
+  "reason": "Course nay nhieu design hon code",
   "status": "PENDING",
-  "createdAt": "2026-08-04T18:08:09Z",
-  "updatedAt": "2026-08-04T18:08:09Z"
+  "createdAt": "2026-08-04T12:00:00",
+  "resolvedAt": null
 }
 ```
 
-### Lỗi
-- **400**: Tổng trọng số không bằng 100%
-- **400**: Course không tồn tại
-- **403**: Không phải giảng viên
-- **409**: Đã có yêu cầu pending cho course này
+### 3.3 Danh sách yêu cầu đổi trọng số
 
----
+`GET /api/v1/courses/contribution-slice-weight-requests?status=PENDING&courseId={courseId}`
 
-## 5. Xem Danh Sách Yêu Cầu Thay Đổi Trọng Số (Admin/Giảng viên)
+**Role:** ADMIN, LECTURER
 
-### Endpoint
-```
-GET /api/v1/courses/{courseId}/contribution-weight-requests?status={status}
-```
+### 3.4 Duyệt / từ chối yêu cầu
 
-### Mục đích
-- Admin xem danh sách yêu cầu chờ duyệt (PENDING)
-- Giảng viên xem lịch sử yêu cầu của mình
+`PUT /api/v1/courses/contribution-slice-weight-requests/{requestId}/decision`
 
-### Request
-```bash
-# Admin xem tất cả yêu cầu chờ duyệt
-curl -X GET \
-  'http://localhost:8080/api/v1/courses/10/contribution-weight-requests?status=PENDING' \
-  -H 'Authorization: Bearer {admin-token}' \
-  -H 'Accept: application/json'
-```
+**Role:** ADMIN
 
-### Response (Status 200)
-```json
-{
-  "courseId": 10,
-  "courseCode": "CS101",
-  "courseName": "Nhập môn lập trình",
-  "requests": [
-    {
-      "requestId": 123,
-      "requestedBy": {
-        "userId": 201,
-        "fullName": "TS. Nguyễn Văn Giảng Viên"
-      },
-      "reason": "Dự án này nặng về thiết kế giao diện, code ít hơn",
-      "status": "PENDING",
-      "proposedCodeWeight": 30,
-      "proposedDocumentWeight": 20,
-      "proposedDesignWeight": 40,
-      "proposedTestingWeight": 10,
-      "createdAt": "2026-08-04T18:08:09Z"
-    }
-  ]
-}
-```
-
----
-
-## 6. Duyệt/Từ Chối Yêu Cầu Thay Đổi Trọng Số (Admin)
-
-### Endpoint
-```
-PUT /api/v1/contribution-weight-requests/{requestId}/decision
-```
-
-### Mục đích
-- Admin duyệt hoặc từ chối yêu cầu
-- Nếu duyệt: trọng số course sẽ cập nhật ngay lập tức
-
-### Request Body - Duyệt
+**Request body**
 ```json
 {
   "decision": "APPROVED",
-  "feedbackMessage": "Nhận xét hợp lý, trọng số đã cập nhật"
+  "note": "Dong y",
+  "adminId": "uuid"
 }
 ```
 
-### Request Body - Từ Chối
+**Response**
 ```json
 {
-  "decision": "REJECTED",
-  "feedbackMessage": "Cần giải thích thêm chi tiết"
-}
-```
-
-### Request
-```bash
-curl -X PUT \
-  'http://localhost:8080/api/v1/contribution-weight-requests/123/decision' \
-  -H 'Authorization: Bearer {admin-token}' \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "decision": "APPROVED",
-    "feedbackMessage": "Nhận xét hợp lý, trọng số đã cập nhật"
-  }'
-```
-
-### Response (Status 200)
-```json
-{
-  "requestId": 123,
-  "courseId": 10,
-  "status": "APPROVED",
-  "decision": "APPROVED",
-  "feedbackMessage": "Nhận xét hợp lý, trọng số đã cập nhật",
-  "decidedBy": {
-    "userId": 999,
-    "fullName": "Admin"
-  },
-  "decidedAt": "2026-08-04T18:15:00Z",
+  "requestId": "uuid",
+  "courseId": "uuid",
+  "courseCode": "SAGA101",
+  "courseName": "Software Engineering",
+  "lecturerId": "uuid",
+  "lecturerName": "Dr. A",
   "proposedCodeWeight": 30,
   "proposedDocumentWeight": 20,
-  "proposedDesignWeight": 40,
-  "proposedTestingWeight": 10
+  "proposedDesignWeight": 50,
+  "reason": "Course nay nhieu design hon code",
+  "status": "APPROVED",
+  "createdAt": "2026-08-04T12:00:00",
+  "resolvedAt": "2026-08-04T12:30:00"
 }
 ```
 
-### Lỗi
-- **400**: Yêu cầu không ở trạng thái PENDING
-- **403**: Không phải admin
-- **404**: Yêu cầu không tồn tại
+---
+
+## 4) Override đóng góp
+
+### Gửi override cho team
+
+`POST /api/v1/teams/{teamId}/contribution-override`
+
+**Role:** ADMIN, LECTURER
+
+**Request body**
+```json
+{
+  "studentId": "uuid",
+  "proposedPercentage": 45,
+  "reason": "Ly do override",
+  "lecturerId": "uuid"
+}
+```
+
+**Response**
+```json
+{
+  "requestId": "uuid",
+  "studentId": "uuid",
+  "proposedPercentage": 45,
+  "status": "APPROVED",
+  "message": "Contribution override applied successfully"
+}
+```
 
 ---
 
-## 7. Override % Đóng Góp Ngay Lập Tức (Giảng viên/Admin)
+## 5) Luồng FE đề xuất
 
-### Endpoint
-```
-POST /api/v1/teams/{teamId}/contribution-override
-```
+1. Student gọi `GET .../peer-reviews/candidates`
+2. Student submit `POST .../peer-reviews`
+3. Lecturer xem `GET .../peer-reviews`
+4. Lecturer xem `GET .../contribution-evaluation`
+5. Lecturer nếu cần thì gửi `POST .../contribution-slice-weight-requests`
+6. Admin duyệt `PUT .../decision`
+7. Lecturer/admin có thể dùng `POST .../contribution-override` khi cần chỉnh tay có lý do
+8. FE lấy `GET /api/v1/projects/{projectId}/sprints` hoặc `GET /api/v1/teams/{teamId}/sprints` để chọn `sprintId` trước khi vào luồng contribution/peer review
 
-### Mục đích
-- Giảng viên/Admin áp dụng override % đóng góp cho cả lớp **ngay lập tức**
-- Không cần admin duyệt
-- Dùng để xử lý các trường hợp đặc biệt (team member vắng, bệnh, v.v.)
+### Quan trọng về `sprintId`
 
-### Request Body
+Các API contribution/peer review vẫn **nhận `sprintId` làm input**:
+- `GET/POST /api/v1/teams/{teamId}/sprints/{sprintId}/peer-reviews...`
+
+FE nên gọi API list sprint trước để lấy danh sách `sprintId`, sau đó mới vào các endpoint bên dưới.
+
+### 5.1 Lấy danh sách sprint theo project/team
+
+`GET /api/v1/projects/{projectId}/sprints`
+
+`GET /api/v1/teams/{teamId}/sprints`
+
+**Role:** ADMIN, LECTURER, STUDENT  
+**Response:** `SprintListResponse`
+
 ```json
 {
-  "reason": "Thành viên SV001 bệnh 2 tuần, cần giảm %",
-  "overrideType": "TEAM_CONTRIBUTION_OVERRIDE",
-  "adjustments": [
+  "projectId": "uuid",
+  "teamId": "uuid",
+  "sprints": [
     {
-      "studentId": 101,
-      "adjustmentPercentage": -15,
-      "note": "Vắng 2 tuần"
-    },
-    {
-      "studentId": 102,
-      "adjustmentPercentage": 5,
-      "note": "Hỗ trợ thêm"
+      "sprintId": "uuid",
+      "sprintName": "Sprint 1",
+      "externalSprintId": "JIRA-123",
+      "startDate": "2026-08-01T00:00:00",
+      "endDate": "2026-08-14T23:59:59",
+      "goal": "Hoàn thành module contribution"
     }
   ]
 }
 ```
 
-### Request
-```bash
-curl -X POST \
-  'http://localhost:8080/api/v1/teams/1/contribution-override' \
-  -H 'Authorization: Bearer {lecturer-token}' \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "reason": "Thành viên SV001 bệnh 2 tuần, cần giảm %",
-    "overrideType": "TEAM_CONTRIBUTION_OVERRIDE",
-    "adjustments": [
-      {
-        "studentId": 101,
-        "adjustmentPercentage": -15,
-        "note": "Vắng 2 tuần"
-      },
-      {
-        "studentId": 102,
-        "adjustmentPercentage": 5,
-        "note": "Hỗ trợ thêm"
-      }
-    ]
-  }'
-```
-
-### Response (Status 201)
-```json
-{
-  "overrideId": 456,
-  "teamId": 1,
-  "reason": "Thành viên SV001 bệnh 2 tuần, cần giảm %",
-  "overrideType": "TEAM_CONTRIBUTION_OVERRIDE",
-  "appliedBy": {
-    "userId": 201,
-    "fullName": "TS. Nguyễn Văn Giảng Viên"
-  },
-  "adjustments": [
-    {
-      "studentId": 101,
-      "adjustmentPercentage": -15,
-      "note": "Vắng 2 tuần",
-      "appliedAt": "2026-08-04T18:08:09Z"
-    },
-    {
-      "studentId": 102,
-      "adjustmentPercentage": 5,
-      "note": "Hỗ trợ thêm",
-      "appliedAt": "2026-08-04T18:08:09Z"
-    }
-  ],
-  "status": "APPLIED",
-  "createdAt": "2026-08-04T18:08:09Z"
-}
-```
-
-### Lỗi
-- **400**: Tổng adjustment không hợp lệ
-- **403**: Không có quyền (chỉ LECTURER + ADMIN)
-- **404**: Team không tồn tại
-
 ---
 
-## Quy Trình Tích Hợp FE
+## 6) Lưu ý
 
-### 1. Sinh viên Đánh Giá Peer Review
-*(Sử dụng API từ PEER_REVIEW_API_EXAMPLE.md)*
-- FE gọi API peer review
-- Lưu 4 tiêu chí × số sao
-- Submit
-
-### 2. Giảng viên Xem Kết Quả (Trang Chi Tiết Peer Review)
-```
-GET /api/v1/peer-review/team/{teamId}/detail?sprintId={sprintId}
-```
-- Hiển thị 4 tiêu chí + số sao cho mỗi thành viên
-- Hiển thị tổng sao và số lần được đánh giá
-
-### 3. Giảng viên Xem % Đóng Góp (Trang Bảng Điểm)
-```
-GET /api/v1/teams/{teamId}/contribution-evaluation?sprintId={sprintId}
-```
-- Hiển thị bảng: Tên - Code % - Doc % - Design % - Tổng %
-- Hiển thị chi tiết: task score, peer review score, warnings
-
-### 4. Giảng viên Yêu Cầu Thay Đổi Trọng Số (Nếu Cần)
-```
-POST /api/v1/courses/{courseId}/contribution-weight-request
-GET /api/v1/courses/{courseId}/contribution-weight-requests?status=PENDING
-```
-- Gửi yêu cầu + lý do
-- Chờ admin duyệt
-
-### 5. Admin Duyệt Yêu Cầu
-```
-PUT /api/v1/contribution-weight-requests/{requestId}/decision
-```
-- Duyệt/từ chối
-- Trọng số cập nhật ngay lập tức nếu duyệt
-
-### 6. Giảng viên Override % (Xử Lý Exception)
-```
-POST /api/v1/teams/{teamId}/contribution-override
-```
-- Áp dụng ngay lập tức, không cần duyệt
-- Dùng cho trường hợp đặc biệt
-
----
-
-## Công Thức Tính Toán % Đóng Góp
-
-### Dữ Liệu Input
-- **Task scores**: Điểm từ task assignments (evidence từ Jira/backend)
-- **Peer review scores**: Trung bình score của 4 tiêu chí từ peer review (0-20)
-- **Slice weights**: Trọng số Code/Doc/Design (tổng = 100%)
-
-### Bước 1: Tính Score Cho Mỗi Slice
-Mỗi thành viên nhận score từ:
-- Commit code → **Code slice**
-- Document tasks → **Document slice**
-- Design tasks → **Design slice**
-
-Score = Task evidence + Peer review contribution
-
-### Bước 2: Chuẩn Hóa Score Thành Percentage
-```
-code_percentage = (member_code_score / total_code_score) × code_weight
-doc_percentage = (member_doc_score / total_doc_score) × doc_weight
-design_percentage = (member_design_score / total_design_score) × design_weight
-
-final_percentage = code_percentage + doc_percentage + design_percentage
-```
-
-### Bước 3: Áp Dụng Override (Nếu Có)
-```
-final_percentage = final_percentage + adjustments_from_override
-```
-
-### Ví Dụ
-**Team 4 người: A (3 code), B (1 code + 3 doc), C (1 design), D (inactive)**
-
-Weights: Code=40%, Doc=30%, Design=20%
-
-| Người | Code Score | Doc Score | Design Score | Code % | Doc % | Design % | Tổng % |
-|-------|-----------|-----------|--------------|--------|-------|----------|--------|
-| A     | 60        | 0         | 0            | 30.0   | 0.0   | 0.0      | 30.0   |
-| B     | 20        | 60        | 0            | 10.0   | 18.0  | 0.0      | 28.0   |
-| C     | 0         | 0         | 40           | 0.0    | 0.0   | 20.0     | 20.0   |
-| D     | 0         | 0         | 0            | 0.0    | 0.0   | 0.0      | 0.0    |
-| **Tổng** | 80 | 60 | 40 | **40.0** | **18.0** | **20.0** | **78.0** |
-
-*(Tổng = 78% là do D không làm gì, nên phần % của D bị "mất")*
-
----
-
-## Validation & Security
-
-### Quyền Truy Cập
-- **GET contribution-evaluation**: LECTURER, ADMIN (xem team của mình)
-- **POST contribution-override**: LECTURER, ADMIN
-- **POST contribution-weight-request**: LECTURER (của course)
-- **PUT contribution-weight-request decision**: ADMIN only
-
-### Validation Rules
-1. Tổng trọng số phải = 100%
-2. Sinh viên không thể đánh giá chính mình (được xử lý trong peer review API)
-3. Override adjustment tổng cộng không được làm thay đổi quá 50% điểm của thành viên
-
----
-
-## Lỗi Thường Gặp
-
-| Lỗi | Nguyên nhân | Cách sửa |
-|-----|-----------|---------|
-| 403 Forbidden | Không có quyền xem/sửa | Kiểm tra token, role, team assignment |
-| 404 Not Found | Team/Course không tồn tại | Kiểm tra ID trong URL |
-| 400 Bad Request | Dữ liệu không hợp lệ | Kiểm tra request body, tổng % = 100%? |
-| 409 Conflict | Yêu cầu đã tồn tại (PENDING) | Chờ admin duyệt hoặc từ chối yêu cầu cũ |
-
----
-
-## Tham Khảo Thêm
-
-- [Peer Review API Documentation](./FRONTEND_API_INTEGRATION.md#peer-review-endpoints)
-- [Team & Course API](./FRONTEND_API_INTEGRATION.md)
-- [Contribution Calculation Logic](../src/main/java/com/saga/be/service/contribution/ContributionCalculationService.java)
+- File này bám theo code hiện tại, không mô tả endpoint giả định.
+- Các response `Page<>` ở API roster/course không nằm trong tài liệu này.
+- Nếu FE cần sample request/response chi tiết hơn cho từng DTO, mình sẽ tách tiếp ra theo từng màn hình.

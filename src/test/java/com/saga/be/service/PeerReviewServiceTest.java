@@ -6,11 +6,13 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
 import com.saga.be.dto.request.PeerReviewCriterionRequest;
 import com.saga.be.dto.response.PeerReviewCandidatesResponse;
 import com.saga.be.dto.request.PeerReviewRequest;
+import com.saga.be.dto.response.PeerReviewDefaultRubricResponse;
 import com.saga.be.dto.response.PeerReviewResponse;
 import com.saga.be.dto.response.PeerReviewRubricResponse;
 import com.saga.be.dto.response.SprintPeerReviewResponse;
@@ -190,6 +192,19 @@ class PeerReviewServiceTest {
     }
 
     @Test
+    void getDefaultPeerReviewRubricReturnsGlobalCriteria() {
+        Fixture fixture = fixture();
+
+        when(rubricTemplateRepository.findBySubjectIdIsNullOrderByCreatedAtAsc())
+                .thenReturn(fixture.rubrics);
+
+        PeerReviewDefaultRubricResponse response = service.getDefaultPeerReviewRubric();
+
+        assertEquals(4, response.criteria().size());
+        assertEquals("Communication", response.criteria().get(0).criteriaName());
+    }
+
+    @Test
     void submitRejectsSelfReview() {
         Fixture fixture = fixture();
         SagaPrincipal principal = studentPrincipal(fixture.reviewer.getId());
@@ -300,8 +315,8 @@ class PeerReviewServiceTest {
         RubricTemplate ownership = rubric(subject, "Ownership");
         List<RubricTemplate> rubrics = List.of(communication, teamwork, quality, ownership);
 
-        when(teamRepository.findWithCourseAndInstructorById(teamId)).thenReturn(Optional.of(team));
-        when(teamMemberRepository.findByTeamId(teamId)).thenReturn(List.of(reviewerMember, revieweeMember));
+        lenient().when(teamRepository.findWithCourseAndInstructorById(teamId)).thenReturn(Optional.of(team));
+        lenient().when(teamMemberRepository.findByTeamId(teamId)).thenReturn(List.of(reviewerMember, revieweeMember));
 
         return new Fixture(team, sprint, reviewer, reviewee, rubrics, lecturerId);
     }

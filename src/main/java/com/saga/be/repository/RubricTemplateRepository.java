@@ -7,5 +7,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface RubricTemplateRepository extends JpaRepository<RubricTemplate, UUID> {
 
+    List<RubricTemplate> findBySubjectIdIsNullOrderByCreatedAtAsc();
+
     List<RubricTemplate> findBySubjectIdOrderByCreatedAtAsc(UUID subjectId);
 }

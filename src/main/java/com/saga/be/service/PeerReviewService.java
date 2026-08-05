@@ -4,6 +4,7 @@ import com.saga.be.dto.request.PeerReviewCriterionRequest;
 import com.saga.be.dto.request.PeerReviewRequest;
 import com.saga.be.dto.response.PeerReviewCandidateResponse;
 import com.saga.be.dto.response.PeerReviewCandidatesResponse;
+import com.saga.be.dto.response.PeerReviewDefaultRubricResponse;
 import com.saga.be.dto.response.PeerReviewResponse;
 import com.saga.be.dto.response.PeerReviewRubricItemResponse;
 import com.saga.be.dto.response.PeerReviewRubricResponse;
@@ -196,12 +197,13 @@ public class PeerReviewService {
         UUID subjectId = team.getCourse() != null && team.getCourse().getSubject() != null
                 ? team.getCourse().getSubject().getId()
                 : null;
-        List<PeerReviewRubricItemResponse> criteria = subjectId == null
-                ? List.of()
-                : rubricTemplateRepository.findBySubjectIdOrderByCreatedAtAsc(subjectId).stream()
-                        .map(PeerReviewRubricItemResponse::from)
-                        .toList();
+        List<PeerReviewRubricItemResponse> criteria = loadRubricItems(subjectId);
         return new PeerReviewRubricResponse(teamId, subjectId, criteria);
+    }
+
+    @Transactional
+    public PeerReviewDefaultRubricResponse getDefaultPeerReviewRubric() {
+        return new PeerReviewDefaultRubricResponse(loadRubricItems(null));
     }
 
     private Team requireTeam(UUID teamId) {
@@ -293,18 +295,11 @@ public class PeerReviewService {
         UUID subjectId = team.getCourse() != null && team.getCourse().getSubject() != null
                 ? team.getCourse().getSubject().getId()
                 : null;
-        if (subjectId == null) {
-            throw new ResponseStatusException(
-                    HttpStatus.BAD_REQUEST,
-                    "Team course does not have a subject rubric configured"
-            );
-        }
-
-        List<RubricTemplate> rubrics = rubricTemplateRepository.findBySubjectIdOrderByCreatedAtAsc(subjectId);
+        List<RubricTemplate> rubrics = loadRubrics(subjectId);
         if (rubrics.isEmpty()) {
             throw new ResponseStatusException(
                     HttpStatus.BAD_REQUEST,
-                    "Peer review rubric is not configured for this subject"
+                    "Peer review rubric is not configured"
             );
         }
         if (request.getCriteriaRatings().size() != rubrics.size()) {
@@ -349,6 +344,24 @@ public class PeerReviewService {
         List<PeerReviewDetail> managedDetails = ensureCriteriaList(peerReview);
         managedDetails.clear();
         managedDetails.addAll(details);
+    }
+
+    private List<PeerReviewRubricItemResponse> loadRubricItems(UUID subjectId) {
+        return loadRubrics(subjectId).stream()
+                .map(PeerReviewRubricItemResponse::from)
+                .toList();
+    }
+
+    private List<RubricTemplate> loadRubrics(UUID subjectId) {
+        List<RubricTemplate> globalRubrics = rubricTemplateRepository.findBySubjectIdIsNullOrderByCreatedAtAsc();
+        if (globalRubrics != null && !globalRubrics.isEmpty()) {
+            return globalRubrics;
+        }
+        if (subjectId == null) {
+            return List.of();
+        }
+        List<RubricTemplate> subjectRubrics = rubricTemplateRepository.findBySubjectIdOrderByCreatedAtAsc(subjectId);
+        return subjectRubrics == null ? List.of() : subjectRubrics;
     }
 
     private List<PeerReviewDetail> ensureCriteriaList(PeerReview peerReview) {

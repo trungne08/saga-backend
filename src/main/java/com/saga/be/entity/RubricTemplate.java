@@ -6,6 +6,7 @@ import jakarta.persistence.FetchType;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import java.math.BigDecimal;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -29,7 +30,7 @@ public class RubricTemplate extends BaseEntity {
     private String criteriaName;
 
     @Column(name = "weight")
-    private Float weight;
+    private BigDecimal weight;
 
     @Column(name = "description")
     private String description;

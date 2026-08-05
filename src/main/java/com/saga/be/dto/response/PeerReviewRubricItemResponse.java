@@ -1,12 +1,13 @@
 package com.saga.be.dto.response;
 
 import com.saga.be.entity.RubricTemplate;
+import java.math.BigDecimal;
 import java.util.UUID;
 
 public record PeerReviewRubricItemResponse(
         UUID rubricId,
         String criteriaName,
-        Float weight,
+        BigDecimal weight,
         String description
 ) {
     public static PeerReviewRubricItemResponse from(RubricTemplate rubricTemplate) {
