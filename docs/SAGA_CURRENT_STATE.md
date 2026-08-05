@@ -157,3 +157,15 @@ BASE HEAD: `0bc30be`. Endpoint Student self-scoped đã được commit tại `2
 - **CONFIRMED:** `GET /api/me/courses/{courseId}/team/members` đã được commit tại `250f514` và vẫn có trong HEAD `200d866`: chỉ cho STUDENT; anonymous 401, ADMIN/LECTURER 403, không cần CSRF. Backend resolve Student từ `SagaPrincipal.localProfileId` và Team theo Student+Course; no membership/Course thiếu 404, legacy nhiều Team 409. Response trả resolved teamId cho FE dùng Project/integration flow, Project nullable và page members không email/cognitoSub/version/token.
 - **CONFIRMED:** endpoint roster cũ vẫn giữ ADMIN/LECTURER/STUDENT exact-Team authorization; page member được tái sử dụng trong `TeamRosterService`. Project LEADER/MEMBER authorization không đổi.
 - **Verification hiện tại:** full Maven suite tại checkpoint hiện tại: **70 suites, 299 tests, 0 failures, 0 errors, 0 skipped**. Không thay đổi OAuth callback, role priority, session hay import authorization.
+## Cập nhật 2026-08-05 — Lecturer Analytics read APIs
+
+- **CONFIRMED:** thêm tám GET route cho Team detail, Student progress/activities,
+  Contribution read adapter, Course early warnings, interaction graph, heatmap và velocity.
+- **CONFIRMED:** actor lấy từ `SagaPrincipal`; ADMIN mọi Course, LECTURER đúng instructor,
+  STUDENT 403; GET dùng session và không cần CSRF.
+- **PARTIAL:** warnings chỉ `OVERDUE_TASK`; heatmap chỉ Commit; interaction chỉ Peer Review;
+  velocity là current planned points; activities không có Jira transition history.
+- Không sửa nhóm Contribution/Peer Review/Slice Weights, migration hoặc provider sync.
+- **Verification:** targeted analytics 21 tests và Team roster security 13 tests pass;
+  regression GitHub/Jira/Contribution 20 tests pass; full Maven 77 suites / 339 tests /
+  0 failures / 0 errors / 0 skipped.

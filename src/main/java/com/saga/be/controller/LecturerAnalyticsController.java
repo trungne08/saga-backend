@@ -1,0 +1,102 @@
+package com.saga.be.controller;
+
+import com.saga.be.dto.response.LecturerAnalyticsResponses;
+import com.saga.be.security.SagaPrincipal;
+import com.saga.be.service.CourseEarlyWarningQueryService;
+import com.saga.be.service.LecturerContributionQueryService;
+import com.saga.be.service.LecturerStudentAnalyticsQueryService;
+import com.saga.be.service.LecturerTeamAnalyticsQueryService;
+import java.time.LocalDate;
+import java.util.UUID;
+import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.ResponseEntity;
+import org.springframework.http.HttpStatus;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
+
+@RestController
+@RequestMapping("/api/v1/courses/{courseId}")
+@RequiredArgsConstructor
+@PreAuthorize("hasAnyRole('ADMIN', 'LECTURER')")
+public class LecturerAnalyticsController {
+
+    private final LecturerTeamAnalyticsQueryService teamAnalytics;
+    private final LecturerStudentAnalyticsQueryService studentAnalytics;
+    private final LecturerContributionQueryService contributionAnalytics;
+    private final CourseEarlyWarningQueryService earlyWarningAnalytics;
+
+    @GetMapping("/teams/{teamId}/detail")
+    public ResponseEntity<LecturerAnalyticsResponses.TeamDetail> teamDetail(
+            @AuthenticationPrincipal SagaPrincipal principal, @PathVariable UUID courseId,
+            @PathVariable UUID teamId, @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return ResponseEntity.ok(teamAnalytics.detail(principal, courseId, teamId, pageRequest(page, size)));
+    }
+
+    @GetMapping("/students/{studentId}/progress")
+    public ResponseEntity<LecturerAnalyticsResponses.StudentProgress> progress(
+            @AuthenticationPrincipal SagaPrincipal principal, @PathVariable UUID courseId,
+            @PathVariable UUID studentId) {
+        return ResponseEntity.ok(studentAnalytics.progress(principal, courseId, studentId));
+    }
+
+    @GetMapping("/students/{studentId}/activities")
+    public ResponseEntity<LecturerAnalyticsResponses.StudentActivities> activities(
+            @AuthenticationPrincipal SagaPrincipal principal, @PathVariable UUID courseId,
+            @PathVariable UUID studentId, @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+        return ResponseEntity.ok(studentAnalytics.activities(principal, courseId, studentId, pageRequest(page, size)));
+    }
+
+    @GetMapping("/students/{studentId}/contribution-detail")
+    public ResponseEntity<LecturerAnalyticsResponses.StudentContributionDetail> contributionDetail(
+            @AuthenticationPrincipal SagaPrincipal principal, @PathVariable UUID courseId,
+            @PathVariable UUID studentId) {
+        return ResponseEntity.ok(contributionAnalytics.get(principal, courseId, studentId));
+    }
+
+    @GetMapping("/early-warnings")
+    public ResponseEntity<LecturerAnalyticsResponses.EarlyWarnings> earlyWarnings(
+            @AuthenticationPrincipal SagaPrincipal principal, @PathVariable UUID courseId) {
+        return ResponseEntity.ok(earlyWarningAnalytics.get(principal, courseId));
+    }
+
+    @GetMapping("/teams/{teamId}/interactions")
+    public ResponseEntity<LecturerAnalyticsResponses.InteractionGraph> interactions(
+            @AuthenticationPrincipal SagaPrincipal principal, @PathVariable UUID courseId,
+            @PathVariable UUID teamId) {
+        return ResponseEntity.ok(teamAnalytics.interactions(principal, courseId, teamId));
+    }
+
+    @GetMapping("/teams/{teamId}/heatmap")
+    public ResponseEntity<LecturerAnalyticsResponses.ActivityHeatmap> heatmap(
+            @AuthenticationPrincipal SagaPrincipal principal, @PathVariable UUID courseId,
+            @PathVariable UUID teamId, @RequestParam(required = false) UUID studentId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+        return ResponseEntity.ok(teamAnalytics.heatmap(principal, courseId, teamId, studentId, startDate, endDate));
+    }
+
+    @GetMapping("/teams/{teamId}/sprints/velocity")
+    public ResponseEntity<LecturerAnalyticsResponses.SprintVelocity> velocity(
+            @AuthenticationPrincipal SagaPrincipal principal, @PathVariable UUID courseId,
+            @PathVariable UUID teamId) {
+        return ResponseEntity.ok(teamAnalytics.velocity(principal, courseId, teamId));
+    }
+
+    private PageRequest pageRequest(int page, int size) {
+        if (page < 0 || size < 1 || size > 100) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "page phải không âm và size phải từ 1 đến 100");
+        }
+        return PageRequest.of(page, size);
+    }
+}

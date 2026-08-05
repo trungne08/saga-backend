@@ -543,3 +543,12 @@ Configuration mới: `app.student-invitation.login-url` lấy từ `STUDENT_INVI
 Runtime fact do người dùng cung cấp: Railway từng fail vì DB thiếu `student.version`. V6/V7 phải chạy trước Hibernate `validate`; repository không có production log/dashboard nên migration production vẫn **TBD**, không CONFIRMED.
 
 Full `./mvnw.cmd test` tại checkpoint hiện tại: **70 suites, 299 tests, 0 failures, 0 errors, 0 skipped**. Jira/GitHub/webhook, sync UTC serialization, GitHub claim/concurrency/stale recovery, session/CSRF/OIDC callback, master-data authorization và import authorization đều pass.
+## Lecturer Analytics constraints — 2026-08-05
+
+- Read-only GET; ADMIN mọi Course, LECTURER instructor-only, STUDENT forbidden.
+- Team/Student phải thuộc đúng Course trong URL; Student+Team filter phải khớp membership.
+- Không có committed story-point snapshot, Jira transition history, AI/NLP signal hay heatmap level rule.
+- Contribution Detail chỉ adapter aggregate hiện hữu; không sao chép công thức và không sửa nhóm 2.
+- Không thêm migration, environment variable hoặc dependency.
+- Verification: full Maven 77 suites / 339 tests pass; targeted analytics 21 tests,
+  Team roster security 13 tests và GitHub/Jira/Contribution regression 20 tests pass.

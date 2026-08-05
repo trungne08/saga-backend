@@ -463,3 +463,16 @@ DO NOT ASSUME: FE implementation, infrastructure wiring, deployment variables, U
 | deployment/config | `application*.properties`, `railway.json`, `.env.example` | property tables |
 
 Không có password, credential, token, private key, encryption key, webhook secret, session cookie hoặc CSRF token thực tế trong tài liệu này.
+## Cập nhật 2026-08-05 — Lecturer Analytics
+
+**CONFIRMED:** tám Lecturer Analytics GET APIs dùng `JSESSIONID`, không cần CSRF,
+và áp ownership Course trong service trước khi resolve Team/Student. DTO riêng không
+trả Cognito subject, provider credential, token hay JPA entity/version.
+
+**PARTIAL:** data model không có Sprint commitment snapshot hoặc Jira transition history.
+Velocity dùng `currentPlannedPoints`; activities chỉ Commit/Document; warning chỉ overdue Task;
+heatmap chỉ Commit UTC; interaction chỉ Peer Review record thật.
+
+Test checkpoint của milestone: 77 Surefire suites / 339 tests / 0 failures /
+0 errors / 0 skipped; targeted analytics 21 tests, Team roster security 13 tests
+và reliability regression 20 tests đều pass.

@@ -345,3 +345,12 @@ Không có secret hoặc thông tin đăng nhập thật trong decision log này
 - Quyết định: Jira search yêu cầu `labels`; provider parse `List<String>` immutable, missing/null/empty thành empty và invalid type trả provider response invalid. `Task.labels_json` là TEXT chứa JSON array, ánh xạ bằng converter defensive; V8 thêm cột nullable nên Task cũ đọc empty.
 - Hệ quả: Jira upsert replace toàn bộ labels mỗi snapshot, empty snapshot clear local và sync cùng snapshot không duplicate. Jira webhook giữ semantics chỉ trigger shared reconciliation; không thêm payload parser labels riêng. Không tạo Label entity/bảng normalized, Task HTTP API, frontend labels response hoặc API tạo/cập nhật Jira task.
 - Evidence: `JiraProviderClientImpl#searchIssues/#toIssue`, `JiraIssueSnapshot`, `JiraIssueUpsertService#upsert`, `Task`, `StringListJsonConverter`, `V8__add_task_jira_labels_snapshot.sql`, labels tests.
+## DEC-028 — Lecturer Analytics là read-only, course-scoped và deterministic
+
+- Ngày: 2026-08-05; trạng thái: ACCEPTED trong working tree milestone.
+- API chỉ nhận resource ID, không nhận lecturer/admin actor ID; actor lấy từ session-backed
+  `SagaPrincipal`. ADMIN xem mọi Course, LECTURER phải là instructor, STUDENT bị chặn.
+- Không dựng AI/NLP/risk prediction. Metric thiếu dữ liệu được đặt tên theo semantic hiện có:
+  `currentPlannedPoints`, aggregate Contribution hiện tại, null severity/không có heatmap level.
+- Evidence: `LecturerAnalyticsController`, `LecturerAnalyticsAuthorizationService`, các query
+  service và `LecturerAnalytics*Test`.

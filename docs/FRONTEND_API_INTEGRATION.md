@@ -885,3 +885,24 @@ SAGA API that creates or updates Jira tasks. Therefore FE label display and
 filtering remain **PARTIAL** until a separately authorized Task read contract is
 implemented. Labels are classification data, not the Jira issue id/key used to
 identify a Task.
+## Lecturer Analytics read APIs — 2026-08-05
+
+Tất cả endpoint dưới đây dùng browser session `JSESSIONID`: frontend gọi với
+`credentials: "include"`. Đây đều là GET nên không gửi CSRF header và không dùng
+Bearer token. ADMIN xem mọi Course; LECTURER chỉ xem Course mà mình là instructor;
+STUDENT nhận 403, anonymous nhận 401.
+
+| Path | Query | Response chính |
+|---|---|---|
+| `GET /api/v1/courses/{courseId}/teams/{teamId}/detail` | `page=0&size=20`, size 1..100 | `TeamDetail`; `project` nullable, `members` là Spring `Page<TeamMemberResponse>` |
+| `GET /api/v1/courses/{courseId}/students/{studentId}/progress` | — | task assigned theo Project, DONE/total completion, Commit count, `TaskType` distribution và unclassified count |
+| `GET /api/v1/courses/{courseId}/students/{studentId}/activities` | `page=0&size=10` | `StudentActivities`; Commit/Document mới nhất, sort timestamp giảm dần rồi type/sourceId |
+| `GET /api/v1/courses/{courseId}/students/{studentId}/contribution-detail` | — | aggregate Contribution hiện tại của Student; không phải lịch sử Sprint |
+| `GET /api/v1/courses/{courseId}/early-warnings` | — | `OVERDUE_TASK` deterministic; `severity` null vì chưa có rule |
+| `GET /api/v1/courses/{courseId}/teams/{teamId}/interactions` | — | nodes roster và directed Peer Review edges thật |
+| `GET /api/v1/courses/{courseId}/teams/{teamId}/heatmap` | `startDate`, `endDate` bắt buộc; `studentId` tùy chọn | inclusive UTC days, Commit counts, có row zero, không có level |
+| `GET /api/v1/courses/{courseId}/teams/{teamId}/sprints/velocity` | — | current task counts/points, DONE points, null-point count, official `BUG` count |
+
+Mọi URL có Team/Student đều kiểm quan hệ lồng nhau với `courseId`; ID tồn tại ở
+Course khác không làm lộ dữ liệu. Recent Activities không dựng Jira transition event
+vì database chỉ giữ trạng thái hiện tại.
