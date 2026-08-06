@@ -1,5 +1,16 @@
 # SAGA — Context kỹ thuật hệ thống hiện tại
 
+## Update 2026-08-06 — Jira hydration, disconnect và relink
+
+- **CONFIRMED:** Jira search HTTP 200 với 0 issues vẫn hydrate mọi Sprint local active (`deletedAt is null`) của board. Candidate hydration được gắn nguồn `ISSUE_BATCH` hoặc `LOCAL_SPRINT`; Sprint local có thể còn thiếu canonical dates.
+- **CONFIRMED:** `getSprint` phân loại 401 `JIRA_ACCESS_REVOKED`, 403 `JIRA_ACCESS_FORBIDDEN`, 404 `JIRA_SPRINT_NOT_FOUND`, 429 `JIRA_RATE_LIMITED`; 5xx sau retry GET và network/timeout là `JIRA_PROVIDER_UNAVAILABLE`. Không đổi OAuth scope, session, CSRF, timezone hay Jira mutation/recovery.
+- **CONFIRMED:** lỗi hydrate được cô lập theo Sprint: Sprint còn lại vẫn upsert; job là `PARTIAL_FAILURE` và không advance cursor. Diagnostics chỉ ghi board local/external ID an toàn, projectKey, externalSprintId, upstream status/category, job/stage/source; không ghi token, Authorization hay raw provider body.
+- **CONFIRMED:** disconnect giữ row `jira_board` và lịch sử tham chiếu, nhưng retire credential, expiry, scopes và webhook state. Relink khóa retained row, dùng fresh OAuth grant từ session và không reuse credential cũ. Scheduler/claim/state-write loại `DISCONNECTED`; worker recheck trước `getSprint` để không tiếp tục hydration sau disconnect.
+- **PARTIAL:** chưa có integration test đa luồng thực sự cho concurrent Jira relink.
+- **TBD:** externalSprintId và upstream HTTP status của incident lịch sử chưa có vì không có diagnostics production an toàn từ lần lỗi cũ. Policy cho Sprint bị xóa ngoài Jira vẫn chưa được phê duyệt.
+- **Known limitation:** Sprint local nhận 404 không tự tombstone/hard-delete. Nếu vẫn active local, reconciliation có thể retry và ghi `PARTIAL_FAILURE` cho đến khi có cleanup policy an toàn.
+- **Verification:** `./mvnw.cmd clean test` hoàn tất `BUILD SUCCESS`: 97 suites / 546 tests / 0 failures / 0 errors / 0 skipped.
+
 ## Update 2026-08-06 - Swagger/OpenAPI tiếng Việt
 
 - **CONFIRMED:** springdoc `3.0.3` sinh 96 operation từ `/v3/api-docs`. Mỗi operation có summary, description và tag tiếng Việt; tag có description để Swagger UI hiển thị nhóm chức năng rõ ràng.

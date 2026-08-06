@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.saga.be.entity.JiraBoard;
 import com.saga.be.entity.SyncJobLog;
@@ -62,5 +63,24 @@ class JiraSyncJobServiceTest {
                 LocalDateTime.of(2026, 8, 4, 5, 13, 49),
                 job.getStartedAt()
         );
+    }
+
+    @Test
+    void neverClaimsADisconnectedBoard() {
+        JiraBoardRepository boardRepository = mock(JiraBoardRepository.class);
+        UUID boardId = UUID.randomUUID();
+        JiraBoard board = JiraBoard.builder()
+                .connectionStatus(IntegrationStatus.DISCONNECTED).build();
+        when(boardRepository.findForSyncClaimById(boardId))
+                .thenReturn(Optional.of(board));
+        JiraSyncJobService service = new JiraSyncJobService(
+                boardRepository,
+                mock(SyncJobLogRepository.class),
+                mock(SyncJobFinalizationService.class),
+                Duration.ofMinutes(15),
+                FIXED_CLOCK
+        );
+
+        assertTrue(service.claim(boardId, SyncJobType.RECONCILIATION).isEmpty());
     }
 }

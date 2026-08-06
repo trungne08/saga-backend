@@ -431,9 +431,23 @@ public class JiraProviderClientImpl implements JiraProviderClient {
 
     @Override
     public JiraSprintSnapshot getSprint(String accessToken, String cloudId, String sprintId) {
-        return toSprint(get(jiraUri(
-                cloudId, "/rest/agile/1.0/sprint/" + requiredPathSegment(sprintId)
-        ), accessToken));
+        try {
+            return toSprint(get(jiraUri(
+                    cloudId, "/rest/agile/1.0/sprint/" + requiredPathSegment(sprintId)
+            ), accessToken));
+        } catch (IntegrationException exception) {
+            // A missing Agile sprint is distinct from a stale OAuth grant.
+            // Do not make reconciliation tell an operator to relink for a
+            // resource that Jira has simply removed or made unavailable.
+            if ("JIRA_RESOURCE_NOT_FOUND".equals(exception.getCode())) {
+                throw new IntegrationException(
+                        HttpStatus.NOT_FOUND,
+                        "JIRA_SPRINT_NOT_FOUND",
+                        "The Jira sprint was not found"
+                );
+            }
+            throw exception;
+        }
     }
 
     @Override

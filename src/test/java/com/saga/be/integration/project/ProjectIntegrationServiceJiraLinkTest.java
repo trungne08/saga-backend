@@ -109,6 +109,41 @@ class ProjectIntegrationServiceJiraLinkTest {
         verify(fixture.jira, never()).projects(any(), any());
     }
 
+    @Test
+    void relinkUpdatesTheRetainedDisconnectedRowUsingTheFreshSessionGrant() {
+        Fixture fixture = fixture();
+        JiraBoard retained = new JiraBoard();
+        UUID retainedId = UUID.randomUUID();
+        retained.setId(retainedId);
+        retained.setConnectionStatus(com.saga.be.entity.enums.IntegrationStatus.DISCONNECTED);
+        retained.setEncryptedAccessToken("old-ciphertext");
+        retained.setEncryptedRefreshToken("old-refresh-ciphertext");
+        when(fixture.boardRepository.findByProjectId(fixture.projectId))
+                .thenReturn(Optional.of(retained));
+
+        fixture.service.linkJira(
+                fixture.principal,
+                fixture.projectId,
+                fixture.session,
+                new JiraProjectLinkRequest("cloud-a", "10034"),
+                "127.0.0.1"
+        );
+
+        assertEquals(retainedId, retained.getId());
+        assertEquals("encrypted", retained.getEncryptedAccessToken());
+        assertEquals("encrypted", retained.getEncryptedRefreshToken());
+        verify(fixture.credentialService).encryptAccess(
+                retained, "test-access-token"
+        );
+        verify(fixture.credentialService).encryptRefresh(
+                retained, "test-refresh-token"
+        );
+        verify(fixture.jira).projects("test-access-token", "cloud-a");
+        verify(fixture.jira).ensureWebhook(
+                eq("test-access-token"), eq("cloud-a"), eq("SAGA"), any(), any()
+        );
+    }
+
     private void assertNotAccessible(Fixture fixture, String input) {
         IntegrationException exception = assertThrows(
                 IntegrationException.class,
@@ -240,7 +275,8 @@ class ProjectIntegrationServiceJiraLinkTest {
                 org.mockito.Mockito.mock(AuthenticationAuditService.class)
         );
         return new Fixture(
-                service, principal, projectId, session, jira, boardRepository
+                service, principal, projectId, session, jira, boardRepository,
+                credentialService
         );
     }
 
@@ -250,7 +286,8 @@ class ProjectIntegrationServiceJiraLinkTest {
             UUID projectId,
             MockHttpSession session,
             JiraProviderClient jira,
-            JiraBoardRepository boardRepository
+            JiraBoardRepository boardRepository,
+            JiraCredentialService credentialService
     ) {
     }
 }

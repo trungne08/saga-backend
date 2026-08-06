@@ -1,6 +1,7 @@
 package com.saga.be.integration.project;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -43,6 +44,52 @@ import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpSession;
 
 class ProjectIntegrationServiceJiraWebhookTest {
+
+    @Test
+    void disconnectRetainsBoardMetadataAndHistoryAnchorWhileRetiringCredentials() {
+        UUID projectId = UUID.randomUUID();
+        Project project = new Project();
+        project.setId(projectId);
+        JiraBoard board = JiraBoard.builder()
+                .project(project)
+                .cloudId("cloud")
+                .jiraProjectId("10034")
+                .projectKey("SDP")
+                .jiraBoardId("99")
+                .encryptedAccessToken("old-ciphertext")
+                .encryptedRefreshToken("old-refresh-ciphertext")
+                .grantedScopes("read:jira-work")
+                .connectionStatus(com.saga.be.entity.enums.IntegrationStatus.ACTIVE)
+                .build();
+        JiraBoardRepository boards = mock(JiraBoardRepository.class);
+        ProjectIntegrationAuthorizationService authorization = mock(
+                ProjectIntegrationAuthorizationService.class
+        );
+        when(authorization.requireProjectManager(any(), eq(projectId)))
+                .thenReturn(project);
+        when(boards.findByProjectId(projectId)).thenReturn(Optional.of(board));
+        when(boards.saveAndFlush(board)).thenReturn(board);
+        ProjectIntegrationService service = service(
+                authorization,
+                mock(ProjectIntegrationSessionStore.class),
+                mock(JiraProviderClient.class),
+                mock(IntegrationUrlResolver.class),
+                mock(IntegrationSecretCipher.class),
+                boards
+        );
+
+        service.disconnectJira(admin(), projectId, "127.0.0.1");
+
+        assertEquals(com.saga.be.entity.enums.IntegrationStatus.DISCONNECTED,
+                board.getConnectionStatus());
+        assertEquals("10034", board.getJiraProjectId());
+        assertEquals("SDP", board.getProjectKey());
+        assertEquals("99", board.getJiraBoardId());
+        org.junit.jupiter.api.Assertions.assertNull(board.getEncryptedAccessToken());
+        org.junit.jupiter.api.Assertions.assertNull(board.getEncryptedRefreshToken());
+        org.junit.jupiter.api.Assertions.assertNull(board.getGrantedScopes());
+        verify(boards).saveAndFlush(board);
+    }
 
     @Test
     void compensatesProviderWebhookWhenTheBoardWriteFailsAfterCreation() {

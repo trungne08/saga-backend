@@ -33,8 +33,10 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -256,7 +258,8 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
             String nextPageToken = null;
             boolean lastPage;
             Set<String> seenPageTokens = new HashSet<>();
-            Set<String> sprintIds = new LinkedHashSet<>();
+            Map<String, Set<String>> sprintHydrationSources =
+                    new LinkedHashMap<>();
             JiraSyncStage itemFailureStage = null;
             int issuesFetchedFromProvider = 0;
             int issuesAfterUpperBoundFilter = 0;
@@ -290,7 +293,9 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
                     }
                     issuesAfterUpperBoundFilter++;
                     if (issue.sprintId() != null && !issue.sprintId().isBlank()) {
-                        sprintIds.add(issue.sprintId());
+                        sprintHydrationSources.computeIfAbsent(
+                                issue.sprintId(), ignored -> new LinkedHashSet<>()
+                        ).add("ISSUE_BATCH");
                     }
                     try {
                         stage = JiraSyncStage.UPSERT_ISSUES;
@@ -340,10 +345,15 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
             sprintRepository.findByBoardIdAndDeletedAtIsNull(boardId).stream()
                     .map(sprint -> sprint.getExternalSprintId())
                     .filter(id -> id != null && !id.isBlank())
-                    .forEach(sprintIds::add);
-            for (String sprintId : sprintIds) {
+                    .forEach(id -> sprintHydrationSources.computeIfAbsent(
+                            id, ignored -> new LinkedHashSet<>()
+                    ).add("LOCAL_SPRINT"));
+            for (Map.Entry<String, Set<String>> candidate
+                    : sprintHydrationSources.entrySet()) {
+                String sprintId = candidate.getKey();
                 try {
                     stage = JiraSyncStage.HYDRATE_SPRINTS;
+                    requireJiraBoardAvailableForRemoteCall(boardId);
                     JiraSprintSnapshot sprint = jiraClient.getSprint(
                             token,
                             board.getCloudId(),
@@ -361,6 +371,9 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
                             jobType,
                             JiraSyncStage.HYDRATE_SPRINTS,
                             categoryOf(exception),
+                            board,
+                            sprintId,
+                            candidate.getValue(),
                             exception
                     );
                 }
@@ -899,6 +912,22 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
         return "UNEXPECTED_SYNC_FAILURE";
     }
 
+    /**
+     * A job can have been claimed just before a user disconnects Jira. Reload
+     * the retained board before a provider call so it cannot keep using the
+     * retired credential during sprint hydration.
+     */
+    private void requireJiraBoardAvailableForRemoteCall(UUID boardId) {
+        JiraBoard latest = jiraBoardRepository.findById(boardId).orElse(null);
+        if (latest == null || latest.getConnectionStatus()
+                == IntegrationStatus.DISCONNECTED) {
+            throw IntegrationException.conflict(
+                    "JIRA_BOARD_UNAVAILABLE",
+                    "The Jira integration is no longer connected"
+            );
+        }
+    }
+
     private String gitHubCategoryOf(RuntimeException exception) {
         if (exception instanceof IntegrationException integrationException) {
             return integrationException.getCode();
@@ -918,20 +947,76 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
             String errorCategory,
             RuntimeException exception
     ) {
-        Throwable root = rootCause(exception);
-        log.error(
-                "{}: jiraBoardEntityId={}, jobId={}, jobType={}, stage={}, "
-                        + "errorCategory={}, exceptionClass={}, rootCauseClass={}",
+        logJiraFailure(
                 message,
                 boardId,
-                job == null ? null : job.getId(),
+                job,
                 jobType,
                 stage,
                 errorCategory,
+                null,
+                null,
+                Set.of(),
+                exception
+        );
+    }
+
+    private void logJiraFailure(
+            String message,
+            UUID boardId,
+            SyncJobLog job,
+            SyncJobType jobType,
+            JiraSyncStage stage,
+            String errorCategory,
+            JiraBoard board,
+            String externalSprintId,
+            Set<String> hydrationSources,
+            RuntimeException exception
+    ) {
+        Throwable root = rootCause(exception);
+        log.error(
+                "{}: jiraBoardEntityId={}, jiraExternalBoardId={}, projectKey={}, "
+                        + "externalSprintId={}, upstreamHttpStatus={}, "
+                        + "providerErrorCategory={}, jobId={}, jobType={}, "
+                        + "stage={}, failureStage={}, hydrationSources={}, exceptionClass={}, "
+                        + "rootCauseClass={}",
+                message,
+                boardId,
+                safeExternalBoardId(board),
+                board == null ? null : board.getProjectKey(),
+                externalSprintId,
+                upstreamHttpStatusOf(exception),
+                errorCategory,
+                job == null ? null : job.getId(),
+                jobType,
+                stage,
+                stage,
+                hydrationSources,
                 exception.getClass().getName(),
                 root.getClass().getName(),
                 safeThrowable(exception)
         );
+    }
+
+    private String safeExternalBoardId(JiraBoard board) {
+        if (board == null || board.getJiraBoardId() == null
+                || !board.getJiraBoardId().matches("[0-9]+")) {
+            return "NOT_CONFIGURED";
+        }
+        return board.getJiraBoardId();
+    }
+
+    private String upstreamHttpStatusOf(RuntimeException exception) {
+        if (!(exception instanceof IntegrationException integrationException)) {
+            return "UNKNOWN";
+        }
+        return switch (integrationException.getCode()) {
+            case "JIRA_ACCESS_REVOKED" -> "401";
+            case "JIRA_ACCESS_FORBIDDEN" -> "403";
+            case "JIRA_SPRINT_NOT_FOUND", "JIRA_RESOURCE_NOT_FOUND" -> "404";
+            case "JIRA_RATE_LIMITED" -> "429";
+            default -> "UNKNOWN";
+        };
     }
 
     private RuntimeException safeThrowable(RuntimeException exception) {

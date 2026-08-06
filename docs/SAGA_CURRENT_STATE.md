@@ -1,5 +1,16 @@
 # SAGA — Trạng thái hiện tại
 
+## Update 2026-08-06 — Jira hydration/disconnect/relink hardening
+
+- **CONFIRMED:** reconciliation hydrate Sprint từ cả issue batch (`ISSUE_BATCH`) và local active Sprint (`LOCAL_SPRINT`), kể cả khi search Jira trả HTTP 200/0 issues hoặc local Sprint chưa có canonical dates.
+- **CONFIRMED:** `getSprint` trả safe category riêng: 401 `JIRA_ACCESS_REVOKED`, 403 `JIRA_ACCESS_FORBIDDEN`, 404 `JIRA_SPRINT_NOT_FOUND`, 429 `JIRA_RATE_LIMITED`, 5xx/network `JIRA_PROVIDER_UNAVAILABLE`. 404 Sprint không bị gộp thành access revoked.
+- **CONFIRMED:** một Sprint hydration lỗi không corrupt Sprint khác; finalization là `PARTIAL_FAILURE`, cursor không advance. Safe diagnostics chứa board/project/Sprint/status/category/job/stage/source, không chứa token hay raw provider body.
+- **CONFIRMED:** disconnect không hard-delete `jira_board`, Task, Sprint hay history; nó retire credential/webhook state. Relink dùng fresh OAuth grant và retained row; OAuth state cũ cùng project bị vô hiệu. Scheduler, claim và state-write không chạy/resurrect integration `DISCONNECTED`.
+- **PARTIAL:** chưa có concurrent-relink integration test đa luồng thực sự.
+- **TBD:** externalSprintId/upstream status của incident lịch sử và policy xử lý Sprint đã bị xóa trên Jira.
+- **Known limitation:** local Sprint 404 chưa tự tombstone; reconciliation có thể tiếp tục retry/ghi `PARTIAL_FAILURE` cho đến khi có policy cleanup an toàn.
+- **Verification:** `./mvnw.cmd clean test` — `BUILD SUCCESS`, 97 suites / 546 tests / 0 failures / 0 errors / 0 skipped.
+
 ## Update 2026-08-06 - Swagger/OpenAPI tiếng Việt
 
 - Generated `/v3/api-docs` hiện có 96 operation được audit trực tiếp. Mọi operation sinh ra có summary/description tiếng Việt và ít nhất một tag tiếng Việt có description.

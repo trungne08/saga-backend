@@ -686,6 +686,20 @@ class JiraProviderClientImplTest {
     }
 
     @Test
+    void getSprintPreservesAuthenticationAccessAndMissingSprintCategories() {
+        assertSprintFailure(org.springframework.http.HttpStatus.UNAUTHORIZED,
+                "JIRA_ACCESS_REVOKED", 1);
+        assertSprintFailure(org.springframework.http.HttpStatus.FORBIDDEN,
+                "JIRA_ACCESS_FORBIDDEN", 1);
+        assertSprintFailure(org.springframework.http.HttpStatus.NOT_FOUND,
+                "JIRA_SPRINT_NOT_FOUND", 1);
+        assertSprintFailure(org.springframework.http.HttpStatus.TOO_MANY_REQUESTS,
+                "JIRA_RATE_LIMITED", 3);
+        assertSprintFailure(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,
+                "JIRA_PROVIDER_UNAVAILABLE", 3);
+    }
+
+    @Test
     void mapsTimeoutAndMalformedMetadataResponsesSafely() {
         Fixture timeout = fixture();
         timeout.server.expect(request -> { }).andRespond(
@@ -741,6 +755,29 @@ class JiraProviderClientImplTest {
                 IntegrationException.class,
                 () -> fixture.client.getCreateIssueTypes(
                         "ACCESS_TOKEN_SECRET", CLOUD_ID, "SDP"
+                )
+        );
+
+        assertEquals(expectedCode, exception.getCode());
+        assertThat(exception.getMessage()).doesNotContain("PROVIDER_SECRET");
+        fixture.server.verify();
+    }
+
+    private void assertSprintFailure(
+            org.springframework.http.HttpStatus status,
+            String expectedCode,
+            int calls
+    ) {
+        Fixture fixture = fixture();
+        fixture.server.expect(ExpectedCount.times(calls), requestTo(SPRINT_URL))
+                .andRespond(withStatus(status)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"error\":\"PROVIDER_SECRET\"}"));
+
+        IntegrationException exception = assertThrows(
+                IntegrationException.class,
+                () -> fixture.client.getSprint(
+                        "ACCESS_TOKEN_SECRET", CLOUD_ID, "42"
                 )
         );
 

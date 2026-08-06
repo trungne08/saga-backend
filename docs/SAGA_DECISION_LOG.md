@@ -1,5 +1,15 @@
 # SAGA — Nhật ký quyết định kỹ thuật
 
+## DEC-042 — Jira hydration fail-isolated, Sprint 404 retention và fresh-grant relink
+
+- Ngày: 2026-08-06; trạng thái: ACCEPTED.
+- Quyết định: reconciliation hợp Sprint candidate từ issue batch (`ISSUE_BATCH`) và local active Sprint (`LOCAL_SPRINT`) để canonical hydration vẫn xảy ra khi Jira search trả 200/0 issues. Lỗi một Sprint được cô lập; Sprint khác tiếp tục, job finalizes `PARTIAL_FAILURE` và không advance cursor.
+- Quyết định: Jira Agile Sprint 404 được biểu diễn bằng `JIRA_SPRINT_NOT_FOUND`, không map thành credential revoked và không tự tombstone/hard-delete Sprint, Task hoặc history. Cleanup chỉ được bổ sung sau khi có evidence/policy retention an toàn.
+- Quyết định: disconnect giữ `jira_board` như history anchor nhưng retire credential, expiry, scopes và webhook state. Relink dùng fresh OAuth grant trong session, khóa retained row và callback state cũ của cùng project bị vô hiệu; không reuse credential cũ hay tạo duplicate row.
+- Quyết định: log hydration failure chỉ chứa structured diagnostics an toàn (board ID, numeric external board ID hoặc `NOT_CONFIGURED`, projectKey, externalSprintId, upstream status/category, job/stage/source). Không log raw provider body, Authorization, token hoặc credential.
+- Hệ quả: `DISCONNECTED` bị scheduler/claim/state-write loại trừ và worker recheck trước `getSprint`. Concurrent relink có lock ở source nhưng chưa có integration test đa luồng thực sự. ExternalSprintId/upstream status của incident lịch sử vẫn TBD.
+- Evidence: `AutomaticSyncDispatcherImpl`, `JiraProviderClientImpl#getSprint`, `ProjectIntegrationService`, `JiraBoardStateWriteService`, `OAuthStateService`, `JiraBoardRepository`, và targeted/full Maven tests.
+
 ## DEC-041 - Chuẩn hóa Swagger/OpenAPI tiếng Việt tại thời điểm sinh tài liệu
 
 - Ngày: 2026-08-06. Trạng thái: ACCEPTED / CONFIRMED từ source và generated OpenAPI test.

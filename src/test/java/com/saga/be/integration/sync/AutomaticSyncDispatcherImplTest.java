@@ -346,6 +346,80 @@ class AutomaticSyncDispatcherImplTest {
     }
 
     @Test
+    void jiraSyncHydratesLocalSprintWithMissingCanonicalDatesWhenSearchIsEmpty() {
+        Sprint local = Sprint.builder()
+                .board(board)
+                .externalSprintId("42")
+                .name("Embedded sprint")
+                .build();
+        JiraSprintSnapshot canonical = new JiraSprintSnapshot(
+                "42", "Sprint 42", "active", null,
+                LocalDateTime.parse("2026-08-01T02:00:00"),
+                LocalDateTime.parse("2026-08-15T02:00:00"), null, "99"
+        );
+        when(jiraClient.searchIssues(
+                eq("token"), eq("cloud-id"), eq("SAGA"), any(), any(), eq(null)
+        )).thenReturn(new JiraIssuePage(List.of(), null, true));
+        when(sprintRepository.findByBoardIdAndDeletedAtIsNull(boardId))
+                .thenReturn(List.of(local));
+        when(jiraClient.getSprint("token", "cloud-id", "42"))
+                .thenReturn(canonical);
+
+        dispatcher.syncJira(boardId, SyncJobType.RECONCILIATION);
+
+        verify(jiraClient).getSprint("token", "cloud-id", "42");
+        verify(jiraSprintUpsertService).upsert(boardId, canonical);
+    }
+
+    @Test
+    void failingSprintDoesNotPreventOtherSprintAndEmitsSafeStructuredDiagnostics() {
+        board.setJiraBoardId("99");
+        Sprint first = Sprint.builder().board(board).externalSprintId("42").build();
+        Sprint missing = Sprint.builder().board(board).externalSprintId("43").build();
+        JiraSprintSnapshot canonical = new JiraSprintSnapshot(
+                "42", "Sprint 42", "active", null, null, null, null, "99"
+        );
+        when(jiraClient.searchIssues(
+                eq("token"), eq("cloud-id"), eq("SAGA"), any(), any(), eq(null)
+        )).thenReturn(new JiraIssuePage(List.of(), null, true));
+        when(sprintRepository.findByBoardIdAndDeletedAtIsNull(boardId))
+                .thenReturn(List.of(first, missing));
+        when(jiraClient.getSprint("token", "cloud-id", "42")).thenReturn(canonical);
+        when(jiraClient.getSprint("token", "cloud-id", "43")).thenThrow(
+                new IntegrationException(org.springframework.http.HttpStatus.NOT_FOUND,
+                        "JIRA_SPRINT_NOT_FOUND", "RAW_PROVIDER_RESPONSE_SECRET")
+        );
+        Logger logger = (Logger) LoggerFactory.getLogger(
+                AutomaticSyncDispatcherImpl.class
+        );
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            dispatcher.syncJira(boardId, SyncJobType.RECONCILIATION);
+            String logged = appender.list.stream()
+                    .map(ILoggingEvent::getFormattedMessage)
+                    .reduce("", String::concat);
+            assertThat(logged).contains("jiraBoardEntityId=" + boardId)
+                    .contains("jiraExternalBoardId=99")
+                    .contains("projectKey=SAGA")
+                    .contains("externalSprintId=43")
+                    .contains("upstreamHttpStatus=404")
+                    .contains("providerErrorCategory=JIRA_SPRINT_NOT_FOUND")
+                    .contains("failureStage=HYDRATE_SPRINTS")
+                    .doesNotContain("RAW_PROVIDER_RESPONSE_SECRET")
+                    .doesNotContain("token");
+        } finally {
+            logger.detachAppender(appender);
+        }
+        verify(jiraSprintUpsertService).upsert(boardId, canonical);
+        verify(syncJobFinalizationService).finalizeJob(
+                jiraJob.getId(), SyncJobStatus.PARTIAL_FAILURE, 1, 1,
+                null, "ITEM_UPSERT_FAILED", "HYDRATE_SPRINTS"
+        );
+    }
+
+    @Test
     void reconciliationReadsOverlapWindowAndCountsIssueUpdatedBeforeJobStart() {
         LocalDateTime issueUpdated = LocalDateTime.ofInstant(
                 Instant.now().minusSeconds(4),

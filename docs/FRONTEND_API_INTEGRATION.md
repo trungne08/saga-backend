@@ -1,5 +1,13 @@
 # SAGA Frontend API Integration Guide
 
+## Jira sync/relink status contract — 2026-08-06
+
+- Jira hydration chạy nền; FE không gửi provider credential và không nhận raw Jira response. Theo dõi qua sync status/history đã có, chỉ dùng safe `errorCategory`/failure stage.
+- Category actionable: `JIRA_ACCESS_REVOKED` tương ứng Jira 401 (operator cần relink), `JIRA_ACCESS_FORBIDDEN` là 403 (cần cấp quyền), `JIRA_SPRINT_NOT_FOUND` là 404 Sprint (không yêu cầu tự relink), `JIRA_RATE_LIMITED` là 429 và `JIRA_PROVIDER_UNAVAILABLE` là 5xx/network. Không suy đoán OAuth scope hoặc tự gửi Bearer token.
+- Một Sprint lỗi có thể khiến job `PARTIAL_FAILURE` và cursor không advance trong khi Sprint khác vẫn được hydrate. `JIRA_SPRINT_NOT_FOUND` không đồng nghĩa local data bị xóa; FE không tự ẩn/xóa Sprint history theo error này.
+- Sau disconnect, retained Jira row/history vẫn có thể hiện trong dữ liệu local nhưng không phải integration active. Relink vẫn dùng session + CSRF hiện có và fresh OAuth grant; không giữ/reuse token ở frontend.
+- Runtime incident history (externalSprintId, upstream status) vẫn TBD; safe diagnostics là vận hành backend, không phải API payload cho FE.
+
 ## Swagger/OpenAPI tiếng Việt - 2026-08-06
 
 - Swagger UI hiển thị nhóm, tiêu đề operation, mô tả, parameter và schema bằng tiếng Việt. Nội dung mô tả phản ánh contract hiện có, không thay API frontend đang gọi.

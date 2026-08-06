@@ -273,7 +273,11 @@ public class ProjectIntegrationService {
                         "The selected Jira project is not accessible"
                 ));
 
-        JiraBoard board = jiraBoardRepository.findByProjectId(projectId)
+        JiraBoard board = jiraBoardRepository.findForLinkByProjectId(projectId)
+                // The fallback preserves callers and test doubles that do
+                // not use the locking query. Production locks a retained row
+                // before it is repurposed for relinking.
+                .or(() -> jiraBoardRepository.findByProjectId(projectId))
                 .orElseGet(() -> JiraBoard.builder()
                         .project(project)
                         .type(BoardType.OTHER)
@@ -377,6 +381,7 @@ public class ProjectIntegrationService {
                 || jiraProject.key().equalsIgnoreCase(requested);
     }
 
+    @Transactional
     public void disconnectJira(
             SagaPrincipal principal,
             UUID projectId,
@@ -405,6 +410,7 @@ public class ProjectIntegrationService {
         board.setEncryptedAccessToken(null);
         board.setEncryptedRefreshToken(null);
         board.setTokenExpiresAt(null);
+        board.setGrantedScopes(null);
         board.setWebhookId(null);
         board.setWebhookSecretHash(null);
         board.setWebhookExpiresAt(null);
