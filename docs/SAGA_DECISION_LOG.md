@@ -1,5 +1,15 @@
 # SAGA — Nhật ký quyết định kỹ thuật
 
+## DEC-040 - Project GitHub reads, reconnect, and sync-history
+
+- Date: 2026-08-06. Status: ACCEPTED / CONFIRMED by source and local tests; production provider runtime remains TBD.
+- Dashboard is local-state only and reuses project read authorization. It excludes soft-deleted tasks and does not manufacture provider freshness.
+- Branches and commits are fetched only by the backend using installation credentials. The frontend sends the branch as a query parameter, including slash-containing branch names; it never receives credentials.
+- Reconnect is a manager-only, CSRF-protected state transition from `DISCONNECTED` to `BACKFILLING`. A pessimistic local-repository lock and the existing initial-backfill claim prevent duplicate active jobs; active work is coalesced rather than dispatched twice.
+- Sync history is the paged manager-only route `/sync-history` with optional `targetSystem`, `status`, and `jobType` filters. `/sync-status` is retained as the legacy compact top-20 view, not the history API.
+- Project DELETE remains blocked. Existing references include Team, Task, GitRepo, JiraBoard, JiraWriteOperation and additional historical/assessment/document records; no cascade or deletion policy has been verified.
+- Evidence: `ProjectDashboardStatsService`, `GitHubProjectReadService`, `ProjectIntegrationService`, `GitHubSyncJobService`, `SyncJobLogRepository`, V18 and related tests. Full Maven: 96 suites / 537 tests / 0 failures / 0 errors / 0 skipped.
+
 ## DEC-039 — Sprint time dùng Instant UTC và board Scrum dùng external numeric ID
 
 - Ngày: 2026-08-06. Trạng thái: ACCEPTED / CONFIRMED từ source và test local; runtime production TBD.

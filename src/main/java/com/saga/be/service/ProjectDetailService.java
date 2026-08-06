@@ -60,7 +60,16 @@ public class ProjectDetailService {
         Project project = managerAuthorization.requireProjectManager(principal, projectId);
         Team team = requireConsistentOwningTeam(project);
         project.setName(request.name().trim());
+        project.setDescription(normalizeDescription(request.description()));
         return ProjectDetailResponse.from(project, team);
+    }
+
+    private String normalizeDescription(String description) {
+        if (description == null) {
+            return null;
+        }
+        String value = description.trim();
+        return value.isEmpty() ? null : value;
     }
 
     private Team requireConsistentOwningTeam(Project project) {

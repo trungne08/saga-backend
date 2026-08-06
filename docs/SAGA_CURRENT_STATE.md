@@ -1,5 +1,15 @@
 # SAGA — Trạng thái hiện tại
 
+## Update 2026-08-06 - Project read and integration completion
+
+- Project update supports `name` and nullable `description`; migration `V18__add_project_description.sql` adds `project.description` as `MEDIUMTEXT`.
+- `GET /api/projects/{projectId}/dashboard-stats` returns generated-at time, task total/completed/incomplete/percentage, and local GitHub repository/commit/pull-request counts. It never calls a provider.
+- GitHub repository detail reads are session-authenticated backend calls: `GET /api/projects/{projectId}/github/repositories/{repositoryId}/branches?page=0&size=20` and `GET /api/projects/{projectId}/github/repositories/{repositoryId}/commits?branch=feature/x&page=0&size=20`. Pages allow `size` 1..100; invalid branch/page input is rejected without a provider call.
+- `POST /api/projects/{projectId}/github/repositories/{repositoryId}/connect` returns 202 only for a disconnected repository whose installation still contains that repository. Repeated connect returns `GITHUB_RECONNECT_NOT_REQUIRED`; missing/revoked installation returns `GITHUB_RECONNECT_REQUIRES_INSTALLATION`.
+- Sync history is finalized as `GET /api/projects/{projectId}/sync-history`; it is paged/filterable and scoped to this project's Jira/GitHub targets. `/sync-status` remains manager-only compact top-20 compatibility/status data.
+- Project DELETE is intentionally absent: the dependency guard is not proven safe across current inbound references, so no destructive API was introduced.
+- Full Maven: 96 suites / 537 tests / 0 failures / 0 errors / 0 skipped. Production provider connectivity is TBD.
+
 ## Cập nhật 2026-08-06 — Jira Sprint time và board
 
 - **CONFIRMED:** HTTP Sprint dùng Instant có offset rõ ràng; FE dùng `Intl.DateTimeFormat`, không cộng cứng `+7`.

@@ -28,6 +28,9 @@ public class Project extends BaseEntity {
     @Column(name = "name")
     private String name;
 
+    @Column(name = "description", columnDefinition = "MEDIUMTEXT")
+    private String description;
+
     @Column(name = "repository_url")
     private String repositoryUrl;
 

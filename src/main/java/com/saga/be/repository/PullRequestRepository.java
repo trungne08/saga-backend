@@ -8,6 +8,7 @@ import org.springframework.stereotype.Repository;
 
 @Repository
 public interface PullRequestRepository extends JpaRepository<PullRequest, UUID> {
+    long countByRepoProjectId(UUID projectId);
     Optional<PullRequest> findByRepoIdAndGithubPullRequestId(
             UUID repoId,
             Long githubPullRequestId

@@ -1,5 +1,16 @@
 # SAGA Frontend API Integration Guide
 
+## Project dashboard and GitHub contract - 2026-08-06
+
+- All routes below use the existing session contract: `credentials: "include"`. State-changing reconnect also needs the existing CSRF header; do not send bearer/provider credentials.
+- Project update accepts `{ "name": "...", "description": "..." }`; `description` may be null/blank. Project detail now returns `description`.
+- Dashboard: `GET /api/projects/{projectId}/dashboard-stats`. Use local aggregates as a snapshot, not a claim that GitHub was just refreshed.
+- Branches: `GET /api/projects/{projectId}/github/repositories/{repositoryId}/branches?page=0&size=20`. Response contains repository id/name and `{ content, page, size, hasNext }`; each item has `name`, `headSha`, `protectedBranch`.
+- Commits: `GET /api/projects/{projectId}/github/repositories/{repositoryId}/commits?branch=feature/x&page=0&size=20`. Keep `branch` URL-encoded as a query parameter (never a path segment). Each item has SHA, message, author fields, authored/committed instants and URL. `size` is 1..100.
+- Reconnect: `POST /api/projects/{projectId}/github/repositories/{repositoryId}/connect`, expected `202 Accepted` with no body. Show a pending/backfilling state and poll status/history; handle `GITHUB_RECONNECT_NOT_REQUIRED` and `GITHUB_RECONNECT_REQUIRES_INSTALLATION` as actionable 409 responses.
+- History: `GET /api/projects/{projectId}/sync-history?page=0&size=20&targetSystem=GITHUB&status=IN_PROGRESS&jobType=RECONCILIATION`. Filters are optional. Response page contains the same sanitized job fields as status (`errorCategory`, not provider payload/error secrets). Use this endpoint for timeline/history; `/sync-status` is only the compact latest-20 status view.
+- These project integration operations are manager-only. For 403/404, follow the existing project authorization UX; never infer access from a repository id alone.
+
 ## Jira Sprint time và Scrum board contract — 2026-08-06
 
 - `startDate`/`endDate` Create và Update Sprint phải là ISO-8601 có offset, ví dụ `2026-08-06T06:03:50Z` hoặc `2026-08-06T13:03:50+07:00`; không gửi `LocalDateTime` không offset.

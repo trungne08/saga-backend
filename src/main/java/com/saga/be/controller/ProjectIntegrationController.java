@@ -8,6 +8,9 @@ import com.saga.be.dto.response.GitHubInstallationResponse;
 import com.saga.be.dto.response.JiraAuthorizationResponse;
 import com.saga.be.dto.response.ProjectIntegrationsResponse;
 import com.saga.be.dto.response.SyncStatusResponse;
+import com.saga.be.dto.response.SyncHistoryResponse;
+import com.saga.be.entity.enums.SyncJobStatus;
+import com.saga.be.entity.enums.SyncJobType;
 import com.saga.be.dto.response.ManualProjectSyncResponse;
 import com.saga.be.integration.project.ProjectIntegrationService;
 import com.saga.be.integration.project.ManualProjectSyncService;
@@ -205,6 +208,31 @@ public class ProjectIntegrationController {
             @PathVariable UUID projectId
     ) {
         return integrationService.syncStatus(principal, projectId);
+    }
+
+    @GetMapping("/sync-history")
+    public SyncHistoryResponse syncHistory(
+            @AuthenticationPrincipal SagaPrincipal principal,
+            @PathVariable UUID projectId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String targetSystem,
+            @RequestParam(required = false) SyncJobStatus status,
+            @RequestParam(required = false) SyncJobType jobType
+    ) {
+        if (page < 0 || size < 1 || size > 100) {
+            throw com.saga.be.exception.IntegrationException.invalid(
+                    "SYNC_HISTORY_PAGE_INVALID", "Pagination is invalid");
+        }
+        return integrationService.syncHistory(
+                principal, projectId, page, size, targetSystem, status, jobType);
+    }
+
+    @PostMapping("/github/repositories/{repositoryId}/connect")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public void githubRepositoryReconnect(@AuthenticationPrincipal SagaPrincipal principal,
+            @PathVariable UUID projectId, @PathVariable Long repositoryId, HttpServletRequest request) {
+        integrationService.reconnectGitHubRepository(principal, projectId, repositoryId, request.getRemoteAddr());
     }
 
     @PostMapping("/sync")

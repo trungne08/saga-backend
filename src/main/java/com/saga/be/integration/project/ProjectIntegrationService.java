@@ -13,6 +13,7 @@ import com.saga.be.dto.response.JiraAuthorizationResponse;
 import com.saga.be.dto.response.JiraSiteResponse;
 import com.saga.be.dto.response.ProjectIntegrationsResponse;
 import com.saga.be.dto.response.SyncStatusResponse;
+import com.saga.be.dto.response.SyncHistoryResponse;
 import com.saga.be.entity.GitHubInstallation;
 import com.saga.be.entity.GitRepo;
 import com.saga.be.entity.JiraBoard;
@@ -57,6 +58,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import org.springframework.data.domain.PageRequest;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.springframework.context.ApplicationEventPublisher;
@@ -832,20 +834,35 @@ public class ProjectIntegrationService {
         );
     }
 
+    @Transactional
+    public void reconnectGitHubRepository(SagaPrincipal principal, UUID projectId, Long repositoryId, String remoteAddress) {
+        authorization.requireProjectManager(principal, projectId);
+        GitRepo repository = gitRepoRepository.findForReconnectByProjectIdAndRepositoryId(projectId, repositoryId)
+                .orElseThrow(() -> new IntegrationException(org.springframework.http.HttpStatus.NOT_FOUND,
+                        "GITHUB_REPOSITORY_NOT_FOUND", "The linked GitHub repository does not exist"));
+        if (repository.getConnectionStatus() != IntegrationStatus.DISCONNECTED) {
+            throw IntegrationException.conflict("GITHUB_RECONNECT_NOT_REQUIRED", "The GitHub repository is already connected");
+        }
+        if (repository.getInstallation() == null || !gitHubClient.installationRepositories(
+                repository.getInstallation().getInstallationId()).stream().anyMatch(value ->
+                        java.util.Objects.equals(value.id(), repository.getRepositoryId()))) {
+            throw IntegrationException.conflict("GITHUB_RECONNECT_REQUIRES_INSTALLATION",
+                    "Reconnect the GitHub installation before reconnecting this repository");
+        }
+        repository.setConnectionStatus(IntegrationStatus.BACKFILLING);
+        repository.setConsecutiveFailures(0);
+        GitRepo saved = gitRepoRepository.saveAndFlush(repository);
+        dispatchAfterCommit(() -> syncDispatcher.initialGitHubBackfill(saved.getId()));
+        auditService.recordIntegrationEvent(principal.cognitoSub(), "PROJECT_GITHUB_REPOSITORY_RECONNECTED",
+                "PROJECT", projectId, "BACKFILLING", remoteAddress);
+    }
+
     public SyncStatusResponse syncStatus(
             SagaPrincipal principal,
             UUID projectId
     ) {
         authorization.requireProjectManager(principal, projectId);
-        Set<UUID> targetIds = gitRepoRepository
-                .findByProjectIdOrderByFullName(projectId)
-                .stream()
-                .map(GitRepo::getId)
-                .collect(Collectors.toSet());
-        targetIds.add(projectId);
-        jiraBoardRepository.findByProjectId(projectId)
-                .map(JiraBoard::getId)
-                .ifPresent(targetIds::add);
+        Set<UUID> targetIds = syncTargetIds(projectId);
         return new SyncStatusResponse(
                 projectId,
                 syncJobLogRepository
@@ -856,6 +873,43 @@ public class ProjectIntegrationService {
                         .map(SyncStatusResponse.Job::from)
                         .toList()
         );
+    }
+
+    @Transactional(readOnly = true)
+    public SyncHistoryResponse syncHistory(
+            SagaPrincipal principal,
+            UUID projectId,
+            int page,
+            int size,
+            String targetSystem,
+            com.saga.be.entity.enums.SyncJobStatus status,
+            com.saga.be.entity.enums.SyncJobType jobType
+    ) {
+        authorization.requireProjectManager(principal, projectId);
+        String normalizedTargetSystem = targetSystem == null || targetSystem.isBlank()
+                ? null : targetSystem.trim().toUpperCase(java.util.Locale.ROOT);
+        if (normalizedTargetSystem != null && !normalizedTargetSystem.equals("JIRA")
+                && !normalizedTargetSystem.equals("GITHUB")) {
+            throw IntegrationException.invalid("SYNC_HISTORY_TARGET_INVALID",
+                    "targetSystem must be JIRA or GITHUB");
+        }
+        return SyncHistoryResponse.from(projectId, syncJobLogRepository.findHistoryByTargetIds(
+                syncTargetIds(projectId), normalizedTargetSystem, status, jobType,
+                PageRequest.of(page, size)
+        ));
+    }
+
+    private Set<UUID> syncTargetIds(UUID projectId) {
+        Set<UUID> targetIds = gitRepoRepository
+                .findByProjectIdOrderByFullName(projectId)
+                .stream()
+                .map(GitRepo::getId)
+                .collect(Collectors.toSet());
+        targetIds.add(projectId);
+        jiraBoardRepository.findByProjectId(projectId)
+                .map(JiraBoard::getId)
+                .ifPresent(targetIds::add);
+        return targetIds;
     }
 
     private void requireInstallationOwner(

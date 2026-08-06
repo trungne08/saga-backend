@@ -281,14 +281,14 @@ class ProjectDetailIntegrationTest {
     }
 
     @Test
-    void updateRequestHasNoDescriptionOrActorContract() {
+    void updateRequestSupportsDescriptionWithoutActorContract() {
         List<String> componentNames = List.of(ProjectUpdateRequest.class.getRecordComponents())
                 .stream()
                 .map(component -> component.getName())
                 .toList();
 
-        assertEquals(List.of("name"), componentNames);
-        assertFalse(componentNames.contains("description"));
+        assertEquals(List.of("name", "description"), componentNames);
+        assertTrue(componentNames.contains("description"));
         assertTrue(componentNames.stream().noneMatch(name -> name.endsWith("Id")));
     }
 

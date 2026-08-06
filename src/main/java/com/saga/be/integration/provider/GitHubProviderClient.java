@@ -68,4 +68,9 @@ public interface GitHubProviderClient {
     String installationAccessToken(long installationId);
 
     void invalidateInstallationToken(long installationId);
+
+    List<GitHubBranchInfo> branches(long installationId, String owner, String repository);
+
+    List<GitHubBranchCommitInfo> branchCommits(long installationId, String owner,
+            String repository, String branch);
 }

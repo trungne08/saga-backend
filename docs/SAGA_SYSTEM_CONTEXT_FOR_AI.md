@@ -1,5 +1,15 @@
 # SAGA — Context kỹ thuật hệ thống hiện tại
 
+## Update 2026-08-06 - Project dashboard and GitHub repository reads
+
+- **CONFIRMED:** Project has nullable `description` (V18); update normalizes blank text to null.
+- **CONFIRMED:** `GET /api/projects/{projectId}/dashboard-stats` applies existing project read authorization and returns only local task/repository/commit/PR aggregates; deleted tasks are excluded.
+- **CONFIRMED:** GitHub repository reads are backend-mediated: `GET .../branches` and `GET .../commits?branch=...` page provider data without exposing installation credentials. Branch names containing `/` stay in the query value.
+- **CONFIRMED:** Manager-only reconnect is `POST .../github/repositories/{repositoryId}/connect` (session + CSRF). It requires a disconnected row and a still-authorized installation, locks the local repository state, then schedules the same initial-backfill claim after commit. The shared claim path serializes competing requests and coalesces an active job.
+- **CONFIRMED:** `GET /api/projects/{projectId}/sync-history` is the paged/filterable history contract (`page`, `size`, optional `targetSystem`, `status`, `jobType`); it remains manager-only. Legacy `/sync-status` remains the compact top-20 status view.
+- **BLOCKED:** There is no Project DELETE endpoint. Do not add one until an explicit dependency guard/retention design covers Team, Task, GitRepo, JiraBoard, JiraWriteOperation, document/risk/assessment and other project references.
+- **Verification:** full Maven at current working tree passed 96 suites / 537 tests / 0 failures / 0 errors / 0 skipped. Provider production credentials and external GitHub runtime smoke test remain TBD.
+
 ## Update 2026-08-06 — Jira Sprint UTC và Scrum board
 
 - **CONFIRMED:** UTC là operational timeline. Create/Update Sprint nhận ISO-8601 có offset và `JiraSprintResponse` trả Instant UTC có `Z`; không cộng cứng UTC+7 hay đổi timezone JVM.

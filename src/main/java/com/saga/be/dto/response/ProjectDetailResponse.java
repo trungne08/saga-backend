@@ -8,6 +8,7 @@ import java.util.UUID;
 public record ProjectDetailResponse(
         UUID projectId,
         String name,
+        String description,
         LocalDateTime createdAt,
         LocalDateTime updatedAt,
         TeamSummary team
@@ -16,6 +17,7 @@ public record ProjectDetailResponse(
         return new ProjectDetailResponse(
                 project.getId(),
                 project.getName(),
+                project.getDescription(),
                 project.getCreatedAt(),
                 project.getUpdatedAt(),
                 TeamSummary.from(team)
