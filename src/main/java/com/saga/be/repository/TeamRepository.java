@@ -22,4 +22,12 @@ public interface TeamRepository extends JpaRepository<Team, UUID> {
             + "left join fetch course.instructor "
             + "where team.id = :teamId")
     Optional<Team> findWithCourseAndInstructorById(@Param("teamId") UUID teamId);
+
+    @Query("select team from Team team "
+            + "left join fetch team.course course "
+            + "left join fetch course.instructor "
+            + "where team.project.id = :projectId")
+    Optional<Team> findWithCourseAndInstructorByProjectId(
+            @Param("projectId") UUID projectId
+    );
 }
