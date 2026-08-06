@@ -67,6 +67,16 @@ public class GitHubSyncJobService {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public Optional<SyncJobLog> claim(UUID repositoryId, SyncJobType jobType) {
+        return claimOrReuse(repositoryId, jobType)
+                .filter(result -> !result.coalesced())
+                .map(SyncJobClaimResult::job);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public Optional<SyncJobClaimResult> claimOrReuse(
+            UUID repositoryId,
+            SyncJobType jobType
+    ) {
         GitRepo repository = gitRepoRepository.findForInitialBackfillClaimById(
                 repositoryId
         ).orElse(null);
@@ -88,7 +98,7 @@ public class GitHubSyncJobService {
         if (!activeJobs.isEmpty()) {
             SyncJobLog activeJob = activeJobs.get(0);
             if (!isStale(activeJob, utcNow())) {
-                return Optional.empty();
+                return Optional.of(SyncJobClaimResult.coalesced(activeJob));
             }
             finalizationService.finalizeJob(
                     activeJob.getId(),
@@ -105,14 +115,16 @@ public class GitHubSyncJobService {
             repository.setConnectionStatus(IntegrationStatus.BACKFILLING);
             gitRepoRepository.saveAndFlush(repository);
         }
-        return Optional.of(jobRepository.saveAndFlush(SyncJobLog.builder()
+        return Optional.of(SyncJobClaimResult.claimed(
+                jobRepository.saveAndFlush(SyncJobLog.builder()
                 .targetSystem("GITHUB")
                 .targetId(repositoryId)
                 .jobType(jobType)
                 .status(SyncJobStatus.IN_PROGRESS)
                 .startedAt(utcNow())
                 .cursorBefore(repository.getSyncCursor())
-                .build()));
+                .build())
+        ));
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)

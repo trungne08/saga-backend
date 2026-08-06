@@ -26,6 +26,7 @@ import com.saga.be.entity.enums.JiraWriteOperationStatus;
 import com.saga.be.entity.enums.JiraWriteOperationType;
 import com.saga.be.exception.IntegrationException;
 import com.saga.be.integration.project.JiraCredentialService;
+import com.saga.be.integration.project.JiraBoardResolutionService;
 import com.saga.be.integration.provider.JiraProviderClient;
 import com.saga.be.integration.provider.JiraSprintSnapshot;
 import com.saga.be.integration.security.ProjectIntegrationAuthorizationService;
@@ -36,6 +37,7 @@ import com.saga.be.repository.SprintRepository;
 import com.saga.be.repository.TaskRepository;
 import com.saga.be.security.ApplicationRole;
 import com.saga.be.security.SagaPrincipal;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -56,11 +58,11 @@ class JiraSprintWriteServiceTest {
         var response = f.service.detail(f.actor, f.projectId, sprint.getId());
 
         assertEquals(
-                LocalDateTime.parse("2026-08-01T02:00:00"),
+                Instant.parse("2026-08-01T02:00:00Z"),
                 response.startDate()
         );
         assertEquals(
-                LocalDateTime.parse("2026-08-08T02:00:00"),
+                Instant.parse("2026-08-08T02:00:00Z"),
                 response.endDate()
         );
     }
@@ -270,6 +272,7 @@ class JiraSprintWriteServiceTest {
         final ProjectIntegrationAuthorizationService authorization = mock(ProjectIntegrationAuthorizationService.class);
         final JiraBoardRepository boards = mock(JiraBoardRepository.class);
         final JiraCredentialService credentials = mock(JiraCredentialService.class);
+        final JiraBoardResolutionService boardResolver = mock(JiraBoardResolutionService.class);
         final JiraProviderClient provider = mock(JiraProviderClient.class);
         final JiraSprintUpsertService upserts = mock(JiraSprintUpsertService.class);
         final JiraWriteOperationService operations = mock(JiraWriteOperationService.class);
@@ -292,7 +295,8 @@ class JiraSprintWriteServiceTest {
             when(operations.fingerprint(any())).thenReturn("f");
             when(boards.findByProjectId(projectId)).thenReturn(Optional.of(board));
             when(credentials.validAccessToken(board)).thenReturn("token");
-            service = new JiraSprintWriteService(authorization, boards, credentials, provider, upserts, operations, sprints, tasks);
+            when(boardResolver.resolve(board)).thenReturn("99");
+            service = new JiraSprintWriteService(authorization, boards, credentials, boardResolver, provider, upserts, operations, sprints, tasks);
         }
 
         Sprint sprint(String state) {

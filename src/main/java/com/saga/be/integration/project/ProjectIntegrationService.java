@@ -94,6 +94,7 @@ public class ProjectIntegrationService {
     private final IntegrationUrlResolver urlResolver;
     private final IntegrationSecretCipher cipher;
     private final JiraCredentialService jiraCredentialService;
+    private final JiraBoardResolutionService jiraBoardResolutionService;
     private final JiraBoardRepository jiraBoardRepository;
     private final GitHubInstallationRepository installationRepository;
     private final GitRepoRepository gitRepoRepository;
@@ -117,6 +118,7 @@ public class ProjectIntegrationService {
             IntegrationUrlResolver urlResolver,
             IntegrationSecretCipher cipher,
             JiraCredentialService jiraCredentialService,
+            JiraBoardResolutionService jiraBoardResolutionService,
             JiraBoardRepository jiraBoardRepository,
             GitHubInstallationRepository installationRepository,
             GitRepoRepository gitRepoRepository,
@@ -138,6 +140,7 @@ public class ProjectIntegrationService {
         this.urlResolver = urlResolver;
         this.cipher = cipher;
         this.jiraCredentialService = jiraCredentialService;
+        this.jiraBoardResolutionService = jiraBoardResolutionService;
         this.jiraBoardRepository = jiraBoardRepository;
         this.installationRepository = installationRepository;
         this.gitRepoRepository = gitRepoRepository;
@@ -313,6 +316,9 @@ public class ProjectIntegrationService {
                 ZoneOffset.UTC
         ));
         board.setGrantedScopes(String.join(" ", grant.scopes()));
+
+        // Discovery is read-only and persists only a verified external numeric Agile id.
+        jiraBoardResolutionService.resolveForLinking(board, grant.accessToken());
 
         String webhookSecret = randomSecret();
         URI callback = jiraWebhookCallback(webhookSecret);

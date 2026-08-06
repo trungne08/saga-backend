@@ -189,19 +189,24 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
     }
 
     void syncJira(UUID boardId, SyncJobType jobType) {
-        SyncJobLog job = null;
+        if (!availability.jiraEnabled()) {
+            return;
+        }
+        SyncJobLog job = jiraSyncJobService.claim(boardId, jobType).orElse(null);
+        if (job == null) {
+            return;
+        }
+        syncClaimedJira(boardId, job);
+    }
+
+    @Override
+    public void syncClaimedJira(UUID boardId, SyncJobLog job) {
         JiraBoard board = null;
         int processed = 0;
         int failed = 0;
         JiraSyncStage stage = JiraSyncStage.CLAIM_JOB;
+        SyncJobType jobType = job.getJobType();
         try {
-            if (!availability.jiraEnabled()) {
-                return;
-            }
-            job = jiraSyncJobService.claim(boardId, jobType).orElse(null);
-            if (job == null) {
-                return;
-            }
             stage = JiraSyncStage.LOAD_BOARD;
             board = jiraBoardRepository.findById(boardId).orElse(null);
             if (board == null || board.getConnectionStatus()
@@ -307,7 +312,7 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
                 }
                 nextPageToken = page.nextPageToken();
                 lastPage = page.last();
-                log.info("Jira search completed: boardId={}, jobId={}, jobType={}, endpoint=/rest/api/3/search/jql, projectKey={}, jiraZoneId={}, cursorBeforeUtc={}, lowerBoundUtc={}, lowerBoundForJql={}, upperBoundUtc={}, upperBoundExclusiveForJql={}, sanitizedJql={}, httpStatus=200, issuesFetchedFromProvider={}, issuesAfterUpperBoundFilter={}, itemsProcessed={}, itemsFailed={}, isLast={}, hasNextPageToken={}",
+                log.info("Jira search completed: jiraBoardEntityId={}, jobId={}, jobType={}, endpoint=/rest/api/3/search/jql, projectKey={}, jiraZoneId={}, cursorBeforeUtc={}, lowerBoundUtc={}, lowerBoundForJql={}, upperBoundUtc={}, upperBoundExclusiveForJql={}, sanitizedJql={}, httpStatus=200, issuesFetchedFromProvider={}, issuesAfterUpperBoundFilter={}, itemsProcessed={}, itemsFailed={}, isLast={}, hasNextPageToken={}",
                         boardId, job.getId(), jobType, board.getProjectKey(),
                         jiraZoneId, cursorBefore, effectiveLowerBound, lowerBoundForJql,
                         capturedUpperBound, upperBoundExclusiveForJql,
@@ -428,6 +433,12 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
         if (job == null) {
             return;
         }
+        syncClaimedGitHub(repositoryLocalId, job);
+    }
+
+    @Override
+    public void syncClaimedGitHub(UUID repositoryLocalId, SyncJobLog job) {
+        SyncJobType jobType = job.getJobType();
         GitRepo repository;
         try {
             repository = gitRepoRepository
@@ -909,7 +920,7 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
     ) {
         Throwable root = rootCause(exception);
         log.error(
-                "{}: boardId={}, jobId={}, jobType={}, stage={}, "
+                "{}: jiraBoardEntityId={}, jobId={}, jobType={}, stage={}, "
                         + "errorCategory={}, exceptionClass={}, rootCauseClass={}",
                 message,
                 boardId,

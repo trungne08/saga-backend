@@ -131,6 +131,7 @@ class ProjectIntegrationServiceJiraLinkTest {
         JiraBoard board = boards.getValue();
         assertEquals("10034", board.getJiraProjectId());
         assertEquals("SAGA", board.getProjectKey());
+        assertEquals("99", board.getJiraBoardId());
         verify(fixture.jira).ensureWebhook(
                 eq("test-access-token"),
                 eq("cloud-a"),
@@ -165,6 +166,9 @@ class ProjectIntegrationServiceJiraLinkTest {
         JiraCredentialService credentialService = org.mockito.Mockito.mock(
                 JiraCredentialService.class
         );
+        JiraBoardResolutionService boardResolver = org.mockito.Mockito.mock(
+                JiraBoardResolutionService.class
+        );
         IntegrationUrlResolver urls = org.mockito.Mockito.mock(
                 IntegrationUrlResolver.class
         );
@@ -194,6 +198,11 @@ class ProjectIntegrationServiceJiraLinkTest {
                 .thenAnswer(invocation -> invocation.getArgument(0));
         when(credentialService.encryptAccess(any(), any())).thenReturn("encrypted");
         when(credentialService.encryptRefresh(any(), any())).thenReturn("encrypted");
+        when(boardResolver.resolveForLinking(any(JiraBoard.class), eq("test-access-token")))
+                .thenAnswer(invocation -> {
+                    ((JiraBoard) invocation.getArgument(0)).setJiraBoardId("99");
+                    return "99";
+                });
         when(urls.jiraWebhookPublicUrl()).thenReturn(
                 "https://saga.example/api/webhooks/jira"
         );
@@ -219,6 +228,7 @@ class ProjectIntegrationServiceJiraLinkTest {
                 urls,
                 org.mockito.Mockito.mock(IntegrationSecretCipher.class),
                 credentialService,
+                boardResolver,
                 boardRepository,
                 org.mockito.Mockito.mock(GitHubInstallationRepository.class),
                 gitRepoRepository,

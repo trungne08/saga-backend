@@ -40,6 +40,8 @@ class JiraProviderClientImplTest {
             + "?startAt=0&maxResults=100";
     private static final String SPRINT_URL = BASE + "/ex/jira/" + CLOUD_ID
             + "/rest/agile/1.0/sprint/42";
+    private static final String AGILE_BOARD_URL = BASE + "/ex/jira/" + CLOUD_ID
+            + "/rest/agile/1.0/board";
     private static final URI CALLBACK = URI.create(
             "https://callback.test/api/webhooks/jira?token=CALLBACK_SECRET"
     );
@@ -391,6 +393,31 @@ class JiraProviderClientImplTest {
                         + "\"content\":[{\"type\":\"text\",\"text\":\"Heading \"},"
                         + "{\"type\":\"text\",\"text\":\"body\"}]}]}"
         ).description());
+    }
+
+    @Test
+    void discoversAllAgileBoardsAcrossPagesUsingTheCanonicalProjectId() {
+        Fixture fixture = fixture();
+        fixture.server.expect(request -> {
+            assertEquals("/ex/jira/" + CLOUD_ID + "/rest/agile/1.0/board", request.getURI().getPath());
+            String query = URLDecoder.decode(request.getURI().getRawQuery(), StandardCharsets.UTF_8);
+            assertThat(query).contains("projectKeyOrId=10034").contains("startAt=0").contains("maxResults=50");
+        }).andExpect(method(HttpMethod.GET)).andRespond(json(
+                page(false, 0, 50, 2, "{\"id\":12,\"name\":\"Scrum\",\"type\":\"scrum\"}")
+        ));
+        fixture.server.expect(request -> {
+            String query = URLDecoder.decode(request.getURI().getRawQuery(), StandardCharsets.UTF_8);
+            assertThat(query).contains("projectKeyOrId=10034").contains("startAt=1");
+        }).andExpect(method(HttpMethod.GET)).andRespond(json(
+                page(true, 1, 50, 2, "{\"id\":13,\"name\":\"Kanban\",\"type\":\"kanban\"}")
+        ));
+
+        assertThat(fixture.client.discoverAgileBoards("ACCESS_TOKEN_SECRET", CLOUD_ID, "10034"))
+                .containsExactly(
+                        new JiraAgileBoardInfo("12", "Scrum", "scrum"),
+                        new JiraAgileBoardInfo("13", "Kanban", "kanban")
+                );
+        fixture.server.verify();
     }
 
     @Test
@@ -789,7 +816,7 @@ class JiraProviderClientImplTest {
     }
 
     @Test
-    void treatsMissingValuesAndMalformedJsonAsInvalidAndRedactsBody() {
+    void treatsMissingValuesAndMalformedJsonAsInvalidWithoutLoggingRawBody() {
         Fixture missingValues = fixture();
         missingValues.server.expect(requestTo(FIRST_WEBHOOK_PAGE_URL))
                 .andRespond(json("{\"isLast\":true}"));
@@ -821,7 +848,7 @@ class JiraProviderClientImplTest {
                     .reduce("", String::concat);
             assertThat(logged)
                     .contains("operation=GET")
-                    .contains("<redacted>")
+                .doesNotContain("<redacted>")
                     .doesNotContain("RESPONSE_SECRET")
                     .doesNotContain("ACCESS_TOKEN_SECRET");
         } finally {

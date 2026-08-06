@@ -1,5 +1,13 @@
 # SAGA Frontend API Integration Guide
 
+## Jira Sprint time và Scrum board contract — 2026-08-06
+
+- `startDate`/`endDate` Create và Update Sprint phải là ISO-8601 có offset, ví dụ `2026-08-06T06:03:50Z` hoặc `2026-08-06T13:03:50+07:00`; không gửi `LocalDateTime` không offset.
+- Sprint response trả date là UTC Instant có `Z` hoặc `null`. FE hiển thị bằng `Intl.DateTimeFormat`, không cộng cứng `+7`/nối thêm `Z`.
+- Jira link tự discover Agile board theo project canonical. `jiraBoardId` là external numeric Scrum board ID; UUID local không phải Jira board ID. Zero/multiple board trả `JIRA_SCRUM_BOARD_NOT_FOUND`/`JIRA_BOARD_SELECTION_REQUIRED`; FE không chọn board đầu tiên.
+- Legacy missing/malformed ID được lazy-discover khi Create Sprint; numeric valid ID được dùng lại. Invalid URL/tên/project key không gọi Jira Create Sprint. Route, `credentials: "include"`, CSRF và `Idempotency-Key` không đổi.
+- UTC chỉ chuyển sang `JIRA_TIME_ZONE` khi tạo JQL literal. Backend không trả/log raw provider data. Runtime production board access/smoke test TBD.
+
 ## Contribution và Jira task-data status (2026-08-05)
 
 - **CONFIRMED:** Jira sync keeps internal Task snapshots for labels, components

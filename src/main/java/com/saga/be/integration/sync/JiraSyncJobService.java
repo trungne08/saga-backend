@@ -67,6 +67,16 @@ public class JiraSyncJobService {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public Optional<SyncJobLog> claim(UUID boardId, SyncJobType jobType) {
+        return claimOrReuse(boardId, jobType)
+                .filter(result -> !result.coalesced())
+                .map(SyncJobClaimResult::job);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public Optional<SyncJobClaimResult> claimOrReuse(
+            UUID boardId,
+            SyncJobType jobType
+    ) {
         JiraBoard board = boardRepository.findForSyncClaimById(boardId)
                 .orElse(null);
         if (board == null || board.getConnectionStatus()
@@ -87,7 +97,7 @@ public class JiraSyncJobService {
         if (!activeJobs.isEmpty()) {
             SyncJobLog activeJob = activeJobs.get(0);
             if (!isStale(activeJob, utcNow())) {
-                return Optional.empty();
+                return Optional.of(SyncJobClaimResult.coalesced(activeJob));
             }
             finalizationService.finalizeJob(
                     activeJob.getId(),
@@ -103,14 +113,16 @@ public class JiraSyncJobService {
             board.setConnectionStatus(IntegrationStatus.BACKFILLING);
             boardRepository.saveAndFlush(board);
         }
-        return Optional.of(jobRepository.saveAndFlush(SyncJobLog.builder()
+        return Optional.of(SyncJobClaimResult.claimed(
+                jobRepository.saveAndFlush(SyncJobLog.builder()
                 .targetSystem("JIRA")
                 .targetId(boardId)
                 .jobType(jobType)
                 .status(SyncJobStatus.IN_PROGRESS)
                 .startedAt(utcNow())
                 .cursorBefore(board.getSyncCursor())
-                .build()));
+                .build())
+        ));
     }
 
     public void recoverStaleJobs() {

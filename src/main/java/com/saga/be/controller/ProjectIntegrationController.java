@@ -3,11 +3,14 @@ package com.saga.be.controller;
 import com.saga.be.dto.request.GitHubRepositoriesLinkRequest;
 import com.saga.be.config.IntegrationAvailability;
 import com.saga.be.dto.request.JiraProjectLinkRequest;
+import com.saga.be.dto.request.ManualSyncProvider;
 import com.saga.be.dto.response.GitHubInstallationResponse;
 import com.saga.be.dto.response.JiraAuthorizationResponse;
 import com.saga.be.dto.response.ProjectIntegrationsResponse;
 import com.saga.be.dto.response.SyncStatusResponse;
+import com.saga.be.dto.response.ManualProjectSyncResponse;
 import com.saga.be.integration.project.ProjectIntegrationService;
+import com.saga.be.integration.project.ManualProjectSyncService;
 import com.saga.be.integration.callback.IntegrationCallbackRedirectService;
 import com.saga.be.integration.callback.IntegrationCallbackResultStore;
 import com.saga.be.security.SagaPrincipal;
@@ -34,17 +37,20 @@ import org.springframework.web.bind.annotation.RestController;
 public class ProjectIntegrationController {
 
     private final ProjectIntegrationService integrationService;
+    private final ManualProjectSyncService manualSyncService;
     private final IntegrationAvailability availability;
     private final IntegrationCallbackResultStore resultStore;
     private final IntegrationCallbackRedirectService callbackRedirectService;
 
     public ProjectIntegrationController(
             ProjectIntegrationService integrationService,
+            ManualProjectSyncService manualSyncService,
             IntegrationAvailability availability,
             IntegrationCallbackResultStore resultStore,
             IntegrationCallbackRedirectService callbackRedirectService
     ) {
         this.integrationService = integrationService;
+        this.manualSyncService = manualSyncService;
         this.availability = availability;
         this.resultStore = resultStore;
         this.callbackRedirectService = callbackRedirectService;
@@ -199,6 +205,16 @@ public class ProjectIntegrationController {
             @PathVariable UUID projectId
     ) {
         return integrationService.syncStatus(principal, projectId);
+    }
+
+    @PostMapping("/sync")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public ManualProjectSyncResponse sync(
+            @AuthenticationPrincipal SagaPrincipal principal,
+            @PathVariable UUID projectId,
+            @RequestParam(defaultValue = "ALL") ManualSyncProvider provider
+    ) {
+        return manualSyncService.request(principal, projectId, provider);
     }
 
     private ResponseEntity<Void> redirect(URI uri) {

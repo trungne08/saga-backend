@@ -1,5 +1,12 @@
 # SAGA — Trạng thái hiện tại
 
+## Cập nhật 2026-08-06 — Jira Sprint time và board
+
+- **CONFIRMED:** HTTP Sprint dùng Instant có offset rõ ràng; FE dùng `Intl.DateTimeFormat`, không cộng cứng `+7`.
+- **CONFIRMED:** Jira link discover Agile board theo project canonical, persist external numeric ID (không phải UUID local). Zero/multiple Scrum board trả `JIRA_SCRUM_BOARD_NOT_FOUND`/`JIRA_BOARD_SELECTION_REQUIRED`; legacy ID thiếu/sai được lazy-repair.
+- **CONFIRMED:** numeric board ID là `originBoardId`; config invalid không gọi Jira Create Sprint. UTC chỉ chuyển sang `JIRA_TIME_ZONE` khi sinh JQL. Safe provider errors và idempotency/recovery không đổi; không raw payload log/API.
+- **Migration:** không thêm vì `jira_board_id` đã có. **Tests:** full Maven tại `c770438` pass 94 suites / 529 tests / 0 failures / 0 errors / 0 skipped. Runtime production smoke test TBD.
+
 ## 1. Thông tin checkpoint
 
 | Mục | Giá trị |

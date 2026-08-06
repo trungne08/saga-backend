@@ -129,6 +129,7 @@ class ProjectIntegrationServiceJiraWebhookTest {
                 urls,
                 cipher,
                 mock(JiraCredentialService.class),
+                mock(JiraBoardResolutionService.class),
                 boards,
                 mock(GitHubInstallationRepository.class),
                 mock(GitRepoRepository.class),

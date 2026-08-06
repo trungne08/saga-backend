@@ -16,6 +16,7 @@ import com.saga.be.integration.callback.IntegrationCallbackResultStore;
 import com.saga.be.integration.callback.JiraOAuthCallbackService;
 import com.saga.be.integration.identity.PersonalIntegrationService;
 import com.saga.be.integration.project.ProjectIntegrationService;
+import com.saga.be.integration.project.ManualProjectSyncService;
 import com.saga.be.security.ApplicationRole;
 import com.saga.be.security.SagaPrincipal;
 import jakarta.servlet.http.HttpServletRequest;
@@ -72,7 +73,7 @@ class IntegrationCallbackRedirectControllerTest {
                 principal, projectId, session, "state", "code", null
         )).thenReturn(result);
         assertRedirect(new ProjectIntegrationController(
-                project, availability, store, redirects
+                project, mock(ManualProjectSyncService.class), availability, store, redirects
         ).githubCallback(principal, projectId, session, "state", "code", null));
 
         when(project.finishGitHubInstallationFromProviderCallback(

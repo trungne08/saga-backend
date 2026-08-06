@@ -13,6 +13,7 @@ import com.saga.be.entity.enums.JiraWriteOperationStatus;
 import com.saga.be.entity.enums.JiraWriteOperationType;
 import com.saga.be.exception.IntegrationException;
 import com.saga.be.integration.project.JiraCredentialService;
+import com.saga.be.integration.project.JiraBoardResolutionService;
 import com.saga.be.integration.provider.JiraProviderClient;
 import com.saga.be.integration.provider.JiraSprintSnapshot;
 import com.saga.be.integration.provider.JiraWriteScope;
@@ -23,6 +24,7 @@ import com.saga.be.repository.JiraBoardRepository;
 import com.saga.be.repository.SprintRepository;
 import com.saga.be.repository.TaskRepository;
 import com.saga.be.security.SagaPrincipal;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -37,6 +39,7 @@ public class JiraSprintWriteService {
     private final ProjectIntegrationAuthorizationService authorization;
     private final JiraBoardRepository boards;
     private final JiraCredentialService credentials;
+    private final JiraBoardResolutionService boardResolver;
     private final JiraProviderClient provider;
     private final JiraSprintUpsertService upserts;
     private final JiraWriteOperationService operations;
@@ -44,10 +47,10 @@ public class JiraSprintWriteService {
     private final TaskRepository tasks;
 
     public JiraSprintWriteService(ProjectIntegrationAuthorizationService authorization, JiraBoardRepository boards,
-            JiraCredentialService credentials, JiraProviderClient provider, JiraSprintUpsertService upserts,
+            JiraCredentialService credentials, JiraBoardResolutionService boardResolver, JiraProviderClient provider, JiraSprintUpsertService upserts,
             JiraWriteOperationService operations, SprintRepository sprints, TaskRepository tasks) {
         this.authorization = authorization; this.boards = boards; this.credentials = credentials;
-        this.provider = provider; this.upserts = upserts; this.operations = operations;
+        this.boardResolver = boardResolver; this.provider = provider; this.upserts = upserts; this.operations = operations;
         this.sprints = sprints; this.tasks = tasks;
     }
 
@@ -62,14 +65,16 @@ public class JiraSprintWriteService {
         if (request.endDate() != null && request.startDate() != null && !request.endDate().isAfter(request.startDate()))
             throw IntegrationException.invalid("JIRA_SPRINT_DATE_INVALID", "Sprint endDate must be after startDate");
         Project project = authorization.requireProjectManager(principal, projectId);
+        JiraBoard board = board(projectId);
+        String externalBoardId = boardResolver.resolve(board);
+        String token = credentials.validAccessToken(board);
+        JiraWriteScope.requireGranted(board, JiraWriteScope.WRITE_SPRINT_SCOPE);
         JiraWriteOperation op = operations.claim(project, principal, JiraWriteOperationType.SPRINT_CREATE, key,
                 operations.fingerprint(request.name() + "|" + request.goal() + "|" + request.startDate() + "|" + request.endDate()));
         if (op.getStatus() == JiraWriteOperationStatus.COMPLETED) return result(op, projectId);
-        JiraBoard board = board(projectId); String token = credentials.validAccessToken(board);
-        JiraWriteScope.requireGranted(board, JiraWriteScope.WRITE_SPRINT_SCOPE);
         if (op.getStatus() == JiraWriteOperationStatus.PENDING) {
             try {
-                JiraSprintSnapshot remote = provider.createSprint(token, board.getCloudId(), board.getJiraBoardId(), request.name(), request.goal(),
+                JiraSprintSnapshot remote = provider.createSprint(token, board.getCloudId(), externalBoardId, request.name(), request.goal(),
                         date(request.startDate()), date(request.endDate()));
                 op.setRemoteResourceId(remote.id()); operations.markRemoteSucceeded(op.getId(), remote.id(), null);
             } catch (IntegrationException exception) { operations.failed(op.getId(), exception.getCode()); throw exception;
@@ -145,7 +150,7 @@ public class JiraSprintWriteService {
     private Sprint sprint(UUID projectId, UUID id) { return sprints.findByIdAndBoardProjectIdAndDeletedAtIsNull(id, projectId).orElseThrow(() -> notFound("Sprint not found")); }
     private JiraBoard board(UUID projectId) { JiraBoard board = boards.findByProjectId(projectId).orElseThrow(() -> IntegrationException.conflict("JIRA_LINK_NOT_FOUND", "The project has no Jira connection")); if (board.getConnectionStatus() != IntegrationStatus.ACTIVE) throw IntegrationException.conflict("JIRA_INTEGRATION_NOT_ACTIVE", "The Jira integration is not active"); return board; }
     private IntegrationException notFound(String text) { return new IntegrationException(HttpStatus.NOT_FOUND, "JIRA_RESOURCE_NOT_FOUND", text); }
-    private String date(LocalDateTime date) { return date == null ? null : date.toString(); }
+    private String date(Instant date) { return date == null ? null : date.toString(); }
     private Map<String, Object> changes(JiraSprintUpdateRequest request) { Map<String, Object> result = new LinkedHashMap<>(); if (request.name() != null) result.put("name", request.name().trim()); if (request.goal() != null) result.put("goal", request.goal()); if (request.startDate() != null) result.put("startDate", date(request.startDate())); if (request.endDate() != null) result.put("endDate", date(request.endDate())); return result; }
     @FunctionalInterface private interface SprintMutation { void apply(String token, JiraBoard board); }
 }

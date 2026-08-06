@@ -1,5 +1,13 @@
 # SAGA — Context kỹ thuật hệ thống hiện tại
 
+## Update 2026-08-06 — Jira Sprint UTC và Scrum board
+
+- **CONFIRMED:** UTC là operational timeline. Create/Update Sprint nhận ISO-8601 có offset và `JiraSprintResponse` trả Instant UTC có `Z`; không cộng cứng UTC+7 hay đổi timezone JVM.
+- **CONFIRMED:** JQL chỉ chuyển cursor UTC sang `JIRA_TIME_ZONE` để tạo literal Jira. `Asia/Ho_Chi_Minh` là zone UI/JQL, không đổi instant vận hành.
+- **CONFIRMED:** external Jira Agile board ID là số trong `JiraBoard.jiraBoardId`; UUID `JiraBoard.id` chỉ là ID local. Link flow discover Scrum board, zero/multiple fail closed, legacy missing/malformed ID lazy-repair trước Create Sprint.
+- **CONFIRMED:** Create Sprint resolve board trước idempotency claim/mutation; canonical fetch/upsert, recovery, session/CSRF và route giữ nguyên. Provider không log raw Jira response.
+- **Migration:** không cần, `jira_board.jira_board_id` đã tồn tại. **Verification:** full Maven tại `c770438` pass 94 suites / 529 tests / 0 failures / 0 errors / 0 skipped. Runtime Jira Agile access vẫn TBD.
+
 > Mục đích: tài liệu **as-built** cho AI assistant và developer mới. Mọi kết luận về hành vi hiện tại được phân loại: **CONFIRMED** (được source/config chứng minh), **PARTIAL** (có code nhưng chưa đầy đủ), **PLANNED** (chỉ thấy trong tài liệu), **TBD** (không xác định được từ repository), **RECOMMENDED** (đề xuất, không phải hành vi hiện tại).
 
 ## 1. Metadata của bản audit

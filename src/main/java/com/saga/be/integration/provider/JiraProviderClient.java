@@ -19,6 +19,10 @@ public interface JiraProviderClient {
 
     List<JiraProjectInfo> projects(String accessToken, String cloudId);
 
+    List<JiraAgileBoardInfo> discoverAgileBoards(
+            String accessToken, String cloudId, String jiraProjectId
+    );
+
     List<JiraCreateIssueType> getCreateIssueTypes(
             String accessToken,
             String cloudId,

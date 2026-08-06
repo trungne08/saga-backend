@@ -1,5 +1,13 @@
 # SAGA — Nhật ký quyết định kỹ thuật
 
+## DEC-039 — Sprint time dùng Instant UTC và board Scrum dùng external numeric ID
+
+- Ngày: 2026-08-06. Trạng thái: ACCEPTED / CONFIRMED từ source và test local; runtime production TBD.
+- HTTP Sprint nhận Instant ISO-8601 có offset, response trả Instant UTC; entity `LocalDateTime` giữ UTC semantics. Không đổi schema/JVM timezone, không cộng cứng UTC+7.
+- Link Jira và lazy Create Sprint discover Agile boards theo project canonical. Chỉ đúng một `scrum` board được persist vào `jira_board.jira_board_id`; UUID entity local không phải Jira board ID.
+- Zero/multiple Scrum board fail closed với `JIRA_SCRUM_BOARD_NOT_FOUND`/`JIRA_BOARD_SELECTION_REQUIRED`; malformed ID được repair, numeric valid ID không re-discover. Invalid config không tạo operation/provider mutation; recovery, idempotency và canonical fetch/upsert giữ nguyên.
+- Không migration vì cột đã tồn tại. Full Maven tại `c770438`: 94 suites / 529 tests / 0 failures / 0 errors / 0 skipped.
+
 Tài liệu ghi lại quyết định đã được code/runtime fact chứng minh và các đề xuất còn mở. `ACCEPTED` không có nghĩa production đã được kiểm chứng; evidence của từng quyết định xác định phạm vi xác nhận.
 
 > Metadata audit hiện tại: branch `main`, HEAD thực tế `4f3dee9` (`4f3dee969ebd7ee03a94eb1b8133987ad622c66d`). Các SHA cũ bên dưới là checkpoint lịch sử. Full Maven gần nhất: 90 suites, 504 tests pass, 0 failures/errors/skips.

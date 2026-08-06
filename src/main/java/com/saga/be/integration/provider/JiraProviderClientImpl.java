@@ -238,6 +238,43 @@ public class JiraProviderClientImpl implements JiraProviderClient {
     }
 
     @Override
+    public List<JiraAgileBoardInfo> discoverAgileBoards(
+            String accessToken, String cloudId, String jiraProjectId
+    ) {
+        String project = requiredPathSegment(jiraProjectId);
+        List<JiraAgileBoardInfo> boards = new ArrayList<>();
+        int startAt = 0;
+        boolean last = false;
+        while (!last) {
+            URI uri = UriComponentsBuilder.fromUri(jiraUri(cloudId, "/rest/agile/1.0/board"))
+                    .queryParam("projectKeyOrId", project)
+                    .queryParam("startAt", startAt)
+                    .queryParam("maxResults", 50)
+                    .build().encode().toUri();
+            JsonNode response = get(uri, accessToken);
+            JsonNode values = response.path("values");
+            if (!values.isArray()) {
+                throw providerResponseInvalid();
+            }
+            for (JsonNode value : values) {
+                String boardId = requiredText(value, "id");
+                if (!boardId.matches("\\d+")) {
+                    throw providerResponseInvalid();
+                }
+                boards.add(new JiraAgileBoardInfo(
+                        boardId, requiredText(value, "name"), requiredText(value, "type")
+                ));
+            }
+            last = response.path("isLast").asBoolean(true);
+            startAt += values.size();
+            if (values.isEmpty()) {
+                last = true;
+            }
+        }
+        return List.copyOf(boards);
+    }
+
+    @Override
     public List<JiraCreateIssueType> getCreateIssueTypes(
             String accessToken,
             String cloudId,
@@ -1073,13 +1110,13 @@ public class JiraProviderClientImpl implements JiraProviderClient {
         log.warn(
                 "Jira dynamic webhook response invalid: operation={}, "
                         + "providerStatus=2xx, cloudId={}, projectKey={}, "
-                        + "callbackHost={}, reason={}, body={}",
+                        + "callbackHost={}, reason={}, responsePresent={}",
                 operation,
                 cloudId,
                 projectKey,
                 callbackUri == null ? "" : callbackUri.getHost(),
                 reason,
-                redactAndTruncate(body)
+                body != null && !body.isBlank()
         );
         return providerResponseInvalid();
     }

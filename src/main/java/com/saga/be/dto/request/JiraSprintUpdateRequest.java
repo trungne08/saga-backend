@@ -1,6 +1,6 @@
 package com.saga.be.dto.request;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
-public record JiraSprintUpdateRequest(String name, String goal, LocalDateTime startDate, LocalDateTime endDate) {
+public record JiraSprintUpdateRequest(String name, String goal, Instant startDate, Instant endDate) {
 }

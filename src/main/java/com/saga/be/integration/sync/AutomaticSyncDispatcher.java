@@ -1,5 +1,6 @@
 package com.saga.be.integration.sync;
 
+import com.saga.be.entity.SyncJobLog;
 import java.util.UUID;
 
 public interface AutomaticSyncDispatcher {
@@ -10,4 +11,8 @@ public interface AutomaticSyncDispatcher {
     void reconcileJira(UUID boardId);
 
     void reconcileGitHub(UUID repositoryLocalId);
+
+    void syncClaimedJira(UUID boardId, SyncJobLog job);
+
+    void syncClaimedGitHub(UUID repositoryLocalId, SyncJobLog job);
 }
