@@ -32,7 +32,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1")
 @RequiredArgsConstructor
 @Validated
-@Tag(name = "Sprints")
+@Tag(name = "Jira Sprint", description = "Đọc và thay đổi Sprint đồng bộ với Jira.")
 public class ProjectSprintController {
 
     private final ProjectSprintService projectSprintService;

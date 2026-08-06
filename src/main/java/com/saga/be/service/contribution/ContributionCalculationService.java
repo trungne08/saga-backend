@@ -29,6 +29,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
+// Calculates the shared local contribution snapshot used by service callers.
 public class ContributionCalculationService {
 
     private static final BigDecimal ONE_HUNDRED = BigDecimal.valueOf(100);

@@ -1,5 +1,12 @@
 # SAGA — Nhật ký quyết định kỹ thuật
 
+## DEC-041 - Chuẩn hóa Swagger/OpenAPI tiếng Việt tại thời điểm sinh tài liệu
+
+- Ngày: 2026-08-06. Trạng thái: ACCEPTED / CONFIRMED từ source và generated OpenAPI test.
+- Quyết định dùng `OperationCustomizer` và `OpenApiCustomizer` để bổ sung summary, description, tag, parameter/response/schema metadata cho toàn bộ operation sinh bởi springdoc 3.0.3. Cách này chỉ thay đổi OpenAPI document, không thay đổi HTTP behavior hay DTO JSON.
+- Browser session `JSESSIONID` và global CSRF Swagger interceptor được giữ nguyên. Không thêm Bearer scheme, không thêm OAuth token input, không lặp `X-XSRF-TOKEN` vào operation. Webhook có `Authorization` vì đó là contract chữ ký provider có evidence, không phải auth header cho frontend.
+- Evidence: `OpenApiConfig`, `VietnameseOpenApiDocumentationConfiguration`, `GeneratedOpenApiDocumentationIntegrationTest`, `SwaggerUiCsrfIntegrationTest`. Generated document có 96 operation; full Maven pass 97 suites / 538 tests.
+
 ## DEC-040 - Project GitHub reads, reconnect, and sync-history
 
 - Date: 2026-08-06. Status: ACCEPTED / CONFIRMED by source and local tests; production provider runtime remains TBD.

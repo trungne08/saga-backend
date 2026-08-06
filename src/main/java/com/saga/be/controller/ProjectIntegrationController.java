@@ -36,6 +36,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
+@io.swagger.v3.oas.annotations.tags.Tag(name = "Tích hợp dự án", description = "Liên kết, trạng thái và đồng bộ Jira/GitHub của dự án.")
 @RequestMapping("/api/projects/{projectId}")
 public class ProjectIntegrationController {
 

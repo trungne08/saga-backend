@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
+@io.swagger.v3.oas.annotations.tags.Tag(name = "GitHub", description = "Đọc repository, nhánh và commit GitHub qua backend.")
 @RequestMapping("/api/projects/{projectId}/github/repositories")
 public class ProjectGitHubReadController {
     private final GitHubProjectReadService service;

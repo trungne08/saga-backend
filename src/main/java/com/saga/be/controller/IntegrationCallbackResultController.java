@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
+@io.swagger.v3.oas.annotations.tags.Tag(name = "Đồng bộ dữ liệu", description = "Nhận kết quả callback tích hợp đã được lưu an toàn.")
 public class IntegrationCallbackResultController {
 
     private final IntegrationCallbackResultStore resultStore;

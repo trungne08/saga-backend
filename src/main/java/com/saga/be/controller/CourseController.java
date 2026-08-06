@@ -26,6 +26,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import java.util.UUID;
 
 @RestController
+@io.swagger.v3.oas.annotations.tags.Tag(name = "Khóa học", description = "Quản lý khóa học và thành viên khóa học.")
 @RequestMapping("/api/v1/courses")
 @RequiredArgsConstructor
 @Validated

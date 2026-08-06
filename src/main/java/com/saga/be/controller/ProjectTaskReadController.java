@@ -31,6 +31,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
+@io.swagger.v3.oas.annotations.tags.Tag(name = "Jira Task", description = "Đọc và thay đổi task đồng bộ với Jira.")
 @RequestMapping("/api/v1/projects/{projectId}/tasks")
 @RequiredArgsConstructor
 @Validated

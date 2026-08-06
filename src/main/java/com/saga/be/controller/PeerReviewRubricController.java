@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
+@io.swagger.v3.oas.annotations.tags.Tag(name = "Đánh giá", description = "Xem rubric peer review của nhóm.")
 @RequestMapping("/api/v1/teams/{teamId}/peer-review-rubric")
 @RequiredArgsConstructor
 public class PeerReviewRubricController {

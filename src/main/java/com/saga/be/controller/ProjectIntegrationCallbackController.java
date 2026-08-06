@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
+@io.swagger.v3.oas.annotations.tags.Tag(name = "Tích hợp dự án", description = "Hoàn tất callback cài đặt GitHub cho dự án.")
 public class ProjectIntegrationCallbackController {
 
     private final ProjectIntegrationService integrationService;

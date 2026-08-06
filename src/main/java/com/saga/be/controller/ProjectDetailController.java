@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
+@io.swagger.v3.oas.annotations.tags.Tag(name = "Dự án", description = "Xem và cập nhật thông tin dự án.")
 @RequestMapping("/api/projects")
 public class ProjectDetailController {
 

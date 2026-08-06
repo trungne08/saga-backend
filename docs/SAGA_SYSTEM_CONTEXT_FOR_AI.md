@@ -1,5 +1,12 @@
 # SAGA — Context kỹ thuật hệ thống hiện tại
 
+## Update 2026-08-06 - Swagger/OpenAPI tiếng Việt
+
+- **CONFIRMED:** springdoc `3.0.3` sinh 96 operation từ `/v3/api-docs`. Mỗi operation có summary, description và tag tiếng Việt; tag có description để Swagger UI hiển thị nhóm chức năng rõ ràng.
+- **CONFIRMED:** metadata được chuẩn hóa tại OpenAPI generation, không thay route, HTTP method, DTO, status, authorization, session, CSRF hay business rule. Schema và parameter chưa có mô tả được bổ sung metadata tiếng Việt tại thời điểm sinh tài liệu.
+- **CONFIRMED:** Swagger tiếp tục dùng browser session `JSESSIONID` và interceptor CSRF same-origin toàn cục. Không có Bearer scheme và không khai báo lặp `X-XSRF-TOKEN` theo từng operation; header `Authorization` chỉ còn ở webhook provider có evidence chữ ký riêng.
+- **Verification:** generated OpenAPI test, OpenApiConfig/Swagger UI CSRF/security regression và full Maven pass 97 suites / 538 tests / 0 failures / 0 errors / 0 skipped. Runtime Swagger UI sau deploy vẫn TBD.
+
 ## Update 2026-08-06 - Project dashboard and GitHub repository reads
 
 - **CONFIRMED:** Project has nullable `description` (V18); update normalizes blank text to null.

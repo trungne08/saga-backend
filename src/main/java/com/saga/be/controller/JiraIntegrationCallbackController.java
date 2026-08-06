@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
+@io.swagger.v3.oas.annotations.tags.Tag(name = "Đồng bộ dữ liệu", description = "Hoàn tất callback OAuth Jira.")
 public class JiraIntegrationCallbackController {
 
     private final JiraOAuthCallbackService callbackService;

@@ -1,5 +1,12 @@
 # SAGA — Trạng thái hiện tại
 
+## Update 2026-08-06 - Swagger/OpenAPI tiếng Việt
+
+- Generated `/v3/api-docs` hiện có 96 operation được audit trực tiếp. Mọi operation sinh ra có summary/description tiếng Việt và ít nhất một tag tiếng Việt có description.
+- Nhóm tag bao phủ xác thực, master data, nhóm/dự án, Jira Task/Sprint, GitHub, tích hợp, đồng bộ, đóng góp, đánh giá, webhook và chính sách riêng tư. Controller nghiệp vụ có `@Tag` tiếng Việt tương ứng.
+- Swagger giữ browser session, `withCredentials` và CSRF interceptor hiện hữu; không thêm Bearer token, OAuth input giả hay CSRF header lặp. `Idempotency-Key` vẫn chỉ xuất hiện ở mutation Jira có source evidence.
+- Full Maven: 97 suites / 538 tests / 0 failures / 0 errors / 0 skipped. Kiểm chứng UI trên môi trường production vẫn TBD.
+
 ## Update 2026-08-06 - Project read and integration completion
 
 - Project update supports `name` and nullable `description`; migration `V18__add_project_description.sql` adds `project.description` as `MEDIUMTEXT`.

@@ -23,6 +23,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
+@io.swagger.v3.oas.annotations.tags.Tag(name = "Đóng góp", description = "Quản lý trọng số đánh giá đóng góp.")
 @RequestMapping("/api/v1/courses")
 @RequiredArgsConstructor
 public class CourseContributionWeightController {

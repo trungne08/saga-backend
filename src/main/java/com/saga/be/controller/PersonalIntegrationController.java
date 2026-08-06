@@ -21,6 +21,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
+@io.swagger.v3.oas.annotations.tags.Tag(name = "Tích hợp cá nhân", description = "Kết nối Jira và GitHub của tài khoản hiện tại.")
 @RequestMapping("/api/me/integrations")
 public class PersonalIntegrationController {
 

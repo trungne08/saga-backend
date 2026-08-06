@@ -22,6 +22,7 @@ import java.util.UUID;
 import org.springframework.stereotype.Service;
 
 @Service
+// Kept as a concrete service so reconciliation claims remain shared by all callers.
 public class ManualProjectSyncService {
 
     private final ProjectIntegrationAuthorizationService authorization;

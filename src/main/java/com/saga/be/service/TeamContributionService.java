@@ -47,6 +47,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 @Service
 @RequiredArgsConstructor
+// Keeps the legacy contribution API backed by the current local aggregates.
 public class TeamContributionService {
 
     private static final String TEAM_CONTRIBUTION_OVERRIDE_TYPE = "TEAM_CONTRIBUTION_OVERRIDE";

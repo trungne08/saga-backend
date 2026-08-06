@@ -23,6 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 @RestController
+@io.swagger.v3.oas.annotations.tags.Tag(name = "Đánh giá", description = "Phân tích tiến độ và hoạt động dành cho giảng viên.")
 @RequestMapping("/api/v1/courses/{courseId}")
 @RequiredArgsConstructor
 @PreAuthorize("hasAnyRole('ADMIN', 'LECTURER')")

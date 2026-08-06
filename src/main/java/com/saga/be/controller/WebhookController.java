@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
+@io.swagger.v3.oas.annotations.tags.Tag(name = "Webhook", description = "Endpoint dành riêng cho webhook của nhà cung cấp.")
 public class WebhookController {
 
     private final WebhookIngestionService ingestionService;

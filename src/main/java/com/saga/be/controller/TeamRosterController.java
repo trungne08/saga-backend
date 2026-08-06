@@ -27,7 +27,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/courses/{courseId}/teams/{teamId}/members")
 @RequiredArgsConstructor
 @Validated
-@Tag(name = "Teams")
+@Tag(name = "Nhóm", description = "Xem danh sách thành viên nhóm.")
 public class TeamRosterController {
 
     private final TeamRosterService teamRosterService;

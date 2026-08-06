@@ -15,6 +15,7 @@ import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.util.HtmlUtils;
 
 @RestController
+@io.swagger.v3.oas.annotations.tags.Tag(name = "Chính sách riêng tư", description = "Nội dung chính sách công khai.")
 public class PrivacyPolicyController {
 
     private static final MediaType HTML_UTF8 = new MediaType(MediaType.TEXT_HTML, StandardCharsets.UTF_8);

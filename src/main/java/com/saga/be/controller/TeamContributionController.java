@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
+@io.swagger.v3.oas.annotations.tags.Tag(name = "Đóng góp", description = "Xem đánh giá và gửi điều chỉnh đóng góp.")
 @RequestMapping("/api/v1/teams")
 @RequiredArgsConstructor
 public class TeamContributionController {

@@ -3,15 +3,10 @@ package com.saga.be.config;
 import io.swagger.v3.oas.models.Components;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.info.Info;
-import io.swagger.v3.oas.models.media.StringSchema;
-import io.swagger.v3.oas.models.Operation;
-import io.swagger.v3.oas.models.parameters.Parameter;
-import io.swagger.v3.oas.models.PathItem;
-import io.swagger.v3.oas.models.responses.ApiResponse;
-import io.swagger.v3.oas.models.responses.ApiResponses;
 import io.swagger.v3.oas.models.security.SecurityRequirement;
 import io.swagger.v3.oas.models.security.SecurityScheme;
-import io.swagger.v3.oas.models.headers.Header;
+import io.swagger.v3.oas.models.tags.Tag;
+import java.util.List;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -26,9 +21,10 @@ public class OpenApiConfig {
 
         return new OpenAPI()
                 .info(new Info()
-                        .title("SAGA System API")
+                        .title("SAGA Backend API")
                         .version("1.0.0")
-                        .description("SAGA backend API"))
+                        .description("Tài liệu API SAGA. API nghiệp vụ yêu cầu đăng nhập bằng browser session; "
+                                + "các thao tác thay đổi dữ liệu dùng CSRF do Swagger UI tự gắn."))
                 .addSecurityItem(new SecurityRequirement().addList(securitySchemeName))
                 .components(new Components().addSecuritySchemes(
                         securitySchemeName,
@@ -36,33 +32,32 @@ public class OpenApiConfig {
                                 .type(SecurityScheme.Type.APIKEY)
                                 .in(SecurityScheme.In.COOKIE)
                                 .name("JSESSIONID")
-                                .description("Authenticated Spring Security session")
+                                .description("Browser session của người dùng đã đăng nhập")
                 ))
-                .path("/api/auth/logout", new PathItem().post(new Operation()
-                        .addTagsItem("Authentication")
-                        .summary("Log out the current browser session")
-                        .description("Spring Security framework-managed logout. A valid "
-                                + "X-XSRF-TOKEN CSRF header is required. With a valid CSRF token, "
-                                + "the framework invalidates any current JSESSIONID session and "
-                                + "redirects the browser to Cognito logout; this also applies when "
-                                + "there is no current session. Swagger UI fetch may show 'Failed to "
-                                + "fetch' when the browser follows this cross-origin Cognito redirect. "
-                                + "For browser logout, use a top-level form POST with a hidden _csrf "
-                                + "parameter, or send X-XSRF-TOKEN from JavaScript.")
-                        .addSecurityItem(new SecurityRequirement().addList(securitySchemeName))
-                        .addParametersItem(new Parameter()
-                                .in("header")
-                                .name("X-XSRF-TOKEN")
-                                .required(true)
-                                .description("CSRF token value obtained from the XSRF-TOKEN cookie")
-                                .schema(new StringSchema()))
-                        .responses(new ApiResponses()
-                                .addApiResponse("302", new ApiResponse()
-                                        .description("Redirect to the Cognito logout endpoint")
-                                        .headers(java.util.Map.of("Location", new Header()
-                                                .description("Cognito logout URL")
-                                                .schema(new StringSchema().format("uri")))))
-                                .addApiResponse("403", new ApiResponse()
-                                        .description("Missing or invalid X-XSRF-TOKEN CSRF header")))));
+                .tags(List.of(
+                        tag("Xác thực", "Đăng nhập, phiên làm việc và CSRF."),
+                        tag("Học kỳ", "Quản lý dữ liệu học kỳ."),
+                        tag("Môn học", "Quản lý dữ liệu môn học."),
+                        tag("Lớp học", "Quản lý dữ liệu lớp học."),
+                        tag("Khóa học", "Quản lý khóa học và thành viên khóa học."),
+                        tag("Giảng viên", "Dữ liệu và phân tích dành cho giảng viên."),
+                        tag("Sinh viên", "Dữ liệu sinh viên trong phạm vi được cấp quyền."),
+                        tag("Nhóm", "Thông tin nhóm và thành viên nhóm."),
+                        tag("Dự án", "Thông tin, thống kê và liên kết dự án."),
+                        tag("Tích hợp dự án", "Liên kết, trạng thái và đồng bộ Jira/GitHub của dự án."),
+                        tag("Tích hợp cá nhân", "Kết nối Jira/GitHub theo tài khoản hiện tại."),
+                        tag("Jira Task", "Đọc và thay đổi task đồng bộ với Jira."),
+                        tag("Jira Sprint", "Đọc và thay đổi Sprint đồng bộ với Jira."),
+                        tag("GitHub", "Đọc repository, nhánh và commit GitHub qua backend."),
+                        tag("Đồng bộ dữ liệu", "Điều phối, lịch sử và xử lý ánh xạ đồng bộ."),
+                        tag("Đóng góp", "Đánh giá và điều chỉnh đóng góp."),
+                        tag("Đánh giá", "Peer review và phân tích học tập."),
+                        tag("Webhook", "Endpoint dành riêng cho webhook của nhà cung cấp."),
+                        tag("Chính sách riêng tư", "Nội dung chính sách công khai.")
+                ));
+    }
+
+    private Tag tag(String name, String description) {
+        return new Tag().name(name).description(description);
     }
 }

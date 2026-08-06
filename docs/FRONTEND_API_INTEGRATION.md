@@ -1,5 +1,13 @@
 # SAGA Frontend API Integration Guide
 
+## Swagger/OpenAPI tiếng Việt - 2026-08-06
+
+- Swagger UI hiển thị nhóm, tiêu đề operation, mô tả, parameter và schema bằng tiếng Việt. Nội dung mô tả phản ánh contract hiện có, không thay API frontend đang gọi.
+- Tiếp tục gọi API bằng browser session với `credentials: "include"`. Swagger UI tự đọc/bootstrap cookie CSRF và chỉ gắn header cho POST/PUT/PATCH/DELETE cùng origin; frontend không tự khai báo token trên từng endpoint.
+- Không có Bearer/OAuth input cho API nghiệp vụ. Không gửi GitHub/Jira token, cookie thật, CSRF token thật, secret hoặc private key vào Swagger.
+- Với Jira mutation, `Idempotency-Key` vẫn được mô tả vì Backend bắt buộc header này. Branch GitHub vẫn là query parameter có thể chứa `/` và phải URL-encode.
+- Generated `/v3/api-docs` được test có 96 operation, summary/description/tag đầy đủ và không có CSRF header lặp. Production Swagger UI smoke test vẫn TBD.
+
 ## Project dashboard and GitHub contract - 2026-08-06
 
 - All routes below use the existing session contract: `credentials: "include"`. State-changing reconnect also needs the existing CSRF header; do not send bearer/provider credentials.

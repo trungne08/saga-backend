@@ -23,6 +23,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
+// Applies the reviewed local identity mapping state used by reconciliation flows.
 public class IdentityMappingReviewService {
 
     private final IdentityMapRepository mappingRepository;

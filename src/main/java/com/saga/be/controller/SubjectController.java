@@ -18,6 +18,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import java.util.UUID;
 
 @RestController
+@io.swagger.v3.oas.annotations.tags.Tag(name = "Môn học", description = "Quản lý dữ liệu môn học.")
 @RequestMapping("/api/v1/subjects")
 @RequiredArgsConstructor
 @Validated

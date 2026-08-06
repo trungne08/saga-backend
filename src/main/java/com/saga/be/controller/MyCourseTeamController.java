@@ -25,7 +25,7 @@ import org.springframework.web.server.ResponseStatusException;
 @RestController
 @RequestMapping("/api/me/courses/{courseId}/team/members")
 @RequiredArgsConstructor
-@Tag(name = "Teams")
+@Tag(name = "Nhóm", description = "Xem thành viên nhóm của sinh viên trong khóa học.")
 public class MyCourseTeamController {
 
     private final TeamRosterService teamRosterService;

@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
+@io.swagger.v3.oas.annotations.tags.Tag(name = "Đánh giá", description = "Thực hiện và xem peer review theo Sprint.")
 @RequestMapping("/api/v1/teams/{teamId}/sprints/{sprintId}/peer-reviews")
 @RequiredArgsConstructor
 public class PeerReviewController {
