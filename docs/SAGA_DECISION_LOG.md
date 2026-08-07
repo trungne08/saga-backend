@@ -1,5 +1,19 @@
 # SAGA — Nhật ký quyết định kỹ thuật
 
+## DEC-044 — Jira relink là provider-identity-aware upsert (2026-08-07)
+
+**Status: ACCEPTED.**
+
+**Context.** `jira_board` có hai identity độc lập: ownership local `project_id` và provider identity unique `(cloud_id, jira_project_id)`. Disconnect cố ý giữ row như history anchor. Lookup chỉ theo Project có thể không thấy canonical provider row trong race/legacy retention path rồi tạo entity mới; `saveAndFlush` khi đó vi phạm `uk_jira_cloud_project` và gây HTTP 500.
+
+**Decision.** Sau fresh OAuth grant, accessible-resource validation, link-scope preflight, canonical Jira Project và Scrum board discovery, local service khóa/resolve cả hai identity trong transaction ngắn. Không row thì insert. Row cùng Project và provider identity thì update/reuse cùng `JiraBoard.id`. Provider identity của Project khác trả `409 JIRA_PROJECT_ALREADY_LINKED` với message an toàn; ownership không chuyển. Retained Project có provider identity khác trả `409 JIRA_PROJECT_IDENTITY_CHANGE_NOT_ALLOWED`; không overwrite history anchor. Provider I/O và webhook không giữ DB lock.
+
+**Race/error policy.** `DataIntegrityViolationException` chỉ là fallback race: request mở transaction mới reload/upsert canonical row. Same Project/provider coalesce; different Project thành conflict. Race không reconcile được trả `409 JIRA_BOARD_UPSERT_CONFLICT`; API/log không lộ SQL, constraint, token, credential, cookie/CSRF hoặc raw provider body.
+
+**Consequences.** Giữ `uk_jira_cloud_project`; không migration, hard-delete, detach/move Task/Sprint/history hoặc thay đổi mutation policy. Browser session + CSRF và fresh OAuth grant giữ nguyên. Production runtime còn **TBD** đến deploy/smoke.
+
+**Evidence.** `JiraBoardLinkPersistenceService`, locking queries của `JiraBoardRepository`, `ProjectIntegrationServiceJiraLinkTest`, `JiraBoardLinkPersistenceServiceTest`, `JiraBoardLinkConcurrencyIntegrationTest`, Jira OAuth/scope/discovery/disconnect/sync/write regressions; full Maven 99 suites / 560 tests / 0 failures / 0 errors / 0 skipped.
+
 ## DEC-043 — Xác thực Jira site scope trước link và chuẩn hóa 3LO gateway (2026-08-07)
 
 **Status: ACCEPTED.**

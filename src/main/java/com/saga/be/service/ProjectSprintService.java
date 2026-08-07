@@ -81,13 +81,14 @@ public class ProjectSprintService {
             return;
         }
         if (principal.applicationRole() == ApplicationRole.STUDENT
-                && principal.localProfileId() != null
-                && project.getCourse() != null
-                && !teamMemberRepository.findByStudentIdAndTeamCourseId(
-                        principal.localProfileId(),
-                        project.getCourse().getId()
-                ).isEmpty()) {
-            return;
+                && principal.localProfileId() != null) {
+            Team owningTeam = teamRepository.findByProjectId(project.getId()).orElse(null);
+            if (owningTeam != null && teamMemberRepository.existsByTeamIdAndStudentId(
+                    owningTeam.getId(),
+                    principal.localProfileId()
+            )) {
+                return;
+            }
         }
         throw new AccessDeniedException("You do not have access to this project sprint list");
     }

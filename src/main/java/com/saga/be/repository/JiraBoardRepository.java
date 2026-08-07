@@ -22,6 +22,14 @@ public interface JiraBoardRepository extends JpaRepository<JiraBoard, UUID> {
     Optional<JiraBoard> findForLinkByProjectId(@Param("projectId") UUID projectId);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select board from JiraBoard board where board.cloudId = :cloudId "
+            + "and board.jiraProjectId = :jiraProjectId")
+    Optional<JiraBoard> findForLinkByCloudIdAndJiraProjectId(
+            @Param("cloudId") String cloudId,
+            @Param("jiraProjectId") String jiraProjectId
+    );
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select board from JiraBoard board where board.id = :id")
     Optional<JiraBoard> findForSyncClaimById(@Param("id") UUID id);
 

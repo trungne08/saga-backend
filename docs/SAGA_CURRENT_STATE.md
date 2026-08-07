@@ -1,5 +1,15 @@
 # SAGA — Trạng thái hiện tại
 
+## Update 2026-08-07 — Jira relink provider-identity-aware upsert
+
+- **CONFIRMED:** `jira_board` vừa là history anchor theo ownership local `project_id`, vừa có provider identity duy nhất `(cloud_id, jira_project_id)`. Disconnect vẫn giữ row/history nhưng retire credential và webhook state.
+- **CONFIRMED:** sau fresh grant, verified resource, scope preflight, canonical Jira Project và Scrum board discovery, relink resolve/lock cả hai identity trong transaction local ngắn. Cùng Project + cùng provider identity luôn update row retained/canonical, giữ `JiraBoard.id` và references; không INSERT duplicate.
+- **CONFIRMED:** provider identity đã thuộc SAGA Project khác trả `409 JIRA_PROJECT_ALREADY_LINKED` với message an toàn “This Jira project is already linked to another SAGA project”; không chuyển ownership, không move/xóa Task, Sprint, SyncJobLog hoặc JiraWriteOperation. Retained row muốn đổi sang provider identity khác trả `409 JIRA_PROJECT_IDENTITY_CHANGE_NOT_ALLOWED`, không overwrite history anchor.
+- **CONFIRMED:** provider I/O không giữ pessimistic DB lock. Race unique constraint được retry bằng local reload/upsert; nếu không thể reconcile thì trả safe `409 JIRA_BOARD_UPSERT_CONFLICT`, không trả SQL/constraint/raw DB error. Test đa luồng xác nhận cùng Project coalesce một row và hai Project tranh cùng external Jira Project chỉ có một owner.
+- **Migration:** không thêm migration và giữ `uk_jira_cloud_project` để bảo vệ provider identity uniqueness.
+- **Verification:** `./mvnw.cmd clean test` hoàn tất **BUILD SUCCESS**: 99 suites / 560 tests / 0 failures / 0 errors / 0 skipped.
+- **TBD runtime:** cần deploy rồi smoke `disconnect → fresh OAuth consent → relink`, cross-project conflict và concurrent relink trên môi trường production; FE tiếp tục dùng browser session + CSRF, không gửi Bearer/provider credential.
+
 ## Update 2026-08-07 — Jira OAuth scope và 3LO gateway
 
 - **CONFIRMED:** 3LO Jira Platform và Agile API dùng `api.atlassian.com/ex/jira/{cloudId}`, không dùng trực tiếp `{site}.atlassian.net` với bearer 3LO. `cloudId` chỉ được dùng sau khi match resource từ `accessible-resources` của fresh OAuth grant.

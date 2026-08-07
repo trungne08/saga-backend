@@ -93,7 +93,7 @@ class ProjectIntegrationServiceJiraWebhookTest {
     }
 
     @Test
-    void compensatesProviderWebhookWhenTheBoardWriteFailsAfterCreation() {
+    void doesNotRegisterProviderWebhookWhenTheLocalUpsertFails() {
         UUID projectId = UUID.randomUUID();
         UUID boardId = UUID.randomUUID();
         Project project = new Project();
@@ -128,8 +128,6 @@ class ProjectIntegrationServiceJiraWebhookTest {
                 "https://tunnel.test/api/webhooks/jira"
         );
         when(cipher.encrypt(any(), any())).thenReturn("encrypted");
-        when(jira.ensureWebhook(any(), any(), any(), any(), any()))
-                .thenReturn(new JiraWebhookRegistration("99", true));
         when(boards.findByProjectId(projectId)).thenReturn(Optional.empty());
         AtomicInteger saves = new AtomicInteger();
         when(boards.saveAndFlush(any(JiraBoard.class))).thenAnswer(call -> {
@@ -150,7 +148,9 @@ class ProjectIntegrationServiceJiraWebhookTest {
                 new JiraProjectLinkRequest("cloud", "10034"), "127.0.0.1"
         ));
 
-        verify(jira).deleteWebhook("ACCESS_TOKEN_SECRET", "cloud", "99");
+        verify(jira, org.mockito.Mockito.never()).ensureWebhook(
+                any(), any(), any(), any(), any()
+        );
     }
 
     private ProjectIntegrationService service(
@@ -177,8 +177,12 @@ class ProjectIntegrationServiceJiraWebhookTest {
                 ),
                 urls,
                 cipher,
-                mock(JiraCredentialService.class),
+                new JiraCredentialService(cipher, jira, boards),
                 mock(JiraBoardResolutionService.class),
+                new JiraBoardLinkPersistenceService(
+                        boards,
+                        new JiraCredentialService(cipher, jira, boards)
+                ),
                 boards,
                 mock(GitHubInstallationRepository.class),
                 mock(GitRepoRepository.class),

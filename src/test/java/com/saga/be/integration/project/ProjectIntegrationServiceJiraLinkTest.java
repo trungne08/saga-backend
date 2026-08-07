@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -41,9 +42,11 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.mock.web.MockHttpSession;
+import org.springframework.dao.DataIntegrityViolationException;
 
 class ProjectIntegrationServiceJiraLinkTest {
 
@@ -138,7 +141,7 @@ class ProjectIntegrationServiceJiraLinkTest {
         retained.setConnectionStatus(com.saga.be.entity.enums.IntegrationStatus.DISCONNECTED);
         retained.setEncryptedAccessToken("old-ciphertext");
         retained.setEncryptedRefreshToken("old-refresh-ciphertext");
-        when(fixture.boardRepository.findByProjectId(fixture.projectId))
+        when(fixture.boardRepository.findForLinkByProjectId(fixture.projectId))
                 .thenReturn(Optional.of(retained));
 
         fixture.service.linkJira(
@@ -182,6 +185,40 @@ class ProjectIntegrationServiceJiraLinkTest {
         );
     }
 
+    @Test
+    void dataIntegrityRaceIsRetriedWithoutLeakingDatabaseDetails() {
+        JiraBoardLinkPersistenceService persistence = org.mockito.Mockito.mock(
+                JiraBoardLinkPersistenceService.class
+        );
+        Fixture fixture = fixture(JiraWriteScope.projectIntegrationScopes(), persistence);
+        JiraBoard board = new JiraBoard();
+        board.setId(UUID.randomUUID());
+        Project project = new Project();
+        project.setId(fixture.projectId());
+        board.setProject(project);
+        board.setCloudId("cloud-a");
+        board.setJiraProjectId("10034");
+        board.setConnectionStatus(com.saga.be.entity.enums.IntegrationStatus.BACKFILLING);
+        when(persistence.upsert(any()))
+                .thenThrow(new DataIntegrityViolationException("duplicate"))
+                .thenReturn(board);
+        when(persistence.complete(any(), eq("webhook-1"), eq(true), any()))
+                .thenReturn(board);
+        when(fixture.boardRepository.findByProjectId(fixture.projectId))
+                .thenReturn(Optional.of(board));
+
+        fixture.service.linkJira(
+                fixture.principal,
+                fixture.projectId,
+                fixture.session,
+                new JiraProjectLinkRequest("cloud-a", "10034"),
+                "127.0.0.1"
+        );
+
+        verify(persistence, times(2)).upsert(any());
+        verify(persistence).complete(any(), eq("webhook-1"), eq(true), any());
+    }
+
     private void assertNotAccessible(Fixture fixture, String input) {
         IntegrationException exception = assertThrows(
                 IntegrationException.class,
@@ -219,6 +256,13 @@ class ProjectIntegrationServiceJiraLinkTest {
     }
 
     private Fixture fixture(Set<String> resourceScopes) {
+        return fixture(resourceScopes, null);
+    }
+
+    private Fixture fixture(
+            Set<String> resourceScopes,
+            JiraBoardLinkPersistenceService persistenceOverride
+    ) {
         UUID projectId = UUID.randomUUID();
         Project project = new Project();
         project.setId(projectId);
@@ -249,8 +293,7 @@ class ProjectIntegrationServiceJiraLinkTest {
         IntegrationUrlResolver urls = org.mockito.Mockito.mock(
                 IntegrationUrlResolver.class
         );
-        JiraBoard board = new JiraBoard();
-        board.setId(UUID.randomUUID());
+        AtomicReference<JiraBoard> persistedBoard = new AtomicReference<>();
 
         when(authorization.requireProjectManager(principal, projectId))
                 .thenReturn(project);
@@ -268,11 +311,20 @@ class ProjectIntegrationServiceJiraLinkTest {
         when(jira.projects("test-access-token", "cloud-a")).thenReturn(
                 List.of(new JiraProjectInfo("10034", "SAGA", "SAGA Project"))
         );
-        when(boardRepository.findByProjectId(projectId)).thenReturn(
-                Optional.empty(), Optional.of(board)
+        when(boardRepository.findForLinkByProjectId(projectId)).thenAnswer(
+                invocation -> Optional.ofNullable(persistedBoard.get())
         );
-        when(boardRepository.saveAndFlush(any(JiraBoard.class)))
-                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(boardRepository.findByProjectId(projectId)).thenAnswer(
+                invocation -> Optional.ofNullable(persistedBoard.get())
+        );
+        when(boardRepository.saveAndFlush(any(JiraBoard.class))).thenAnswer(invocation -> {
+            JiraBoard saved = invocation.getArgument(0);
+            if (saved.getId() == null) {
+                saved.setId(UUID.randomUUID());
+            }
+            persistedBoard.set(saved);
+            return saved;
+        });
         when(credentialService.encryptAccess(any(), any())).thenReturn("encrypted");
         when(credentialService.encryptRefresh(any(), any())).thenReturn("encrypted");
         when(boardResolver.resolveForLinking(any(JiraBoard.class), eq("test-access-token")))
@@ -306,6 +358,9 @@ class ProjectIntegrationServiceJiraLinkTest {
                 org.mockito.Mockito.mock(IntegrationSecretCipher.class),
                 credentialService,
                 boardResolver,
+                persistenceOverride == null
+                        ? new JiraBoardLinkPersistenceService(boardRepository, credentialService)
+                        : persistenceOverride,
                 boardRepository,
                 org.mockito.Mockito.mock(GitHubInstallationRepository.class),
                 gitRepoRepository,

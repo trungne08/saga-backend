@@ -183,6 +183,18 @@ class ProjectTaskReadIntegrationTest {
                                 task.getId()
                         )
                         .with(authentication(authenticationFor(
+                                ApplicationRole.LECTURER,
+                                fixture.instructor().getId()
+                        ))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(task.getId().toString()));
+
+        mockMvc.perform(get(
+                                "/api/v1/projects/{projectId}/tasks/{taskId}",
+                                fixture.project().getId(),
+                                task.getId()
+                        )
+                        .with(authentication(authenticationFor(
                                 ApplicationRole.STUDENT,
                                 fixture.member().getId()
                         ))))
@@ -198,15 +210,20 @@ class ProjectTaskReadIntegrationTest {
                 .email(unique("other-lecturer") + "@example.test")
                 .fullName("Other lecturer")
                 .build());
+        Course otherCourse = courseRepository.saveAndFlush(Course.builder()
+                .instructor(otherLecturer)
+                .courseCode(unique("OTHER-COURSE"))
+                .name("Other lecturer's course")
+                .build());
         Student otherStudent = saveStudent("OTHER-STUDENT");
         Project otherProject = projectRepository.saveAndFlush(Project.builder()
-                .course(fixture.course())
+                .course(otherCourse)
                 .name("Other project")
                 .build());
         Team otherTeam = teamRepository.saveAndFlush(Team.builder()
-                .course(fixture.course())
+                .course(otherCourse)
                 .project(otherProject)
-                .name("Other team in same course")
+                .name("Other team in another course")
                 .build());
         teamMemberRepository.saveAndFlush(TeamMember.builder()
                 .team(otherTeam)

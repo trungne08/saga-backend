@@ -1,6 +1,7 @@
 package com.saga.be.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.when;
 
 import com.saga.be.dto.response.SprintListResponse;
@@ -27,6 +28,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.access.AccessDeniedException;
 
 @ExtendWith(MockitoExtension.class)
 class ProjectSprintServiceTest {
@@ -130,6 +132,54 @@ class ProjectSprintServiceTest {
         assertEquals(projectId, response.projectId());
         assertEquals(teamId, response.teamId());
         assertEquals(1, response.sprints().size());
+    }
+
+    @Test
+    void rejectsLecturerWhoOwnsAnotherCourse() {
+        UUID projectId = UUID.randomUUID();
+        Lecturer owningLecturer = entityWithId(new Lecturer(), UUID.randomUUID());
+        Lecturer otherLecturer = entityWithId(new Lecturer(), UUID.randomUUID());
+        Course projectCourse = entityWithId(new Course(), UUID.randomUUID());
+        projectCourse.setInstructor(owningLecturer);
+        Course otherCourse = entityWithId(new Course(), UUID.randomUUID());
+        otherCourse.setInstructor(otherLecturer);
+        Project project = entityWithId(new Project(), projectId);
+        project.setCourse(projectCourse);
+
+        when(projectRepository.findById(projectId)).thenReturn(Optional.of(project));
+
+        assertThrows(
+                AccessDeniedException.class,
+                () -> service.getByProject(
+                        studentOrLecturerPrincipal(ApplicationRole.LECTURER, otherLecturer.getId()),
+                        projectId
+                )
+        );
+    }
+
+    @Test
+    void rejectsStudentWhoseMembershipIsOnlyInAnotherTeamOfTheCourse() {
+        UUID projectId = UUID.randomUUID();
+        UUID owningTeamId = UUID.randomUUID();
+        UUID studentId = UUID.randomUUID();
+        Course course = entityWithId(new Course(), UUID.randomUUID());
+        Project project = entityWithId(new Project(), projectId);
+        project.setCourse(course);
+        Team owningTeam = entityWithId(new Team(), owningTeamId);
+        owningTeam.setCourse(course);
+        owningTeam.setProject(project);
+
+        when(projectRepository.findById(projectId)).thenReturn(Optional.of(project));
+        when(teamRepository.findByProjectId(projectId)).thenReturn(Optional.of(owningTeam));
+        when(teamMemberRepository.existsByTeamIdAndStudentId(owningTeamId, studentId)).thenReturn(false);
+
+        assertThrows(
+                AccessDeniedException.class,
+                () -> service.getByProject(
+                        studentOrLecturerPrincipal(ApplicationRole.STUDENT, studentId),
+                        projectId
+                )
+        );
     }
 
     private SagaPrincipal studentOrLecturerPrincipal(ApplicationRole role, UUID profileId) {

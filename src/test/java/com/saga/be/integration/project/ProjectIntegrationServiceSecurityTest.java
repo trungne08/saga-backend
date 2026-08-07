@@ -79,6 +79,7 @@ class ProjectIntegrationServiceSecurityTest {
                 mock(IntegrationSecretCipher.class),
                 mock(JiraCredentialService.class),
                 mock(JiraBoardResolutionService.class),
+                mock(JiraBoardLinkPersistenceService.class),
                 mock(JiraBoardRepository.class),
                 installationRepository,
                 mock(GitRepoRepository.class),

@@ -1,5 +1,14 @@
 # SAGA — Context kỹ thuật hệ thống hiện tại
 
+## Update 2026-08-07 — Jira relink retained-row upsert và provider identity
+
+- **CONFIRMED:** `ProjectIntegrationService#linkJira` hoàn tất fresh grant/resource/scope/canonical project/Scrum board discovery trước local persistence. `JiraBoardLinkPersistenceService` sau đó khóa cả `project_id` và `(cloud_id, jira_project_id)`; provider HTTP (discovery/webhook) không chạy khi giữ DB lock.
+- **CONFIRMED:** nếu retained row theo Project và provider identity khớp, hoặc provider-identity row đã thuộc đúng Project, service update chính managed row đó với credential mới, metadata site/project/board/status/webhook; `JiraBoard.id` và historical references được giữ. Không có nhánh tạo `JiraBoard` mới khi canonical provider row đã tồn tại.
+- **CONFIRMED:** provider identity thuộc Project khác fail closed bằng `409 JIRA_PROJECT_ALREADY_LINKED` và message an toàn. Một retained Project có Jira identity khác cũng không bị overwrite mù; trả `409 JIRA_PROJECT_IDENTITY_CHANGE_NOT_ALLOWED`. Unique `uk_jira_cloud_project` giữ nguyên.
+- **CONFIRMED:** race insert được coi là fallback hiếm: retry transaction mới để reload canonical row; same Project/provider coalesce, khác Project thành 409. Nếu vẫn không reconcile, API trả `JIRA_BOARD_UPSERT_CONFLICT`, không expose `DataIntegrityViolationException`, SQL, tên constraint, cloudId hay local row ID. Log chỉ chứa projectId/stage/conflict type an toàn, không token/raw provider body.
+- **CONFIRMED:** concurrent DB integration tests bao phủ same-Project relink và two-Project same-provider race; disconnect/relink, OAuth fresh grant, scope preflight, board discovery, sync và Task/Sprint write regressions vẫn pass. Full Maven: 99 suites / 560 tests / 0 failures / 0 errors / 0 skipped.
+- **TBD runtime:** deploy/smoke production vẫn cần thiết cho OAuth consent, dynamic webhook và concurrent requests thật; không thêm Bearer, không đổi session/CSRF và không thêm migration.
+
 ## Update 2026-08-07 — Jira 3LO resource, scope preflight và link diagnostics
 
 - **CONFIRMED:** mọi Jira site-specific request của `JiraProviderClientImpl` đều đi qua 3LO gateway `https://api.atlassian.com/ex/jira/{verifiedCloudId}{apiPath}` cho Jira Platform (`/rest/api/3/...`) và Jira Software Agile (`/rest/agile/1.0/...`). URI builder chỉ nhận cloudId/path segment hợp lệ; không ghép site URL do FE gửi vào provider request.

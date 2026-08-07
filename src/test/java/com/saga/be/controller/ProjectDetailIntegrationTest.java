@@ -144,6 +144,33 @@ class ProjectDetailIntegrationTest {
     }
 
     @Test
+    void dashboardAllowsOwnerLecturerAndRejectsOtherCourseLecturerAndAnonymous() throws Exception {
+        Fixture fixture = fixture();
+        Lecturer otherLecturer = saveLecturer("OTHER-DASHBOARD-LECTURER");
+        courseRepository.saveAndFlush(Course.builder()
+                .instructor(otherLecturer)
+                .courseCode(unique("OTHER-DASHBOARD-COURSE"))
+                .name("Other dashboard course")
+                .build());
+
+        mockMvc.perform(get("/api/projects/{projectId}/dashboard-stats", fixture.project().getId())
+                        .with(authentication(authenticationFor(
+                                ApplicationRole.LECTURER,
+                                fixture.instructor().getId()
+                        ))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.projectId").value(fixture.project().getId().toString()));
+        mockMvc.perform(get("/api/projects/{projectId}/dashboard-stats", fixture.project().getId())
+                        .with(authentication(authenticationFor(
+                                ApplicationRole.LECTURER,
+                                otherLecturer.getId()
+                        ))))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/projects/{projectId}/dashboard-stats", fixture.project().getId()))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
     void getReturnsSafeTeamOwnedMetadataAndNoInternalOrIntegrationFields() throws Exception {
         Fixture fixture = fixture();
         saveBoard(fixture.project());

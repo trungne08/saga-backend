@@ -18,7 +18,6 @@ import com.saga.be.entity.GitHubInstallation;
 import com.saga.be.entity.GitRepo;
 import com.saga.be.entity.JiraBoard;
 import com.saga.be.entity.Project;
-import com.saga.be.entity.enums.BoardType;
 import com.saga.be.entity.enums.GitHubInstallationStatus;
 import com.saga.be.entity.enums.IntegrationStatus;
 import com.saga.be.exception.IntegrationException;
@@ -60,6 +59,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.dao.DataIntegrityViolationException;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.springframework.context.ApplicationEventPublisher;
@@ -89,6 +89,7 @@ public class ProjectIntegrationService {
     private final IntegrationSecretCipher cipher;
     private final JiraCredentialService jiraCredentialService;
     private final JiraBoardResolutionService jiraBoardResolutionService;
+    private final JiraBoardLinkPersistenceService jiraBoardLinkPersistenceService;
     private final JiraBoardRepository jiraBoardRepository;
     private final GitHubInstallationRepository installationRepository;
     private final GitRepoRepository gitRepoRepository;
@@ -113,6 +114,7 @@ public class ProjectIntegrationService {
             IntegrationSecretCipher cipher,
             JiraCredentialService jiraCredentialService,
             JiraBoardResolutionService jiraBoardResolutionService,
+            JiraBoardLinkPersistenceService jiraBoardLinkPersistenceService,
             JiraBoardRepository jiraBoardRepository,
             GitHubInstallationRepository installationRepository,
             GitRepoRepository gitRepoRepository,
@@ -135,6 +137,7 @@ public class ProjectIntegrationService {
         this.cipher = cipher;
         this.jiraCredentialService = jiraCredentialService;
         this.jiraBoardResolutionService = jiraBoardResolutionService;
+        this.jiraBoardLinkPersistenceService = jiraBoardLinkPersistenceService;
         this.jiraBoardRepository = jiraBoardRepository;
         this.installationRepository = installationRepository;
         this.gitRepoRepository = gitRepoRepository;
@@ -231,7 +234,6 @@ public class ProjectIntegrationService {
         );
     }
 
-    @Transactional
     public ProjectIntegrationsResponse linkJira(
             SagaPrincipal principal,
             UUID projectId,
@@ -278,59 +280,37 @@ public class ProjectIntegrationService {
                             "The selected Jira project is not accessible"
                     ));
 
-            JiraBoard board = jiraBoardRepository.findForLinkByProjectId(projectId)
-                // The fallback preserves callers and test doubles that do
-                // not use the locking query. Production locks a retained row
-                // before it is repurposed for relinking.
-                .or(() -> jiraBoardRepository.findByProjectId(projectId))
-                    .orElseGet(() -> JiraBoard.builder()
-                        .project(project)
-                        .type(BoardType.OTHER)
-                        .connectionStatus(IntegrationStatus.CONNECTING)
-                            .build());
-            if (
-            board.getJiraProjectId() != null
-            && !board.getJiraProjectId().equals(jiraProject.id())
-            && board.getConnectionStatus() != IntegrationStatus.DISCONNECTED
-            ) {
-            throw IntegrationException.conflict(
-                    "JIRA_PROJECT_ALREADY_LINKED",
-                    "Disconnect the current Jira project before linking another one"
-            );
-            }
-
-            board.setName(jiraProject.name());
-        board.setCloudId(resource.cloudId());
-        board.setSiteUrl(resource.siteUrl());
-        board.setJiraProjectId(jiraProject.id());
-        board.setProjectKey(jiraProject.key());
-        board.setConnectedByCognitoSub(principal.cognitoSub());
-        board.setConnectedByStudent(
-                principal.applicationRole() == ApplicationRole.STUDENT
-                        ? projectStudent(principal)
-                        : null
-        );
-        board.setConnectionStatus(IntegrationStatus.CONNECTING);
-            if (board.getId() == null) {
-                board = jiraBoardRepository.saveAndFlush(board);
-            }
-        board.setEncryptedAccessToken(jiraCredentialService.encryptAccess(
-                board,
-                grant.accessToken()
-        ));
-        board.setEncryptedRefreshToken(jiraCredentialService.encryptRefresh(
-                board,
-                grant.refreshToken()
-        ));
-        board.setTokenExpiresAt(LocalDateTime.ofInstant(
-                grant.tokenExpiresAt(),
-                ZoneOffset.UTC
-        ));
-            board.setGrantedScopes(String.join(" ", resource.scopes()));
-
-            // Discovery is read-only and persists only a verified external numeric Agile id.
+            JiraBoard discovery = JiraBoard.builder()
+                    .project(project)
+                    .name(jiraProject.name())
+                    .cloudId(resource.cloudId())
+                    .siteUrl(resource.siteUrl())
+                    .jiraProjectId(jiraProject.id())
+                    .projectKey(jiraProject.key())
+                    .connectionStatus(IntegrationStatus.CONNECTING)
+                    .build();
+            // Provider I/O occurs before the short, locked local upsert transaction.
             stage = JiraLinkStage.DISCOVER_SCRUM_BOARDS;
-            jiraBoardResolutionService.resolveForLinking(board, grant.accessToken());
+            jiraBoardResolutionService.resolveForLinking(discovery, grant.accessToken());
+            JiraBoardLinkCommand command = new JiraBoardLinkCommand(
+                    project,
+                    jiraProject.name(),
+                    resource.cloudId(),
+                    resource.siteUrl(),
+                    jiraProject.id(),
+                    jiraProject.key(),
+                    discovery.getJiraBoardId(),
+                    grant.accessToken(),
+                    grant.refreshToken(),
+                    grant.tokenExpiresAt(),
+                    resource.scopes(),
+                    principal.cognitoSub(),
+                    principal.applicationRole() == ApplicationRole.STUDENT
+                            ? projectStudent(principal)
+                            : null
+            );
+            stage = JiraLinkStage.UPSERT_JIRA_BOARD;
+            JiraBoard board = upsertJiraBoard(command, projectId);
 
             String webhookSecret = randomSecret();
             URI callback = jiraWebhookCallback(webhookSecret);
@@ -344,16 +324,12 @@ public class ProjectIntegrationService {
                     callback,
                     board.getWebhookId()
             );
-            board.setWebhookId(registration.webhookId());
-            // A reused webhook retains its original token, whose hash is
-            // already stored on the board. Replacing it gets a new secret.
-            if (registration.created()) {
-                board.setWebhookSecretHash(sha256(webhookSecret));
-            }
-            board.setWebhookExpiresAt(LocalDateTime.now().plusDays(29));
-            board.setConnectionStatus(IntegrationStatus.BACKFILLING);
-            board.setConsecutiveFailures(0);
-            JiraBoard saved = jiraBoardRepository.saveAndFlush(board);
+            JiraBoard saved = jiraBoardLinkPersistenceService.complete(
+                    command,
+                    registration.webhookId(),
+                    registration.created(),
+                    registration.created() ? sha256(webhookSecret) : null
+            );
             sessionStore.removeJiraGrant(session, projectId);
 
             dispatchAfterCommit(() -> syncDispatcher.initialJiraBackfill(saved.getId()));
@@ -1010,12 +986,30 @@ public class ProjectIntegrationService {
         SCOPE_PREFLIGHT("scopePreflight"),
         RESOLVE_PROJECT("resolveProject"),
         DISCOVER_SCRUM_BOARDS("discoverScrumBoards"),
+        UPSERT_JIRA_BOARD("upsertJiraBoard"),
         REGISTER_WEBHOOK("registerWebhook");
 
         private final String providerOperation;
 
         JiraLinkStage(String providerOperation) {
             this.providerOperation = providerOperation;
+        }
+    }
+
+    private JiraBoard upsertJiraBoard(JiraBoardLinkCommand command, UUID projectId) {
+        try {
+            return jiraBoardLinkPersistenceService.upsert(command);
+        } catch (DataIntegrityViolationException firstRace) {
+            log.warn("Jira board link race reconciled: projectId={}, stage=UPSERT_JIRA_BOARD, "
+                    + "conflictType=SAME_PROJECT_RELINK_OR_PROVIDER_CONFLICT", projectId);
+            try {
+                return jiraBoardLinkPersistenceService.upsert(command);
+            } catch (DataIntegrityViolationException secondRace) {
+                throw IntegrationException.conflict(
+                        "JIRA_BOARD_UPSERT_CONFLICT",
+                        "The Jira project link could not be reconciled"
+                );
+            }
         }
     }
 
