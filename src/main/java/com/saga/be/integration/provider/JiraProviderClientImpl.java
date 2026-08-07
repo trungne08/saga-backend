@@ -262,8 +262,13 @@ public class JiraProviderClientImpl implements JiraProviderClient {
                 if (!boardId.matches("\\d+")) {
                     throw providerResponseInvalid();
                 }
+                JsonNode location = value.path("location");
                 boards.add(new JiraAgileBoardInfo(
-                        boardId, requiredText(value, "name"), requiredText(value, "type")
+                        boardId,
+                        requiredText(value, "name"),
+                        requiredText(value, "type"),
+                        text(location, "projectId"),
+                        text(location, "projectKey")
                 ));
             }
             last = response.path("isLast").asBoolean(true);

@@ -6,6 +6,8 @@ import com.saga.be.integration.provider.JiraAgileBoardInfo;
 import com.saga.be.integration.provider.JiraProviderClient;
 import com.saga.be.repository.JiraBoardRepository;
 import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -15,6 +17,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 @Service
 public class JiraBoardResolutionService {
     private static final String NUMERIC_BOARD_ID = "\\d+";
+    private static final Logger log = LoggerFactory.getLogger(JiraBoardResolutionService.class);
 
     private final JiraBoardRepository boards;
     private final JiraProviderClient provider;
@@ -78,14 +81,18 @@ public class JiraBoardResolutionService {
                     "The Jira project link is not fully configured"
             );
         }
-        List<JiraAgileBoardInfo> scrumBoards = provider.discoverAgileBoards(
-                        accessToken, board.getCloudId(), board.getJiraProjectId())
-                .stream().filter(value -> "scrum".equalsIgnoreCase(value.type())).toList();
+        List<JiraAgileBoardInfo> discoveredBoards = provider.discoverAgileBoards(
+                accessToken, board.getCloudId(), board.getJiraProjectId());
+        List<JiraAgileBoardInfo> scrumBoards = discoveredBoards.stream()
+                .filter(value -> "scrum".equalsIgnoreCase(value.type()))
+                .toList();
         if (scrumBoards.isEmpty()) {
+            logDiscoveryRejection(board, discoveredBoards, "NO_SCRUM_BOARD");
             throw IntegrationException.conflict("JIRA_SCRUM_BOARD_NOT_FOUND",
                     "No Scrum board is available for the linked Jira project");
         }
         if (scrumBoards.size() != 1) {
+            logDiscoveryRejection(board, discoveredBoards, "MULTIPLE_SCRUM_BOARDS");
             throw IntegrationException.conflict("JIRA_BOARD_SELECTION_REQUIRED",
                     "More than one Scrum board is available for the linked Jira project");
         }
@@ -94,6 +101,21 @@ public class JiraBoardResolutionService {
             throw IntegrationException.unavailable("JIRA_RESPONSE_INVALID");
         }
         return discovered;
+    }
+
+    private void logDiscoveryRejection(
+            JiraBoard board,
+            List<JiraAgileBoardInfo> discoveredBoards,
+            String rejectionReason
+    ) {
+        log.warn("Jira board discovery rejected: projectKey={}, boardCount={}, boardTypes={}, "
+                        + "boardIds={}, projectAssociations={}, discoveryRejectionReason={}",
+                board.getProjectKey(),
+                discoveredBoards.size(),
+                discoveredBoards.stream().map(JiraAgileBoardInfo::type).toList(),
+                discoveredBoards.stream().map(JiraAgileBoardInfo::boardId).toList(),
+                discoveredBoards.stream().map(JiraAgileBoardInfo::projectAssociation).toList(),
+                rejectionReason);
     }
 
     private String persistResolved(java.util.UUID boardEntityId, String discovered) {
