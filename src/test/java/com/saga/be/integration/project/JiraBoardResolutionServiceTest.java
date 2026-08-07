@@ -14,6 +14,7 @@ import com.saga.be.entity.JiraBoard;
 import com.saga.be.exception.IntegrationException;
 import com.saga.be.integration.provider.JiraAgileBoardInfo;
 import com.saga.be.integration.provider.JiraBoardFeature;
+import com.saga.be.integration.provider.JiraProjectFeature;
 import com.saga.be.integration.provider.JiraProviderClient;
 import com.saga.be.repository.JiraBoardRepository;
 import java.util.List;
@@ -140,7 +141,7 @@ class JiraBoardResolutionServiceTest {
     }
 
     @Test
-    void simpleBoardWithEnabledSprintsResolvesTheProductionSdpBoard() {
+    void simpleBoardDoesNotResolveFromAnUnverifiedBoardFeatureIdentifier() {
         Fixture fixture = new Fixture();
         fixture.board.setProjectKey("SDP");
         JiraAgileBoardInfo sdpBoard = new JiraAgileBoardInfo(
@@ -151,23 +152,25 @@ class JiraBoardResolutionServiceTest {
         when(fixture.provider.getBoardFeatures("token", "cloud", "35")).thenReturn(List.of(
                 new JiraBoardFeature("SPRINTS", "sprints", "ENABLED", "35")
         ));
-        when(fixture.repository.findById(fixture.board.getId())).thenReturn(Optional.of(fixture.board));
+        when(fixture.provider.getProjectFeatures("token", "cloud", "10034")).thenReturn(List.of(
+                new JiraProjectFeature("jsw.team.sprints", "ENABLED")
+        ));
 
-        assertEquals("35", fixture.service.resolve(fixture.board));
-
-        assertEquals("35", fixture.board.getJiraBoardId());
-        verify(fixture.repository).saveAndFlush(fixture.board);
+        assertEquals("JIRA_SPRINT_CAPABILITY_UNCONFIRMED", assertThrows(
+                IntegrationException.class, () -> fixture.service.resolve(fixture.board)
+        ).getCode());
+        verify(fixture.repository, never()).saveAndFlush(any());
     }
 
     @Test
-    void simpleBoardWithDisabledSprintsFailsWithDedicatedCategory() {
+    void simpleBoardWithDisabledFeatureDoesNotClaimSprintsAreDisabledWithoutIdentifierEvidence() {
         Fixture fixture = simpleBoardFixture("DISABLED");
 
         IntegrationException exception = assertThrows(
                 IntegrationException.class, () -> fixture.service.resolve(fixture.board)
         );
 
-        assertEquals("JIRA_SPRINTS_NOT_ENABLED", exception.getCode());
+        assertEquals("JIRA_SPRINT_CAPABILITY_UNCONFIRMED", exception.getCode());
         verify(fixture.repository, never()).saveAndFlush(any());
     }
 
@@ -181,17 +184,18 @@ class JiraBoardResolutionServiceTest {
         when(fixture.provider.getBoardFeatures("token", "cloud", "35")).thenReturn(List.of(
                 new JiraBoardFeature("BACKLOG", "backlog", "ENABLED", "35")
         ));
+        when(fixture.provider.getProjectFeatures("token", "cloud", "10034")).thenReturn(List.of());
 
         IntegrationException exception = assertThrows(
                 IntegrationException.class, () -> fixture.service.resolve(fixture.board)
         );
 
-        assertEquals("JIRA_SCRUM_BOARD_NOT_FOUND", exception.getCode());
+        assertEquals("JIRA_SPRINT_CAPABILITY_UNCONFIRMED", exception.getCode());
         verify(fixture.repository, never()).saveAndFlush(any());
     }
 
     @Test
-    void multipleSprintCapableBoardsRequireSelection() {
+    void simpleBoardDoesNotBecomeSecondCandidateBesideScrum() {
         Fixture fixture = new Fixture();
         fixture.board.setProjectKey("SDP");
         when(fixture.provider.discoverAgileBoards("token", "cloud", "10034")).thenReturn(List.of(
@@ -201,11 +205,11 @@ class JiraBoardResolutionServiceTest {
         when(fixture.provider.getBoardFeatures("token", "cloud", "35")).thenReturn(List.of(
                 new JiraBoardFeature("SPRINTS", "sprints", "ENABLED", "35")
         ));
+        when(fixture.provider.getProjectFeatures("token", "cloud", "10034")).thenReturn(List.of());
+        when(fixture.repository.findById(fixture.board.getId())).thenReturn(Optional.of(fixture.board));
 
-        assertEquals("JIRA_BOARD_SELECTION_REQUIRED", assertThrows(
-                IntegrationException.class, () -> fixture.service.resolve(fixture.board)
-        ).getCode());
-        verify(fixture.repository, never()).saveAndFlush(any());
+        assertEquals("8", fixture.service.resolve(fixture.board));
+        verify(fixture.repository).saveAndFlush(fixture.board);
     }
 
     @Test
@@ -245,9 +249,17 @@ class JiraBoardResolutionServiceTest {
         assertTrue(message.contains("boardId=35"));
         assertTrue(message.contains("boardType=simple"));
         assertTrue(message.contains("boardFeatureIdentifiers=[SPRINTS]"));
-        assertTrue(message.contains("sprintFeatureState=ENABLED"));
-        assertTrue(message.contains("candidateReason=SPRINT_FEATURE_ENABLED"));
-        assertTrue(message.contains("selectionResult=CANDIDATE"));
+        assertTrue(message.contains("sprintFeatureState=UNCONFIRMED"));
+        assertTrue(message.contains("candidateReason=SIMPLE_CAPABILITY_UNCONFIRMED"));
+        assertTrue(message.contains("selectionResult=REJECTED"));
+        String projectMessage = events.list.stream()
+                .map(ILoggingEvent::getFormattedMessage)
+                .filter(value -> value.startsWith("Jira project feature discovery:"))
+                .findFirst()
+                .orElseThrow();
+        assertTrue(projectMessage.contains("projectKey=SDP"));
+        assertTrue(projectMessage.contains("projectFeatureIdentifiers=[jsw.team.sprints]"));
+        assertTrue(projectMessage.contains("projectFeatureStates=[ENABLED]"));
     }
 
     private Fixture simpleBoardFixture(String sprintState) {
@@ -258,6 +270,9 @@ class JiraBoardResolutionServiceTest {
         ));
         when(fixture.provider.getBoardFeatures("token", "cloud", "35")).thenReturn(List.of(
                 new JiraBoardFeature("SPRINTS", "sprints", sprintState, "35")
+        ));
+        when(fixture.provider.getProjectFeatures("token", "cloud", "10034")).thenReturn(List.of(
+                new JiraProjectFeature("jsw.team.sprints", "ENABLED")
         ));
         return fixture;
     }

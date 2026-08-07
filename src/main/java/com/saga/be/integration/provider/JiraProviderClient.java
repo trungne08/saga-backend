@@ -27,6 +27,10 @@ public interface JiraProviderClient {
             String accessToken, String cloudId, String boardId
     );
 
+    List<JiraProjectFeature> getProjectFeatures(
+            String accessToken, String cloudId, String jiraProjectId
+    );
+
     List<JiraCreateIssueType> getCreateIssueTypes(
             String accessToken,
             String cloudId,

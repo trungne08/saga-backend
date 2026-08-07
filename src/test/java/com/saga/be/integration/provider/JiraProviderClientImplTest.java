@@ -43,6 +43,8 @@ class JiraProviderClientImplTest {
     private static final String AGILE_BOARD_URL = BASE + "/ex/jira/" + CLOUD_ID
             + "/rest/agile/1.0/board";
     private static final String BOARD_FEATURES_URL = AGILE_BOARD_URL + "/35/features";
+    private static final String PROJECT_FEATURES_URL = BASE + "/ex/jira/" + CLOUD_ID
+            + "/rest/api/3/project/10034/features";
     private static final String PROJECT_URL = BASE + "/ex/jira/" + CLOUD_ID
             + "/rest/api/3/project/search?startAt=0&maxResults=50&orderBy=key";
     private static final URI CALLBACK = URI.create(
@@ -424,23 +426,91 @@ class JiraProviderClientImplTest {
     }
 
     @Test
-    void getsOnlySafeMachineReadableBoardFeatureFactsThroughThe3loGateway() {
+    void parsesTheOfficialBoardFeaturesShapeAndIgnoresDocumentedExtraFields() {
         Fixture fixture = fixture();
         fixture.server.expect(requestTo(BOARD_FEATURES_URL))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(json("""
                         {"features":[{
-                          "boardFeature":"SPRINTS",
-                          "featureId":"sprints",
+                          "boardFeature":"SIMPLE_ROADMAP",
+                          "featureId":"feature-35",
+                          "featureType":"BASIC",
                           "state":"ENABLED",
                           "boardId":35,
                           "localisedName":"Sprints",
-                          "localisedDescription":"Not retained"
+                          "localisedDescription":"Not retained",
+                          "unknownFutureField":true
                         }]}
                         """));
 
         assertThat(fixture.client.getBoardFeatures("ACCESS_TOKEN_SECRET", CLOUD_ID, "35"))
-                .containsExactly(new JiraBoardFeature("SPRINTS", "sprints", "ENABLED", "35"));
+                .containsExactly(new JiraBoardFeature(
+                        "SIMPLE_ROADMAP", "feature-35", "ENABLED", "35"
+                ));
+        fixture.server.verify();
+    }
+
+    @Test
+    void acceptsMissingOptionalBoardFeatureFieldsWithoutCallingTheResponseMalformed() {
+        Fixture fixture = fixture();
+        fixture.server.expect(requestTo(BOARD_FEATURES_URL))
+                .andRespond(json("{" + "\"features\":[{}]}"));
+
+        assertThat(fixture.client.getBoardFeatures("ACCESS_TOKEN_SECRET", CLOUD_ID, "35"))
+                .containsExactly(new JiraBoardFeature(null, null, null, null));
+        fixture.server.verify();
+    }
+
+    @Test
+    void parsesProjectFeatureIdentifiersAndStatesWithoutLocalizedValues() {
+        Fixture fixture = fixture();
+        fixture.server.expect(requestTo(PROJECT_FEATURES_URL))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(json("""
+                        {"features":[{
+                          "feature":"jsw.team.example",
+                          "projectId":10034,
+                          "state":"ENABLED",
+                          "localisedName":"Ignored",
+                          "localisedDescription":"Ignored"
+                        }]}
+                        """));
+
+        assertThat(fixture.client.getProjectFeatures("ACCESS_TOKEN_SECRET", CLOUD_ID, "10034"))
+                .containsExactly(new JiraProjectFeature("jsw.team.example", "ENABLED"));
+        fixture.server.verify();
+    }
+
+    @Test
+    void logsSafeShapeDiagnosticsWhenBoardFeaturesRootIsMalformed() {
+        Fixture fixture = fixture();
+        Logger logger = (Logger) LoggerFactory.getLogger(JiraProviderClientImpl.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        fixture.server.expect(requestTo(BOARD_FEATURES_URL))
+                .andRespond(json("{\"unexpected\":\"PROVIDER_SECRET\"}"));
+        try {
+            assertEquals("JIRA_RESPONSE_INVALID", assertThrows(
+                    IntegrationException.class,
+                    () -> fixture.client.getBoardFeatures("ACCESS_TOKEN_SECRET", CLOUD_ID, "35")
+            ).getCode());
+            String logged = appender.list.stream()
+                    .map(ILoggingEvent::getFormattedMessage)
+                    .filter(value -> value.startsWith("Jira feature response invalid:"))
+                    .findFirst()
+                    .orElseThrow();
+            assertThat(logged)
+                    .contains("providerOperation=getBoardFeatures")
+                    .contains("endpointPathTemplate=/rest/agile/1.0/board/{boardId}/features")
+                    .contains("responseShapeCategory=FEATURES_MISSING")
+                    .contains("missingRequiredFields=features")
+                    .contains("exceptionClass=IntegrationException")
+                    .doesNotContain("PROVIDER_SECRET")
+                    .doesNotContain("ACCESS_TOKEN_SECRET");
+        } finally {
+            logger.detachAppender(appender);
+        }
         fixture.server.verify();
     }
 

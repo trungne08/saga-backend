@@ -284,31 +284,13 @@ public class JiraProviderClientImpl implements JiraProviderClient {
     public List<JiraBoardFeature> getBoardFeatures(
             String accessToken, String cloudId, String boardId
     ) {
+        String endpoint = "/rest/agile/1.0/board/{boardId}/features";
+        JsonNode response;
         try {
-            JsonNode response = get(jiraUri(
+            response = get(jiraUri(
                     cloudId,
                     "/rest/agile/1.0/board/" + requiredNumericBoardId(boardId) + "/features"
             ), accessToken);
-            JsonNode values = response.path("features");
-            if (!values.isArray()) {
-                throw providerResponseInvalid();
-            }
-            List<JiraBoardFeature> features = new ArrayList<>();
-            for (JsonNode value : values) {
-                String boardFeature = text(value, "boardFeature");
-                String featureId = text(value, "featureId");
-                if ((boardFeature == null || boardFeature.isBlank())
-                        && (featureId == null || featureId.isBlank())) {
-                    throw providerResponseInvalid();
-                }
-                features.add(new JiraBoardFeature(
-                        boardFeature,
-                        featureId,
-                        text(value, "state"),
-                        text(value, "boardId")
-                ));
-            }
-            return List.copyOf(features);
         } catch (IntegrationException exception) {
             if ("JIRA_RESOURCE_NOT_FOUND".equals(exception.getCode())) {
                 throw IntegrationException.conflict(
@@ -316,8 +298,200 @@ public class JiraProviderClientImpl implements JiraProviderClient {
                         "The selected Jira board is no longer accessible"
                 );
             }
+            if ("JIRA_RESPONSE_INVALID".equals(exception.getCode())) {
+                logFeatureResponseInvalid(
+                        "getBoardFeatures", endpoint, "2xx", "UNPARSEABLE_OR_EMPTY",
+                        "UNKNOWN", "UNKNOWN", "UNKNOWN", exception
+                );
+            }
             throw exception;
         }
+        return parseBoardFeatures(response, endpoint);
+    }
+
+    @Override
+    public List<JiraProjectFeature> getProjectFeatures(
+            String accessToken, String cloudId, String jiraProjectId
+    ) {
+        String endpoint = "/rest/api/3/project/{projectIdOrKey}/features";
+        JsonNode response;
+        try {
+            response = get(jiraUri(
+                    cloudId,
+                    "/rest/api/3/project/" + requiredPathSegment(jiraProjectId) + "/features"
+            ), accessToken);
+        } catch (IntegrationException exception) {
+            if ("JIRA_RESPONSE_INVALID".equals(exception.getCode())) {
+                logFeatureResponseInvalid(
+                        "getProjectFeatures", endpoint, "2xx", "UNPARSEABLE_OR_EMPTY",
+                        "UNKNOWN", "UNKNOWN", "UNKNOWN", exception
+                );
+            }
+            throw exception;
+        }
+        return parseProjectFeatures(response, endpoint);
+    }
+
+    private List<JiraBoardFeature> parseBoardFeatures(JsonNode response, String endpoint) {
+        JsonNode values = requiredFeaturesArray(response, "getBoardFeatures", endpoint);
+        List<JiraBoardFeature> features = new ArrayList<>();
+        for (JsonNode value : values) {
+            if (!value.isObject()) {
+                throw featureResponseInvalid(
+                        "getBoardFeatures", endpoint, "FEATURE_ITEM_NOT_OBJECT",
+                        "NONE", "features[]", nodeType(value)
+                );
+            }
+            features.add(new JiraBoardFeature(
+                    optionalFeatureText(value, "boardFeature", "getBoardFeatures", endpoint),
+                    optionalFeatureText(value, "featureId", "getBoardFeatures", endpoint),
+                    optionalFeatureText(value, "state", "getBoardFeatures", endpoint),
+                    optionalNumericFeatureId(value, "boardId", "getBoardFeatures", endpoint)
+            ));
+        }
+        return List.copyOf(features);
+    }
+
+    private List<JiraProjectFeature> parseProjectFeatures(JsonNode response, String endpoint) {
+        JsonNode values = requiredFeaturesArray(response, "getProjectFeatures", endpoint);
+        List<JiraProjectFeature> features = new ArrayList<>();
+        for (JsonNode value : values) {
+            if (!value.isObject()) {
+                throw featureResponseInvalid(
+                        "getProjectFeatures", endpoint, "FEATURE_ITEM_NOT_OBJECT",
+                        "NONE", "features[]", nodeType(value)
+                );
+            }
+            features.add(new JiraProjectFeature(
+                    optionalFeatureText(value, "feature", "getProjectFeatures", endpoint),
+                    optionalFeatureText(value, "state", "getProjectFeatures", endpoint)
+            ));
+        }
+        return List.copyOf(features);
+    }
+
+    private JsonNode requiredFeaturesArray(
+            JsonNode response,
+            String operation,
+            String endpoint
+    ) {
+        if (response == null || !response.isObject()) {
+            throw featureResponseInvalid(
+                    operation, endpoint, "ROOT_NOT_OBJECT", "features", "ROOT", nodeType(response)
+            );
+        }
+        JsonNode values = response.get("features");
+        if (values == null || values.isNull()) {
+            throw featureResponseInvalid(
+                    operation, endpoint, "FEATURES_MISSING", "features", "features", "MISSING_OR_NULL"
+            );
+        }
+        if (!values.isArray()) {
+            throw featureResponseInvalid(
+                    operation, endpoint, "FEATURES_NOT_ARRAY", "NONE", "features", nodeType(values)
+            );
+        }
+        return values;
+    }
+
+    private String optionalFeatureText(
+            JsonNode item,
+            String field,
+            String operation,
+            String endpoint
+    ) {
+        JsonNode value = item.get(field);
+        if (value == null || value.isNull()) {
+            return null;
+        }
+        if (!value.isTextual()) {
+            throw featureResponseInvalid(
+                    operation, endpoint, "FEATURE_FIELD_INVALID_TYPE", "NONE", field, nodeType(value)
+            );
+        }
+        return value.asText();
+    }
+
+    private String optionalNumericFeatureId(
+            JsonNode item,
+            String field,
+            String operation,
+            String endpoint
+    ) {
+        JsonNode value = item.get(field);
+        if (value == null || value.isNull()) {
+            return null;
+        }
+        if (!value.isIntegralNumber()) {
+            throw featureResponseInvalid(
+                    operation, endpoint, "FEATURE_FIELD_INVALID_TYPE", "NONE", field, nodeType(value)
+            );
+        }
+        return value.asText();
+    }
+
+    private IntegrationException featureResponseInvalid(
+            String operation,
+            String endpoint,
+            String shape,
+            String missingFields,
+            String invalidField,
+            String invalidFieldType
+    ) {
+        IntegrationException exception = providerResponseInvalid();
+        logFeatureResponseInvalid(
+                operation, endpoint, "2xx", shape, missingFields, invalidField,
+                invalidFieldType, exception
+        );
+        return exception;
+    }
+
+    private void logFeatureResponseInvalid(
+            String operation,
+            String endpoint,
+            String upstreamHttpStatus,
+            String responseShapeCategory,
+            String missingRequiredFields,
+            String invalidFieldName,
+            String invalidFieldType,
+            IntegrationException exception
+    ) {
+        Throwable root = exception.getCause();
+        log.warn("Jira feature response invalid: providerOperation={}, endpointPathTemplate={}, "
+                        + "upstreamHttpStatus={}, responseShapeCategory={}, missingRequiredFields={}, "
+                        + "invalidFieldName={}, invalidFieldType={}, exceptionClass={}, rootCauseClass={}",
+                operation, endpoint, upstreamHttpStatus, responseShapeCategory,
+                missingRequiredFields, invalidFieldName, invalidFieldType,
+                exception.getClass().getSimpleName(),
+                root == null ? "NONE" : root.getClass().getSimpleName());
+    }
+
+    private String nodeType(JsonNode value) {
+        if (value == null) {
+            return "MISSING";
+        }
+        if (value.isNull()) {
+            return "NULL";
+        }
+        if (value.isObject()) {
+            return "OBJECT";
+        }
+        if (value.isArray()) {
+            return "ARRAY";
+        }
+        if (value.isTextual()) {
+            return "STRING";
+        }
+        if (value.isIntegralNumber()) {
+            return "INTEGER";
+        }
+        if (value.isNumber()) {
+            return "NUMBER";
+        }
+        if (value.isBoolean()) {
+            return "BOOLEAN";
+        }
+        return "SCALAR";
     }
 
     @Override

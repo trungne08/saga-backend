@@ -1,12 +1,12 @@
 # SAGA Frontend API Integration Guide
 
-## Jira Sprint-capable board link — 2026-08-07
+## Jira simple-board capability re-audit — 2026-08-07
 
-`POST /api/projects/{projectId}/jira/link` vẫn dùng browser session + CSRF và không nhận Bearer/provider credential từ FE. Backend tự resolve board Sprint-capable: Scrum được nhận trực tiếp; board simple chỉ được nhận khi Jira board-features xác nhận machine feature `SPRINTS=ENABLED`. FE không gửi board ID, feature key, localized name hay provider response để ép quyết định.
+`POST /api/projects/{projectId}/jira/link` vẫn dùng browser session + CSRF và không nhận Bearer/provider credential từ FE. SDP có board `35`, `type=simple`, association `10034/SDP`, nhưng backend chưa được phép coi simple là Sprint-capable từ một key chưa có evidence. Scrum vẫn resolve trực tiếp; simple hợp lệ trả `409 JIRA_SPRINT_CAPABILITY_UNCONFIRMED` sau backend diagnostics an toàn.
 
-Với Jira Project SDP, evidence production an toàn là board external `35`, `type=simple`, association `10034/SDP`; sau deploy/re-consent, relink thành công phải lưu board `35`. Nếu Sprints bị tắt, backend trả `409 JIRA_SPRINTS_NOT_ENABLED` với message an toàn; FE hướng người dùng bật Sprints trong Jira rồi relink, không tự chọn Kanban hay board khác. `JIRA_BOARD_SELECTION_REQUIRED` vẫn yêu cầu xử lý lựa chọn nghiệp vụ thay vì FE tự lấy board đầu tiên.
+`502 JIRA_RESPONSE_INVALID` chỉ biểu thị provider response thật sự không parse được theo root/features/item/type contract; field Jira documented dư hoặc field optional thiếu không phải lý do. FE không retry mù, không gửi board ID/feature key/raw response để ép backend, và chờ operator lấy diagnostics production an toàn sau deploy/relink.
 
-Board-features là provider call của link nên grant thiếu `read:board-scope.admin:jira-software` trả `JIRA_SCOPE_INSUFFICIENT` trước provider I/O. Feature 401/403/404/429/5xx vẫn là các category an toàn `JIRA_ACCESS_REVOKED`, `JIRA_ACCESS_FORBIDDEN`, `JIRA_BOARD_NOT_FOUND`, `JIRA_RATE_LIMITED`, `JIRA_PROVIDER_UNAVAILABLE`; không parse/log raw Jira response.
+Board Features và Project Features được backend đọc qua 3LO; grant thiếu board-admin scope vẫn trả `JIRA_SCOPE_INSUFFICIENT`. FE không parse/log raw Jira response; 401/403/404/429/5xx giữ các category an toàn hiện có.
 
 ## Jira 3LO re-consent và lỗi scope — 2026-08-07
 

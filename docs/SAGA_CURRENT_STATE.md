@@ -1,11 +1,11 @@
 # SAGA — Trạng thái hiện tại
 
-## Update 2026-08-07 — Jira board Sprint-capable
+## Update 2026-08-07 — Jira feature parser và Sprint capability re-audit
 
-- **CONFIRMED:** runtime evidence của SDP là một board external `35`, `type=simple`, association `10034/SDP`; OAuth user nhìn thấy board. 409 cũ xuất phát từ filter `type=scrum` duy nhất.
-- **CONFIRMED:** policy hiện tại supersede “only type=scrum”: Scrum là candidate trực tiếp; simple chỉ là candidate khi board-features trả machine identifier `SPRINTS` ở `ENABLED`. Không dùng tên/localized description, không mặc định simple là Scrum, không nhận Kanban/unknown hay association mismatch.
-- **CONFIRMED:** simple `SPRINTS=DISABLED` trả `JIRA_SPRINTS_NOT_ENABLED`; simple thiếu evidence fail closed; nhiều Sprint-capable boards trả `JIRA_BOARD_SELECTION_REQUIRED`. Board-features dùng scope `read:board-scope.admin:jira-software` trong preflight link, giữ nguyên 3LO, fresh grant và retained-row relink.
-- **TBD runtime:** sau deploy cần fresh consent và relink SDP; expected persisted `jiraBoardId=35`, rồi smoke Create Sprint và Sprint hydration. FE tiếp tục browser session + CSRF, không Bearer/provider credential.
+- **CONFIRMED:** SDP có board external `35`, `type=simple`, association `10034/SDP`; OAuth user nhìn thấy board. 502 mới là `JIRA_RESPONSE_INVALID` của SAGA, nhưng chưa có log 10:53 để xác định exact runtime shape.
+- **CONFIRMED:** Board Features parser bỏ qua field documented dư và cho phép nullable `boardFeature`/`featureId`/`state`/`boardId`; chỉ malformed root/features/item/type mới trả `JIRA_RESPONSE_INVALID` kèm diagnostics an toàn. Project Features v3 cũng được parse/log identifiers/state qua 3LO với scope classic `read:jira-work`.
+- **PARTIAL:** official docs không chứng minh machine key Sprint cho SDP. `SPRINTS` không còn là rule business; simple không được persist và trả `JIRA_SPRINT_CAPABILITY_UNCONFIRMED` sau diagnostics. Scrum vẫn là candidate trực tiếp; browser session + CSRF, retained-row relink và mutation policy giữ nguyên.
+- **TBD runtime:** deploy/relink SDP để lấy identifier/state an toàn từ provider, rồi mới quyết định endpoint/key chính thức cho simple-board capability.
 
 ## Update 2026-08-07 — Jira relink provider-identity-aware upsert
 

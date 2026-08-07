@@ -290,7 +290,7 @@ public class ProjectIntegrationService {
                     .connectionStatus(IntegrationStatus.CONNECTING)
                     .build();
             // Provider I/O occurs before the short, locked local upsert transaction.
-            stage = JiraLinkStage.DISCOVER_SCRUM_BOARDS;
+            stage = JiraLinkStage.RESOLVE_SPRINT_CAPABILITY;
             jiraBoardResolutionService.resolveForLinking(discovery, grant.accessToken());
             JiraBoardLinkCommand command = new JiraBoardLinkCommand(
                     project,
@@ -985,7 +985,7 @@ public class ProjectIntegrationService {
         VERIFY_ACCESSIBLE_RESOURCE("accessibleResources"),
         SCOPE_PREFLIGHT("scopePreflight"),
         RESOLVE_PROJECT("resolveProject"),
-        DISCOVER_SCRUM_BOARDS("discoverScrumBoards"),
+        RESOLVE_SPRINT_CAPABILITY("resolveSprintCapability"),
         UPSERT_JIRA_BOARD("upsertJiraBoard"),
         REGISTER_WEBHOOK("registerWebhook");
 

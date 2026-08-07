@@ -1,16 +1,14 @@
 # SAGA — Nhật ký quyết định kỹ thuật
 
-## DEC-045 — Resolve Jira board theo Sprint capability, không chỉ type (2026-08-07)
+## DEC-045 — Re-audit Jira simple-board capability (2026-08-07)
 
-**Status: ACCEPTED.**
+**Status: PARTIAL — supersedes the unsupported `boardFeature=SPRINTS` selection assumption.**
 
-**Context.** Production diagnostics xác nhận Jira Project `SDP` có đúng một board visible: ID `35`, `type=simple`, association `10034/SDP`. Resolver cũ chỉ nhận `type=scrum`, nên trả `JIRA_SCRUM_BOARD_NOT_FOUND` dù board tồn tại và OAuth user nhìn thấy nó.
+**Context.** SDP có board `35`, `type=simple`, association `10034/SDP`, nhưng relink sau deploy trả `502 JIRA_RESPONSE_INVALID`. Official Board Features contract có root `features` array; field dư phải bị bỏ qua. Official sources xác nhận Sprints là Board Feature category và Project Features v3 có API riêng, nhưng không công bố machine Sprint identifier cho SDP.
 
-**Decision.** Giữ Scrum là candidate Sprint-capable trực tiếp. Với board simple, gọi `GET /rest/agile/1.0/board/{boardId}/features` qua 3LO gateway và chỉ nhận candidate khi machine `boardFeature=SPRINTS` có `state=ENABLED`. Parser chỉ giữ `boardFeature`, `featureId`, `state`, `boardId`; không dùng localized text hay raw payload. Kanban/unknown, feature không chứng minh Sprint và association location mâu thuẫn với canonical Jira Project đều fail closed. `SPRINTS=DISABLED` không còn candidate trả `JIRA_SPRINTS_NOT_ENABLED`; nhiều candidate trả `JIRA_BOARD_SELECTION_REQUIRED`.
+**Decision.** Parser Board/Project Features chỉ giữ facts machine-safe nullable và chỉ báo invalid khi root/features/item/type thực sự sai contract. Mỗi invalid ghi safe diagnostic operation/path/status category/shape/field/type/exception class. Resolver giữ Scrum candidate trực tiếp; với simple chỉ discovery/log Board + Project identifiers/state, sau đó fail closed `JIRA_SPRINT_CAPABILITY_UNCONFIRMED`. Không hardcode identifier/localized name và không persist board 35 cho đến khi runtime evidence chứng minh endpoint/key/state.
 
-**Security and operations.** Link preflight yêu cầu thêm `read:board-scope.admin:jira-software`, vốn đã thuộc capability default. 401/403/404/429/5xx-network từ board-features map an toàn thành `JIRA_ACCESS_REVOKED`, `JIRA_ACCESS_FORBIDDEN`, `JIRA_BOARD_NOT_FOUND`, `JIRA_RATE_LIMITED`, `JIRA_PROVIDER_UNAVAILABLE`. Diagnostics chỉ ghi facts machine-safe (project/board/type/feature/state/reason/result), không token, credential, cookie/CSRF, Authorization hay raw provider body.
-
-**Consequences.** Không migration; không đổi 3LO/access-resource/scope baseline ngoài preflight của operation mới, retained-row upsert, cross-project conflict, disconnect/scheduler protection, Task/Sprint idempotency, session/CSRF hoặc Project Manager mutation rule. Runtime fix vẫn **TBD** đến deploy + fresh consent + relink SDP, xác nhận persist `35`, Create Sprint và hydration.
+**Consequences.** Không migration hay đổi 3LO/session/CSRF/retained-row/mutation policy. Board Features admin scope đã có trong link preflight; Project Features dùng `read:jira-work`. Production outcome vẫn **TBD** đến deploy và relink SDP có diagnostics an toàn.
 
 ## DEC-044 — Jira relink là provider-identity-aware upsert (2026-08-07)
 
