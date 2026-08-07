@@ -1,14 +1,20 @@
 # SAGA — Nhật ký quyết định kỹ thuật
 
-## DEC-045 — Re-audit Jira simple-board capability (2026-08-07)
+## DEC-045 — Jira simple-board capability bằng read-only Sprint probe (2026-08-07)
 
-**Status: PARTIAL — supersedes the unsupported `boardFeature=SPRINTS` selection assumption.**
+**Status: PARTIAL — source/test CONFIRMED; SDP production probe TBD. Supersedes giả định chọn board từ `boardFeature=SPRINTS`.**
 
-**Context.** SDP có board `35`, `type=simple`, association `10034/SDP`, nhưng relink sau deploy trả `502 JIRA_RESPONSE_INVALID`. Official Board Features contract có root `features` array; field dư phải bị bỏ qua. Official sources xác nhận Sprints là Board Feature category và Project Features v3 có API riêng, nhưng không công bố machine Sprint identifier cho SDP.
+**Context.** SDP có board `35`, `type=simple`, association `10034/SDP`; Board Features rỗng và Project Features không expose Sprint identifier hữu dụng. Hai endpoint metadata không đủ evidence để quyết định capability, nên không hardcode identifier/localized text.
 
-**Decision.** Parser Board/Project Features chỉ giữ facts machine-safe nullable và chỉ báo invalid khi root/features/item/type thực sự sai contract. Mỗi invalid ghi safe diagnostic operation/path/status category/shape/field/type/exception class. Resolver giữ Scrum candidate trực tiếp; với simple chỉ discovery/log Board + Project identifiers/state, sau đó fail closed `JIRA_SPRINT_CAPABILITY_UNCONFIRMED`. Không hardcode identifier/localized name và không persist board 35 cho đến khi runtime evidence chứng minh endpoint/key/state.
+**Decision.** Giữ `scrum` là candidate trực tiếp. Với `simple`, gọi read-only 3LO `GET /rest/agile/1.0/board/{boardId}/sprint?maxResults=1`, cần scope `read:sprint:jira-software`. 200 với page object có `values` array, kể cả rỗng, là evidence `SPRINT_ENDPOINT_SUPPORTED`; chỉ một candidate được persist. Probe không parse/persist Sprint và không thêm public endpoint.
 
-**Consequences.** Không migration hay đổi 3LO/session/CSRF/retained-row/mutation policy. Board Features admin scope đã có trong link preflight; Project Features dùng `read:jira-work`. Production outcome vẫn **TBD** đến deploy và relink SDP có diagnostics an toàn.
+**Failure semantics.** 400 trả fail-closed `JIRA_SPRINT_CAPABILITY_UNCONFIRMED`; 401, 403, 404, 429, 5xx/network và malformed 2xx lần lượt map `JIRA_ACCESS_REVOKED`, `JIRA_ACCESS_FORBIDDEN`, `JIRA_BOARD_NOT_FOUND`, `JIRA_RATE_LIMITED`, `JIRA_PROVIDER_UNAVAILABLE`, `JIRA_RESPONSE_INVALID`.
+
+**Diagnostics và verification.** Log chỉ có project/board/type, HTTP result probe, candidate reason/selection; không raw response, Sprint name hoặc credential. Full `./mvnw.cmd clean test` pass 99 suites / 586 tests / 0 failures / 0 errors / 0 skipped. Production phải relink SDP để xác nhận probe 35; không suy diễn rằng mọi simple board đều hỗ trợ Sprint.
+
+**Metadata diagnostics.** Parser Board/Project Features chỉ giữ facts machine-safe nullable và chỉ báo invalid khi root/features/item/type thực sự sai contract. Metadata không quyết định simple-board capability. Link preflight gồm cả scope read Sprint cần cho probe.
+
+**Consequences.** Không migration hay đổi 3LO/session/CSRF/retained-row/mutation policy. Production outcome vẫn **TBD** đến deploy và relink SDP có diagnostics an toàn.
 
 ## DEC-044 — Jira relink là provider-identity-aware upsert (2026-08-07)
 

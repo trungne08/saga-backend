@@ -42,7 +42,8 @@ public final class JiraWriteScope {
             MANAGE_WEBHOOK_SCOPE,
             READ_BOARD_SCOPE,
             READ_BOARD_ADMIN_SCOPE,
-            READ_PROJECT_SCOPE
+            READ_PROJECT_SCOPE,
+            READ_SPRINT_SCOPE
     );
 
     private JiraWriteScope() {

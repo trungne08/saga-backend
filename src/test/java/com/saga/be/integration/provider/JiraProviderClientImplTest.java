@@ -43,6 +43,7 @@ class JiraProviderClientImplTest {
     private static final String AGILE_BOARD_URL = BASE + "/ex/jira/" + CLOUD_ID
             + "/rest/agile/1.0/board";
     private static final String BOARD_FEATURES_URL = AGILE_BOARD_URL + "/35/features";
+    private static final String BOARD_SPRINTS_URL = AGILE_BOARD_URL + "/35/sprint";
     private static final String PROJECT_FEATURES_URL = BASE + "/ex/jira/" + CLOUD_ID
             + "/rest/api/3/project/10034/features";
     private static final String PROJECT_URL = BASE + "/ex/jira/" + CLOUD_ID
@@ -462,6 +463,66 @@ class JiraProviderClientImplTest {
     }
 
     @Test
+    void acceptsAnEmptyBoardSprintPageAsSprintEndpointSupport() {
+        Fixture fixture = fixture();
+        fixture.server.expect(request -> {
+            assertEquals("/ex/jira/" + CLOUD_ID + "/rest/agile/1.0/board/35/sprint",
+                    request.getURI().getPath());
+            assertEquals("maxResults=1", request.getURI().getRawQuery());
+        }).andExpect(method(HttpMethod.GET)).andRespond(json("{\"values\":[]}"));
+
+        assertThat(fixture.client.supportsBoardSprintEndpoint(
+                "ACCESS_TOKEN_SECRET", CLOUD_ID, "35"
+        )).isTrue();
+        fixture.server.verify();
+    }
+
+    @Test
+    void acceptsANonEmptyBoardSprintPageWithoutRetainingSprintValues() {
+        Fixture fixture = fixture();
+        fixture.server.expect(requestTo(BOARD_SPRINTS_URL + "?maxResults=1"))
+                .andRespond(json("{\"values\":[{\"id\":42,\"name\":\"Sprint private\"}]}"));
+
+        assertThat(fixture.client.supportsBoardSprintEndpoint(
+                "ACCESS_TOKEN_SECRET", CLOUD_ID, "35"
+        )).isTrue();
+        fixture.server.verify();
+    }
+
+    @Test
+    void rejectsMalformedBoardSprintPageWithoutLoggingProviderBody() {
+        Fixture fixture = fixture();
+        Logger logger = (Logger) LoggerFactory.getLogger(JiraProviderClientImpl.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        fixture.server.expect(requestTo(BOARD_SPRINTS_URL + "?maxResults=1"))
+                .andRespond(json("{\"unexpected\":\"PROVIDER_SECRET\"}"));
+        try {
+            assertEquals("JIRA_RESPONSE_INVALID", assertThrows(
+                    IntegrationException.class,
+                    () -> fixture.client.supportsBoardSprintEndpoint(
+                            "ACCESS_TOKEN_SECRET", CLOUD_ID, "35"
+                    )
+            ).getCode());
+            String logged = appender.list.stream()
+                    .map(ILoggingEvent::getFormattedMessage)
+                    .filter(value -> value.startsWith("Jira sprint capability probe response invalid:"))
+                    .findFirst()
+                    .orElseThrow();
+            assertThat(logged)
+                    .contains("providerOperation=supportsBoardSprintEndpoint")
+                    .contains("endpointPathTemplate=/rest/agile/1.0/board/{boardId}/sprint")
+                    .contains("responseShapeCategory=VALUES_MISSING")
+                    .doesNotContain("PROVIDER_SECRET")
+                    .doesNotContain("ACCESS_TOKEN_SECRET");
+        } finally {
+            logger.detachAppender(appender);
+        }
+        fixture.server.verify();
+    }
+
+    @Test
     void parsesProjectFeatureIdentifiersAndStatesWithoutLocalizedValues() {
         Fixture fixture = fixture();
         fixture.server.expect(requestTo(PROJECT_FEATURES_URL))
@@ -836,6 +897,38 @@ class JiraProviderClientImplTest {
     }
 
     @Test
+    void boardSprintCapabilityProbeMapsDocumentedHttpSemantics() {
+        assertBoardSprintProbeFailure(org.springframework.http.HttpStatus.BAD_REQUEST,
+                "JIRA_SPRINT_CAPABILITY_UNCONFIRMED", 1);
+        assertBoardSprintProbeFailure(org.springframework.http.HttpStatus.UNAUTHORIZED,
+                "JIRA_ACCESS_REVOKED", 1);
+        assertBoardSprintProbeFailure(org.springframework.http.HttpStatus.FORBIDDEN,
+                "JIRA_ACCESS_FORBIDDEN", 1);
+        assertBoardSprintProbeFailure(org.springframework.http.HttpStatus.NOT_FOUND,
+                "JIRA_BOARD_NOT_FOUND", 1);
+        assertBoardSprintProbeFailure(org.springframework.http.HttpStatus.TOO_MANY_REQUESTS,
+                "JIRA_RATE_LIMITED", 3);
+        assertBoardSprintProbeFailure(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,
+                "JIRA_PROVIDER_UNAVAILABLE", 3);
+    }
+
+    @Test
+    void boardSprintCapabilityProbeMapsNetworkFailureToProviderUnavailable() {
+        Fixture fixture = fixture();
+        fixture.server.expect(requestTo(BOARD_SPRINTS_URL + "?maxResults=1"))
+                .andRespond(org.springframework.test.web.client.response.MockRestResponseCreators
+                        .withException(new SocketTimeoutException("timeout")));
+
+        assertEquals("JIRA_PROVIDER_UNAVAILABLE", assertThrows(
+                IntegrationException.class,
+                () -> fixture.client.supportsBoardSprintEndpoint(
+                        "ACCESS_TOKEN_SECRET", CLOUD_ID, "35"
+                )
+        ).getCode());
+        fixture.server.verify();
+    }
+
+    @Test
     void mapsTimeoutAndMalformedMetadataResponsesSafely() {
         Fixture timeout = fixture();
         timeout.server.expect(request -> { }).andRespond(
@@ -936,6 +1029,29 @@ class JiraProviderClientImplTest {
         IntegrationException exception = assertThrows(
                 IntegrationException.class,
                 () -> fixture.client.getBoardFeatures("ACCESS_TOKEN_SECRET", CLOUD_ID, "35")
+        );
+
+        assertEquals(expectedCode, exception.getCode());
+        assertThat(exception.getMessage()).doesNotContain("PROVIDER_SECRET");
+        fixture.server.verify();
+    }
+
+    private void assertBoardSprintProbeFailure(
+            org.springframework.http.HttpStatus status,
+            String expectedCode,
+            int calls
+    ) {
+        Fixture fixture = fixture();
+        fixture.server.expect(ExpectedCount.times(calls), requestTo(BOARD_SPRINTS_URL + "?maxResults=1"))
+                .andRespond(withStatus(status)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"error\":\"PROVIDER_SECRET\"}"));
+
+        IntegrationException exception = assertThrows(
+                IntegrationException.class,
+                () -> fixture.client.supportsBoardSprintEndpoint(
+                        "ACCESS_TOKEN_SECRET", CLOUD_ID, "35"
+                )
         );
 
         assertEquals(expectedCode, exception.getCode());

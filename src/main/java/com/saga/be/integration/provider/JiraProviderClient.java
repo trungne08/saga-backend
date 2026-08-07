@@ -31,6 +31,15 @@ public interface JiraProviderClient {
             String accessToken, String cloudId, String jiraProjectId
     );
 
+    /**
+     * Performs a read-only, one-item Sprint page probe for a board. A
+     * successful return means Jira accepted the board Sprint endpoint and
+     * returned a structurally valid page; it does not load or persist sprints.
+     */
+    boolean supportsBoardSprintEndpoint(
+            String accessToken, String cloudId, String boardId
+    );
+
     List<JiraCreateIssueType> getCreateIssueTypes(
             String accessToken,
             String cloudId,

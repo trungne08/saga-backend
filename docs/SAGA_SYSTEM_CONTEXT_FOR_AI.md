@@ -1,12 +1,13 @@
 # SAGA — Context kỹ thuật hệ thống hiện tại
 
-## Update 2026-08-07 — Jira feature parser và Sprint capability re-audit
+## Update 2026-08-07 — Jira simple-board Sprint capability probe
 
-- **CONFIRMED runtime evidence:** Jira Project `SDP` trả một board nhìn thấy được: external ID `35`, `type=simple`, association `projectId=10034` / `projectKey=SDP`. Lỗi mới `502 JIRA_RESPONSE_INVALID` xảy ra sau deploy, nhưng log request 10:53 chưa có nên chưa thể quy về field runtime cụ thể.
-- **CONFIRMED parser policy:** Board Features yêu cầu root object có `features` array; item phải là object. Field documented dư bị bỏ qua; `boardFeature`, `featureId`, `state`, `boardId` đều optional/null-safe, trong đó `boardId` nếu có phải integer. Malformed root/array/item/type mới là `JIRA_RESPONSE_INVALID`; log chỉ chứa operation/path/status category/shape/field/type/exception class, không raw body hay credential.
-- **PARTIAL capability evidence:** Atlassian phân loại Sprints là Board Feature trong announcement, còn Project Features v3 cũng có endpoint/scope `read:jira-work`; reference hiện hành không công bố machine Sprint identifier cho SDP. Backend chỉ log machine identifier/state từ cả hai nguồn, không dùng localized text và không hardcode `SPRINTS` để accept simple.
-- **Current resolution:** `scrum` vẫn là candidate trực tiếp. `simple` hợp lệ được query Board + Project Features nhưng fail closed `JIRA_SPRINT_CAPABILITY_UNCONFIRMED`; Kanban/unknown/association mismatch vẫn bị loại. Không persist board `35`, không Create Sprint trên `35`, cho đến khi production diagnostics chứng minh capability source/identifier.
-- **TBD runtime:** deploy một lần, relink SDP, lấy diagnostics an toàn để xác định source/key/state thực tế. Session + CSRF, 3LO, retained-row upsert, scheduler protection và mutation rules không đổi.
+- **CONFIRMED runtime evidence:** SDP có đúng một board nhìn thấy được: external ID `35`, `type=simple`, association `projectId=10034` / `projectKey=SDP`. Board Features trả machine-identifier rỗng; Project Features không có Sprint identifier hữu dụng. Hai metadata source này không đủ để quyết định capability.
+- **CONFIRMED source behavior:** `JiraProviderClientImpl` probe read-only qua 3LO `GET /rest/agile/1.0/board/{boardId}/sprint?maxResults=1`, có scope `read:sprint:jira-software`. Probe chỉ xác thực page object có `values` array; page rỗng cũng là bằng chứng endpoint được hỗ trợ. Không parse/persist Sprint và không tạo public SAGA endpoint.
+- **Policy:** `scrum` là Sprint-capable trực tiếp và không probe. `simple` chỉ thành candidate khi probe trả 200 với page hợp lệ; association `10034/SDP` vẫn bắt buộc, zero/multiple candidate vẫn fail closed. Khi chỉ có board `35` supported, external ID `35` được persist và Create Sprint tiếp tục dùng `originBoardId=35` qua flow hiện hữu.
+- **HTTP mapping:** 400 -> `JIRA_SPRINT_CAPABILITY_UNCONFIRMED`; 401/403/404/429 -> `JIRA_ACCESS_REVOKED` / `JIRA_ACCESS_FORBIDDEN` / `JIRA_BOARD_NOT_FOUND` / `JIRA_RATE_LIMITED`; 5xx/network -> `JIRA_PROVIDER_UNAVAILABLE`; malformed 2xx -> `JIRA_RESPONSE_INVALID`.
+- **Safe diagnostics:** capability log có `projectKey`, `boardId`, `boardType`, `sprintCapabilityProbeHttpStatus`, `sprintCapabilityProbeResult`, `candidateReason`, `selectionResult`; feature diagnostics cũ vẫn chỉ là machine metadata. Không log raw body, Sprint name, token, Authorization, cookie hay credential.
+- **Verification:** targeted Jira provider/resolver/link/Sprint tests pass; full `./mvnw.cmd clean test`: 99 suites / 586 tests / 0 failures / 0 errors / 0 skipped. Production probe SDP vẫn **TBD**; session + CSRF, retained-row relink và mutation authorization không đổi.
 
 ## Update 2026-08-07 — Jira relink retained-row upsert và provider identity
 

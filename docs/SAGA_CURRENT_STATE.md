@@ -1,11 +1,12 @@
 # SAGA — Trạng thái hiện tại
 
-## Update 2026-08-07 — Jira feature parser và Sprint capability re-audit
+## Update 2026-08-07 — Jira simple-board Sprint capability probe
 
-- **CONFIRMED:** SDP có board external `35`, `type=simple`, association `10034/SDP`; OAuth user nhìn thấy board. 502 mới là `JIRA_RESPONSE_INVALID` của SAGA, nhưng chưa có log 10:53 để xác định exact runtime shape.
-- **CONFIRMED:** Board Features parser bỏ qua field documented dư và cho phép nullable `boardFeature`/`featureId`/`state`/`boardId`; chỉ malformed root/features/item/type mới trả `JIRA_RESPONSE_INVALID` kèm diagnostics an toàn. Project Features v3 cũng được parse/log identifiers/state qua 3LO với scope classic `read:jira-work`.
-- **PARTIAL:** official docs không chứng minh machine key Sprint cho SDP. `SPRINTS` không còn là rule business; simple không được persist và trả `JIRA_SPRINT_CAPABILITY_UNCONFIRMED` sau diagnostics. Scrum vẫn là candidate trực tiếp; browser session + CSRF, retained-row relink và mutation policy giữ nguyên.
-- **TBD runtime:** deploy/relink SDP để lấy identifier/state an toàn từ provider, rồi mới quyết định endpoint/key chính thức cho simple-board capability.
+- **CONFIRMED runtime:** SDP board `35`, `type=simple`, association `10034/SDP`; Board Features rỗng và Project Features không expose Sprint identifier hữu dụng. Vì vậy metadata feature không còn là nguồn quyết định Sprint capability.
+- **CONFIRMED source:** simple board được probe bằng read-only `GET /rest/agile/1.0/board/{boardId}/sprint?maxResults=1` qua 3LO, với `read:sprint:jira-software`. HTTP 200 cùng page hợp lệ (kể cả `values=[]`) xác nhận endpoint-supported; không hydrate, upsert hay log Sprint item.
+- **Policy sau patch:** Scrum resolve trực tiếp, không probe. Simple chỉ resolve/persist nếu probe supported; 400 fail closed `JIRA_SPRINT_CAPABILITY_UNCONFIRMED`. 401/403/404/429/5xx-network/malformed-2xx giữ category an toàn tương ứng. Association project vẫn bắt buộc và nhiều candidate trả `JIRA_BOARD_SELECTION_REQUIRED`.
+- **Diagnostics:** resolver ghi project/board/type, HTTP status/result probe, candidate reason và kết quả `REJECTED` hoặc `SELECTED`, không raw provider body hay credential. Browser session + CSRF, retained-row relink và Project Manager mutation rule không đổi.
+- **TBD production:** deploy và relink SDP để xác nhận probe board 35 trả 200 hợp lệ; khi đó SAGA sẽ persist `35` và Create Sprint dùng origin board này. Full Maven pass: 99 suites / 586 tests / 0 failures / 0 errors / 0 skipped.
 
 ## Update 2026-08-07 — Jira relink provider-identity-aware upsert
 

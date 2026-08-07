@@ -157,6 +157,31 @@ class ProjectIntegrationServiceJiraLinkTest {
     }
 
     @Test
+    void rejectsMissingReadSprintScopeBeforeCallingTheProvider() {
+        Fixture fixture = fixture(Set.of(
+                "read:jira-work",
+                "manage:jira-webhook",
+                "read:board-scope:jira-software",
+                "read:board-scope.admin:jira-software",
+                "read:project:jira"
+        ));
+
+        IntegrationException exception = assertThrows(
+                IntegrationException.class,
+                () -> fixture.service.linkJira(
+                        fixture.principal,
+                        fixture.projectId,
+                        fixture.session,
+                        new JiraProjectLinkRequest("cloud-a", "SAGA"),
+                        "127.0.0.1"
+                )
+        );
+
+        assertEquals("JIRA_SCOPE_INSUFFICIENT", exception.getCode());
+        verify(fixture.jira, never()).projects(any(), any());
+    }
+
+    @Test
     void relinkUpdatesTheRetainedDisconnectedRowUsingTheFreshSessionGrant() {
         Fixture fixture = fixture();
         JiraBoard retained = new JiraBoard();

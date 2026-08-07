@@ -71,6 +71,20 @@ class JiraBoardResolutionServiceTest {
     }
 
     @Test
+    void scrumBoardResolvesWithoutSprintCapabilityProbe() {
+        Fixture fixture = new Fixture();
+        fixture.board.setProjectKey("SDP");
+        when(fixture.provider.discoverAgileBoards("token", "cloud", "10034")).thenReturn(List.of(
+                new JiraAgileBoardInfo("8", "Sprint", "scrum", "10034", "SDP")
+        ));
+        when(fixture.repository.findById(fixture.board.getId())).thenReturn(Optional.of(fixture.board));
+
+        assertEquals("8", fixture.service.resolve(fixture.board));
+
+        verify(fixture.provider, never()).supportsBoardSprintEndpoint(any(), any(), any());
+    }
+
+    @Test
     void rejectedBoardDiscoveryLogsOnlySafeBoardFacts() {
         Fixture fixture = new Fixture();
         fixture.board.setProjectKey("SAGA");
@@ -163,6 +177,61 @@ class JiraBoardResolutionServiceTest {
     }
 
     @Test
+    void simpleBoardResolvesWhenSprintProbeSupportsAnEmptyPage() {
+        Fixture fixture = simpleBoardFixture("ENABLED");
+        when(fixture.provider.supportsBoardSprintEndpoint("token", "cloud", "35")).thenReturn(true);
+        when(fixture.repository.findById(fixture.board.getId())).thenReturn(Optional.of(fixture.board));
+
+        assertEquals("35", fixture.service.resolve(fixture.board));
+
+        assertEquals("35", fixture.board.getJiraBoardId());
+        verify(fixture.repository).saveAndFlush(fixture.board);
+    }
+
+    @Test
+    void simpleBoardResolvesWhenSprintProbeSupportsANonEmptyPage() {
+        Fixture fixture = simpleBoardFixture("ENABLED");
+        when(fixture.provider.supportsBoardSprintEndpoint("token", "cloud", "35")).thenReturn(true);
+        when(fixture.repository.findById(fixture.board.getId())).thenReturn(Optional.of(fixture.board));
+
+        assertEquals("35", fixture.service.resolve(fixture.board));
+
+        verify(fixture.repository).saveAndFlush(fixture.board);
+    }
+
+    @Test
+    void multipleSimpleBoardsWithSupportedSprintEndpointsRequireSelection() {
+        Fixture fixture = new Fixture();
+        fixture.board.setProjectKey("SDP");
+        when(fixture.provider.discoverAgileBoards("token", "cloud", "10034")).thenReturn(List.of(
+                new JiraAgileBoardInfo("35", "First", "simple", "10034", "SDP"),
+                new JiraAgileBoardInfo("36", "Second", "simple", "10034", "SDP")
+        ));
+        when(fixture.provider.getBoardFeatures("token", "cloud", "35")).thenReturn(List.of());
+        when(fixture.provider.getBoardFeatures("token", "cloud", "36")).thenReturn(List.of());
+        when(fixture.provider.getProjectFeatures("token", "cloud", "10034")).thenReturn(List.of());
+        when(fixture.provider.supportsBoardSprintEndpoint("token", "cloud", "35")).thenReturn(true);
+        when(fixture.provider.supportsBoardSprintEndpoint("token", "cloud", "36")).thenReturn(true);
+
+        assertEquals("JIRA_BOARD_SELECTION_REQUIRED", assertThrows(
+                IntegrationException.class, () -> fixture.service.resolve(fixture.board)
+        ).getCode());
+
+        verify(fixture.repository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void simpleBoardPropagatesSprintProbeFailureCategories() {
+        assertSimpleBoardProbeFailure("JIRA_SPRINT_CAPABILITY_UNCONFIRMED");
+        assertSimpleBoardProbeFailure("JIRA_ACCESS_REVOKED");
+        assertSimpleBoardProbeFailure("JIRA_ACCESS_FORBIDDEN");
+        assertSimpleBoardProbeFailure("JIRA_BOARD_NOT_FOUND");
+        assertSimpleBoardProbeFailure("JIRA_RATE_LIMITED");
+        assertSimpleBoardProbeFailure("JIRA_PROVIDER_UNAVAILABLE");
+        assertSimpleBoardProbeFailure("JIRA_RESPONSE_INVALID");
+    }
+
+    @Test
     void simpleBoardWithDisabledFeatureDoesNotClaimSprintsAreDisabledWithoutIdentifierEvidence() {
         Fixture fixture = simpleBoardFixture("DISABLED");
 
@@ -250,6 +319,8 @@ class JiraBoardResolutionServiceTest {
         assertTrue(message.contains("boardType=simple"));
         assertTrue(message.contains("boardFeatureIdentifiers=[SPRINTS]"));
         assertTrue(message.contains("sprintFeatureState=UNCONFIRMED"));
+        assertTrue(message.contains("sprintCapabilityProbeHttpStatus=UNKNOWN"));
+        assertTrue(message.contains("sprintCapabilityProbeResult=UNCONFIRMED"));
         assertTrue(message.contains("candidateReason=SIMPLE_CAPABILITY_UNCONFIRMED"));
         assertTrue(message.contains("selectionResult=REJECTED"));
         String projectMessage = events.list.stream()
@@ -275,6 +346,31 @@ class JiraBoardResolutionServiceTest {
                 new JiraProjectFeature("jsw.team.sprints", "ENABLED")
         ));
         return fixture;
+    }
+
+    private void assertSimpleBoardProbeFailure(String code) {
+        Fixture fixture = simpleBoardFixture("ENABLED");
+        when(fixture.provider.supportsBoardSprintEndpoint("token", "cloud", "35"))
+                .thenThrow(exceptionFor(code));
+
+        assertEquals(code, assertThrows(
+                IntegrationException.class, () -> fixture.service.resolve(fixture.board)
+        ).getCode());
+        verify(fixture.repository, never()).saveAndFlush(any());
+    }
+
+    private IntegrationException exceptionFor(String code) {
+        return switch (code) {
+            case "JIRA_ACCESS_REVOKED" -> IntegrationException.conflict(code, "test");
+            case "JIRA_ACCESS_FORBIDDEN" -> new IntegrationException(
+                    org.springframework.http.HttpStatus.FORBIDDEN, code, "test"
+            );
+            case "JIRA_RATE_LIMITED" -> new IntegrationException(
+                    org.springframework.http.HttpStatus.TOO_MANY_REQUESTS, code, "test"
+            );
+            case "JIRA_PROVIDER_UNAVAILABLE", "JIRA_RESPONSE_INVALID" -> IntegrationException.unavailable(code);
+            default -> IntegrationException.conflict(code, "test");
+        };
     }
 
     @Test

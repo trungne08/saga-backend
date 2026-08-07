@@ -332,6 +332,45 @@ public class JiraProviderClientImpl implements JiraProviderClient {
         return parseProjectFeatures(response, endpoint);
     }
 
+    @Override
+    public boolean supportsBoardSprintEndpoint(
+            String accessToken, String cloudId, String boardId
+    ) {
+        String endpoint = "/rest/agile/1.0/board/{boardId}/sprint";
+        JsonNode response;
+        try {
+            response = get(UriComponentsBuilder.fromUri(jiraUri(
+                            cloudId,
+                            "/rest/agile/1.0/board/" + requiredNumericBoardId(boardId) + "/sprint"
+                    ))
+                    .queryParam("maxResults", 1)
+                    .build()
+                    .encode()
+                    .toUri(), accessToken);
+        } catch (IntegrationException exception) {
+            if ("JIRA_REQUEST_REJECTED".equals(exception.getCode())) {
+                throw IntegrationException.conflict(
+                        "JIRA_SPRINT_CAPABILITY_UNCONFIRMED",
+                        "Jira did not confirm Sprint capability for the selected board"
+                );
+            }
+            if ("JIRA_RESOURCE_NOT_FOUND".equals(exception.getCode())) {
+                throw IntegrationException.conflict(
+                        "JIRA_BOARD_NOT_FOUND",
+                        "The selected Jira board is no longer accessible"
+                );
+            }
+            if ("JIRA_RESPONSE_INVALID".equals(exception.getCode())) {
+                logSprintCapabilityProbeResponseInvalid(
+                        endpoint, "UNPARSEABLE_OR_EMPTY", "values", "ROOT", "UNKNOWN", exception
+                );
+            }
+            throw exception;
+        }
+        validateSprintCapabilityPage(response, endpoint);
+        return true;
+    }
+
     private List<JiraBoardFeature> parseBoardFeatures(JsonNode response, String endpoint) {
         JsonNode values = requiredFeaturesArray(response, "getBoardFeatures", endpoint);
         List<JiraBoardFeature> features = new ArrayList<>();
@@ -368,6 +407,63 @@ public class JiraProviderClientImpl implements JiraProviderClient {
             ));
         }
         return List.copyOf(features);
+    }
+
+    /**
+     * The capability probe only needs Jira's paged envelope. Sprint values are
+     * deliberately neither parsed nor persisted, and an empty page is valid.
+     */
+    private void validateSprintCapabilityPage(JsonNode response, String endpoint) {
+        if (response == null || !response.isObject()) {
+            throw sprintCapabilityProbeResponseInvalid(
+                    endpoint, "ROOT_NOT_OBJECT", "values", "ROOT", nodeType(response)
+            );
+        }
+        JsonNode values = response.get("values");
+        if (values == null || values.isNull()) {
+            throw sprintCapabilityProbeResponseInvalid(
+                    endpoint, "VALUES_MISSING", "values", "values", "MISSING_OR_NULL"
+            );
+        }
+        if (!values.isArray()) {
+            throw sprintCapabilityProbeResponseInvalid(
+                    endpoint, "VALUES_NOT_ARRAY", "NONE", "values", nodeType(values)
+            );
+        }
+    }
+
+    private IntegrationException sprintCapabilityProbeResponseInvalid(
+            String endpoint,
+            String responseShapeCategory,
+            String missingRequiredFields,
+            String invalidFieldName,
+            String invalidFieldType
+    ) {
+        IntegrationException exception = providerResponseInvalid();
+        logSprintCapabilityProbeResponseInvalid(
+                endpoint, responseShapeCategory, missingRequiredFields, invalidFieldName,
+                invalidFieldType, exception
+        );
+        return exception;
+    }
+
+    private void logSprintCapabilityProbeResponseInvalid(
+            String endpoint,
+            String responseShapeCategory,
+            String missingRequiredFields,
+            String invalidFieldName,
+            String invalidFieldType,
+            IntegrationException exception
+    ) {
+        Throwable root = exception.getCause();
+        log.warn("Jira sprint capability probe response invalid: providerOperation={}, "
+                        + "endpointPathTemplate={}, upstreamHttpStatus={}, responseShapeCategory={}, "
+                        + "missingRequiredFields={}, invalidFieldName={}, invalidFieldType={}, "
+                        + "exceptionClass={}, rootCauseClass={}",
+                "supportsBoardSprintEndpoint", endpoint, "2xx", responseShapeCategory,
+                missingRequiredFields, invalidFieldName, invalidFieldType,
+                exception.getClass().getSimpleName(),
+                root == null ? "NONE" : root.getClass().getSimpleName());
     }
 
     private JsonNode requiredFeaturesArray(

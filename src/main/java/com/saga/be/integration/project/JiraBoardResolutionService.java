@@ -108,7 +108,9 @@ public class JiraBoardResolutionService {
             throw IntegrationException.conflict("JIRA_BOARD_SELECTION_REQUIRED",
                     "More than one Sprint-capable board is available for the linked Jira project");
         }
-        String discovered = sprintCapableBoards.get(0).board().boardId();
+        BoardCandidate selected = sprintCapableBoards.get(0);
+        logSelectedCandidate(board, selected);
+        String discovered = selected.board().boardId();
         if (!isExternalBoardId(discovered)) {
             throw IntegrationException.unavailable("JIRA_RESPONSE_INVALID");
         }
@@ -121,15 +123,18 @@ public class JiraBoardResolutionService {
             JiraAgileBoardInfo discoveredBoard
     ) {
         if (!matchesLinkedProject(board, discoveredBoard)) {
-            return logCandidate(board, discoveredBoard, List.of(), "NOT_REQUESTED",
+            return logCandidate(board, discoveredBoard, List.of(), "NOT_REQUESTED", "NOT_REQUESTED",
+                    "NOT_REQUESTED",
                     "PROJECT_ASSOCIATION_MISMATCH", false, false);
         }
         if ("scrum".equalsIgnoreCase(discoveredBoard.type())) {
-            return logCandidate(board, discoveredBoard, List.of(), "NOT_APPLICABLE",
+            return logCandidate(board, discoveredBoard, List.of(), "NOT_APPLICABLE", "NOT_REQUESTED",
+                    "NOT_REQUESTED",
                     "SCRUM_BOARD_TYPE", true, false);
         }
         if (!"simple".equalsIgnoreCase(discoveredBoard.type())) {
-            return logCandidate(board, discoveredBoard, List.of(), "NOT_REQUESTED",
+            return logCandidate(board, discoveredBoard, List.of(), "NOT_REQUESTED", "NOT_REQUESTED",
+                    "NOT_REQUESTED",
                     "NON_SPRINT_BOARD_TYPE", false, false);
         }
 
@@ -142,8 +147,21 @@ public class JiraBoardResolutionService {
                 .filter(java.util.Objects::nonNull)
                 .toList();
         logProjectFeatureDiagnostics(board, projectFeatures);
-        return logCandidate(board, discoveredBoard, boardFeatureIdentifiers, "UNCONFIRMED",
-                "SIMPLE_CAPABILITY_UNCONFIRMED", false, true);
+        try {
+            if (provider.supportsBoardSprintEndpoint(
+                    accessToken, board.getCloudId(), discoveredBoard.boardId())) {
+                return logCandidate(board, discoveredBoard, boardFeatureIdentifiers, "CONFIRMED", "200",
+                        "SUPPORTED", "SPRINT_ENDPOINT_SUPPORTED", true, false);
+            }
+            return logCandidate(board, discoveredBoard, boardFeatureIdentifiers, "UNCONFIRMED", "UNKNOWN",
+                    "UNCONFIRMED", "SIMPLE_CAPABILITY_UNCONFIRMED", false, true);
+        } catch (IntegrationException exception) {
+            logCandidate(board, discoveredBoard, boardFeatureIdentifiers,
+                    probeState(exception), probeHttpStatus(exception), probeResult(exception),
+                    probeCandidateReason(exception), false,
+                    "JIRA_SPRINT_CAPABILITY_UNCONFIRMED".equals(exception.getCode()));
+            throw exception;
+        }
     }
 
     private boolean matchesLinkedProject(JiraBoard board, JiraAgileBoardInfo discoveredBoard) {
@@ -160,17 +178,71 @@ public class JiraBoardResolutionService {
             JiraAgileBoardInfo discoveredBoard,
             List<String> featureIdentifiers,
             String sprintFeatureState,
+            String sprintCapabilityProbeHttpStatus,
+            String sprintCapabilityProbeResult,
             String candidateReason,
             boolean sprintCapable,
             boolean capabilityUnconfirmed
     ) {
         String selectionResult = sprintCapable ? "CANDIDATE" : "REJECTED";
         log.info("Jira board capability evaluated: projectKey={}, boardId={}, boardType={}, "
-                        + "boardFeatureIdentifiers={}, sprintFeatureState={}, candidateReason={}, "
-                        + "selectionResult={}",
+                        + "boardFeatureIdentifiers={}, sprintFeatureState={}, sprintCapabilityProbeHttpStatus={}, "
+                        + "sprintCapabilityProbeResult={}, candidateReason={}, selectionResult={}",
                 linkedBoard.getProjectKey(), discoveredBoard.boardId(), discoveredBoard.type(), featureIdentifiers,
-                sprintFeatureState, candidateReason, selectionResult);
+                sprintFeatureState, sprintCapabilityProbeHttpStatus, sprintCapabilityProbeResult,
+                candidateReason, selectionResult);
         return new BoardCandidate(discoveredBoard, sprintCapable, capabilityUnconfirmed);
+    }
+
+    private void logSelectedCandidate(JiraBoard linkedBoard, BoardCandidate selected) {
+        String sprintCapabilityProbeHttpStatus = "scrum".equalsIgnoreCase(selected.board().type())
+                ? "NOT_REQUESTED" : "200";
+        String sprintCapabilityProbeResult = "scrum".equalsIgnoreCase(selected.board().type())
+                ? "NOT_REQUESTED" : "SUPPORTED";
+        String candidateReason = "scrum".equalsIgnoreCase(selected.board().type())
+                ? "SCRUM_BOARD_TYPE" : "SPRINT_ENDPOINT_SUPPORTED";
+        log.info("Jira board capability selected: projectKey={}, boardId={}, boardType={}, "
+                        + "sprintCapabilityProbeHttpStatus={}, sprintCapabilityProbeResult={}, "
+                        + "candidateReason={}, selectionResult={}",
+                linkedBoard.getProjectKey(), selected.board().boardId(), selected.board().type(),
+                sprintCapabilityProbeHttpStatus, sprintCapabilityProbeResult,
+                candidateReason, "SELECTED");
+    }
+
+    private String probeState(IntegrationException exception) {
+        return "JIRA_SPRINT_CAPABILITY_UNCONFIRMED".equals(exception.getCode())
+                ? "UNCONFIRMED" : "PROBE_FAILED";
+    }
+
+    private String probeHttpStatus(IntegrationException exception) {
+        return switch (exception.getCode()) {
+            case "JIRA_SPRINT_CAPABILITY_UNCONFIRMED" -> "400";
+            case "JIRA_ACCESS_REVOKED" -> "401";
+            case "JIRA_ACCESS_FORBIDDEN" -> "403";
+            case "JIRA_BOARD_NOT_FOUND" -> "404";
+            case "JIRA_RATE_LIMITED" -> "429";
+            case "JIRA_RESPONSE_INVALID" -> "200";
+            case "JIRA_PROVIDER_UNAVAILABLE" -> "UNAVAILABLE";
+            default -> "UNKNOWN";
+        };
+    }
+
+    private String probeResult(IntegrationException exception) {
+        return "JIRA_SPRINT_CAPABILITY_UNCONFIRMED".equals(exception.getCode())
+                ? "UNCONFIRMED" : "FAILED";
+    }
+
+    private String probeCandidateReason(IntegrationException exception) {
+        return switch (exception.getCode()) {
+            case "JIRA_SPRINT_CAPABILITY_UNCONFIRMED" -> "SPRINT_ENDPOINT_UNCONFIRMED";
+            case "JIRA_ACCESS_REVOKED" -> "SPRINT_ENDPOINT_ACCESS_REVOKED";
+            case "JIRA_ACCESS_FORBIDDEN" -> "SPRINT_ENDPOINT_ACCESS_FORBIDDEN";
+            case "JIRA_BOARD_NOT_FOUND" -> "SPRINT_ENDPOINT_BOARD_NOT_FOUND";
+            case "JIRA_RATE_LIMITED" -> "SPRINT_ENDPOINT_RATE_LIMITED";
+            case "JIRA_RESPONSE_INVALID" -> "SPRINT_ENDPOINT_RESPONSE_INVALID";
+            case "JIRA_PROVIDER_UNAVAILABLE" -> "SPRINT_ENDPOINT_UNAVAILABLE";
+            default -> "SPRINT_ENDPOINT_PROBE_FAILED";
+        };
     }
 
     private void logProjectFeatureDiagnostics(

@@ -1,12 +1,14 @@
 # SAGA Frontend API Integration Guide
 
-## Jira simple-board capability re-audit — 2026-08-07
+## Jira simple-board Sprint capability probe — 2026-08-07
 
-`POST /api/projects/{projectId}/jira/link` vẫn dùng browser session + CSRF và không nhận Bearer/provider credential từ FE. SDP có board `35`, `type=simple`, association `10034/SDP`, nhưng backend chưa được phép coi simple là Sprint-capable từ một key chưa có evidence. Scrum vẫn resolve trực tiếp; simple hợp lệ trả `409 JIRA_SPRINT_CAPABILITY_UNCONFIRMED` sau backend diagnostics an toàn.
+`POST /api/projects/{projectId}/jira/link` vẫn dùng browser session + CSRF và không nhận Bearer/provider credential từ FE. Runtime SDP có board `35`, `type=simple`, association `10034/SDP`; Board/Project Features không đưa ra Sprint identifier hữu dụng nên FE không được suy diễn từ chúng.
 
-`502 JIRA_RESPONSE_INVALID` chỉ biểu thị provider response thật sự không parse được theo root/features/item/type contract; field Jira documented dư hoặc field optional thiếu không phải lý do. FE không retry mù, không gửi board ID/feature key/raw response để ép backend, và chờ operator lấy diagnostics production an toàn sau deploy/relink.
+Backend tự probe read-only endpoint Sprint của board với `maxResults=1`. Với simple board, 200 và page hợp lệ — kể cả không có Sprint item — cho phép link; board external `35` sẽ được dùng làm `originBoardId` cho Create Sprint flow hiện hữu. Scrum vẫn resolve trực tiếp. FE không gửi board ID tự chọn, Sprint list hay raw provider response để tác động lựa chọn.
 
-Board Features và Project Features được backend đọc qua 3LO; grant thiếu board-admin scope vẫn trả `JIRA_SCOPE_INSUFFICIENT`. FE không parse/log raw Jira response; 401/403/404/429/5xx giữ các category an toàn hiện có.
+Nếu Jira trả 400, API trả `409 JIRA_SPRINT_CAPABILITY_UNCONFIRMED` và FE hiển thị capability chưa được Jira xác nhận, không retry mù. 401/403/404/429/5xx-network/malformed-2xx giữ category an toàn `JIRA_ACCESS_REVOKED` / `JIRA_ACCESS_FORBIDDEN` / `JIRA_BOARD_NOT_FOUND` / `JIRA_RATE_LIMITED` / `JIRA_PROVIDER_UNAVAILABLE` / `JIRA_RESPONSE_INVALID`.
+
+Link preflight hiện cần thêm `read:sprint:jira-software`; sau deploy scope mới, flow là disconnect Jira → connect/consent lại → callback mới → link. Không gửi token, cookie, CSRF hay raw Jira body cho support/log.
 
 ## Jira 3LO re-consent và lỗi scope — 2026-08-07
 
