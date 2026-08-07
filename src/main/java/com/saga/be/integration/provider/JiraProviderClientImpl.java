@@ -904,34 +904,63 @@ public class JiraProviderClientImpl implements JiraProviderClient {
                 projectKey,
                 callbackUri
         );
-        JiraWebhook exactMatch = webhooks.stream()
+        List<JiraWebhook> sagaProjectCandidates = webhooks.stream()
                 .filter(webhook -> matchesWebhook(
                         webhook,
                         projectKey,
                         callbackUri,
-                        true
+                        false
                 ))
+                .toList();
+        if (sagaProjectCandidates.size() > 1) {
+            throw IntegrationException.conflict(
+                    "JIRA_WEBHOOK_ORPHAN_AMBIGUOUS",
+                    "Jira webhook recovery requires operator action"
+            );
+        }
+        if (sagaProjectCandidates.size() == 1) {
+            // Jira returns only webhooks owned by the current OAuth application.
+            // The matching callback endpoint, JQL and event set identify a stale
+            // SAGA webhook, including a retained local webhook ID or an orphan
+            // left behind after the local row was removed. User-driven links
+            // always replace it with a fresh callback secret.
+            deleteWebhook(accessToken, cloudId, sagaProjectCandidates.get(0).id());
+        }
+        return new JiraWebhookRegistration(
+                createWebhook(accessToken, cloudId, projectKey, callbackUri),
+                true
+        );
+    }
+
+    @Override
+    public JiraWebhookRegistration refreshWebhook(
+            String accessToken,
+            String cloudId,
+            String projectKey,
+            URI callbackUri,
+            String existingWebhookId
+    ) {
+        List<JiraWebhook> webhooks = listWebhooks(
+                accessToken,
+                cloudId,
+                projectKey,
+                callbackUri
+        );
+        JiraWebhook exactMatch = webhooks.stream()
+                .filter(webhook -> matchesWebhook(webhook, projectKey, callbackUri, true))
                 .findFirst()
                 .orElse(null);
         if (exactMatch != null) {
             return new JiraWebhookRegistration(exactMatch.id(), false);
         }
-
         JiraWebhook existing = webhooks.stream()
                 .filter(webhook -> webhook.id().equals(existingWebhookId))
                 .findFirst()
                 .orElse(null);
-        if (existing != null && matchesWebhook(
-                existing,
-                projectKey,
-                callbackUri,
-                false
-        )) {
+        if (existing != null && matchesWebhook(existing, projectKey, callbackUri, false)) {
             return new JiraWebhookRegistration(existing.id(), false);
         }
         if (existing != null) {
-            // This is the only deletion path: the ID is stored on this board
-            // and was returned by Jira for this OAuth application.
             deleteWebhook(accessToken, cloudId, existing.id());
         }
         return new JiraWebhookRegistration(
@@ -1451,26 +1480,6 @@ public class JiraProviderClientImpl implements JiraProviderClient {
         return providerResponseInvalid();
     }
 
-    private String redactAndTruncate(String body) {
-        if (body == null || body.isBlank()) {
-            return "<empty>";
-        }
-        String redacted = body
-                .replaceAll(
-                        "(?i)\\\"(access_token|refresh_token|token|authorization|client_secret)\\\"\\s*:\\s*\\\"[^\\\"]*\\\"",
-                        "\\\"$1\\\":\\\"<redacted>\\\""
-                )
-                .replaceAll(
-                        "(?i)([?&](?:access_token|refresh_token|token|authorization|client_secret)=)[^&\\\"\\s]*",
-                        "$1<redacted>"
-                )
-                .replaceAll("(?i)Bearer\\s+[^\\s\\\"]+", "Bearer <redacted>")
-                .replaceAll("[\\r\\n]", " ");
-        return redacted.length() <= 1024
-                ? redacted
-                : redacted.substring(0, 1024) + "…";
-    }
-
     private IntegrationException webhookHttpFailure(
             RestClientResponseException exception,
             String cloudId,
@@ -1533,7 +1542,7 @@ public class JiraProviderClientImpl implements JiraProviderClient {
         }
         return IntegrationException.conflict(
                 "JIRA_WEBHOOK_REGISTRATION_REJECTED",
-                "Jira rejected the webhook registration: " + errorSummary(errors)
+                "Jira rejected the webhook registration request"
         );
     }
 
@@ -1546,12 +1555,13 @@ public class JiraProviderClientImpl implements JiraProviderClient {
     ) {
         log.warn(
                 "Jira dynamic webhook registration rejected: providerStatus={}, "
-                        + "cloudId={}, projectKey={}, callbackHost={}, errors={}",
+                        + "cloudId={}, projectKey={}, callbackHost={}, errorCategory={}, errorCount={}",
                 providerStatus,
                 cloudId,
                 projectKey,
                 callbackUri == null ? "" : callbackUri.getHost(),
-                errorSummary(providerErrors(body))
+                webhookErrorCategory(providerErrors(body)),
+                providerErrors(body).size()
         );
     }
 
@@ -1599,13 +1609,11 @@ public class JiraProviderClientImpl implements JiraProviderClient {
         }
     }
 
-    private String errorSummary(List<String> errors) {
+    private String webhookErrorCategory(List<String> errors) {
         if (errors.isEmpty()) {
-            return "no provider error detail";
+            return "NO_DETAIL";
         }
-        String summary = String.join("; ", errors)
-                .replaceAll("[\\r\\n]", " ");
-        return summary.length() <= 512 ? summary : summary.substring(0, 512);
+        return isWebhookLimit(errors) ? "LIMIT" : "REJECTED";
     }
 
     private boolean isWebhookLimit(List<String> errors) {

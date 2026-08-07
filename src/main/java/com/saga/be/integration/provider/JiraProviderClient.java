@@ -160,9 +160,9 @@ public interface JiraProviderClient {
     );
 
     /**
-     * Reuses a matching dynamic webhook where possible, and replaces only the
-     * webhook identified by {@code existingWebhookId} when its configuration
-     * no longer matches the current board.
+     * Reconciles one safely identified SAGA webhook for the current Project,
+     * then registers a fresh callback. Scheduler renewal does not use this
+     * replacement policy.
      */
     JiraWebhookRegistration ensureWebhook(
             String accessToken,
@@ -171,6 +171,20 @@ public interface JiraProviderClient {
             URI callbackUri,
             String existingWebhookId
     );
+
+    /**
+     * Maintains an existing webhook without rotating its callback on every
+     * scheduler run. Implementations may create one only when it is missing.
+     */
+    default JiraWebhookRegistration refreshWebhook(
+            String accessToken,
+            String cloudId,
+            String projectKey,
+            URI callbackUri,
+            String existingWebhookId
+    ) {
+        return ensureWebhook(accessToken, cloudId, projectKey, callbackUri, existingWebhookId);
+    }
 
     List<JiraWebhook> listWebhooks(String accessToken, String cloudId);
 

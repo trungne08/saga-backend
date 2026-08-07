@@ -52,7 +52,7 @@ public class JiraWebhookMaintenanceService {
         try {
             token = credentialService.validAccessToken(board);
             String secret = randomSecret();
-            registration = jiraClient.ensureWebhook(
+            registration = jiraClient.refreshWebhook(
                     token,
                     board.getCloudId(),
                     board.getProjectKey(),

@@ -74,7 +74,7 @@ class JiraProviderClientImplTest {
     }
 
     @Test
-    void exposesProviderErrorsFromHttp200WithoutLoggingSecrets() {
+    void redactsProviderErrorsContainingCallbackSecrets() {
         Fixture fixture = fixture();
         Logger logger = (Logger) LoggerFactory.getLogger(
                 JiraProviderClientImpl.class
@@ -86,7 +86,7 @@ class JiraProviderClientImplTest {
                 .andExpect(method(HttpMethod.POST))
                 .andRespond(withStatus(org.springframework.http.HttpStatus.OK)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .body("{\"webhookRegistrationResult\":[{\"errors\":[\"JQL is invalid\"]}]}"));
+                        .body("{\"webhookRegistrationResult\":[{\"errors\":[\"callback https://callback.test/api/webhooks/jira?token=PROVIDER_CALLBACK_SECRET is already registered\"]}]}"));
 
         try {
             IntegrationException error = assertThrows(
@@ -96,13 +96,16 @@ class JiraProviderClientImplTest {
                     )
             );
             assertEquals("JIRA_WEBHOOK_REGISTRATION_REJECTED", error.getCode());
-            assertThat(error.getMessage()).contains("JQL is invalid");
+            assertThat(error.getMessage()).doesNotContain("PROVIDER_CALLBACK_SECRET");
             String logged = appender.list.stream()
                     .map(ILoggingEvent::getFormattedMessage)
                     .reduce("", String::concat);
             assertThat(logged)
                     .doesNotContain("ACCESS_TOKEN_SECRET")
-                    .doesNotContain("CALLBACK_SECRET");
+                    .doesNotContain("CALLBACK_SECRET")
+                    .doesNotContain("PROVIDER_CALLBACK_SECRET")
+                    .contains("errorCategory=REJECTED")
+                    .contains("errorCount=1");
         } finally {
             logger.detachAppender(appender);
         }
@@ -110,23 +113,45 @@ class JiraProviderClientImplTest {
     }
 
     @Test
-    void reusesMatchingExistingWebhookWithoutPostingAnother() {
+    void replacesMatchingRetainedWebhookWithFreshCallback() {
         Fixture fixture = fixture();
         fixture.server.expect(requestTo(FIRST_WEBHOOK_PAGE_URL))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(json(listResponse("12", CALLBACK.toString())));
+        fixture.server.expect(requestTo(WEBHOOK_URL))
+                .andExpect(method(HttpMethod.DELETE))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.NO_CONTENT));
+        fixture.server.expect(requestTo(WEBHOOK_URL))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(json("{\"webhookRegistrationResult\":[{\"createdWebhookId\":13}]}"));
 
         JiraWebhookRegistration result = fixture.client.ensureWebhook(
                 "ACCESS_TOKEN_SECRET", CLOUD_ID, "SDP", CALLBACK, "12"
         );
 
-        assertEquals("12", result.webhookId());
+        assertEquals("13", result.webhookId());
+        assertThat(result.created()).isTrue();
+        fixture.server.verify();
+    }
+
+    @Test
+    void maintenanceRefreshDoesNotRotateMatchingWebhook() {
+        Fixture fixture = fixture();
+        fixture.server.expect(requestTo(FIRST_WEBHOOK_PAGE_URL))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(json(listResponse("14", CALLBACK.toString())));
+
+        JiraWebhookRegistration result = fixture.client.refreshWebhook(
+                "ACCESS_TOKEN_SECRET", CLOUD_ID, "SDP", CALLBACK, "14"
+        );
+
+        assertEquals("14", result.webhookId());
         assertThat(result.created()).isFalse();
         fixture.server.verify();
     }
 
     @Test
-    void replacesOnlyTheBoardWebhookWhenCallbackUrlIsOld() {
+    void doesNotDeleteRetainedWebhookWhenCallbackEndpointIsUnrelated() {
         Fixture fixture = fixture();
         fixture.server.expect(requestTo(FIRST_WEBHOOK_PAGE_URL))
                 .andExpect(method(HttpMethod.GET))
@@ -134,9 +159,6 @@ class JiraProviderClientImplTest {
                         "9",
                         "https://example.com/api/webhooks/jira?token=old"
                 )));
-        fixture.server.expect(requestTo(WEBHOOK_URL))
-                .andExpect(method(HttpMethod.DELETE))
-                .andRespond(withStatus(org.springframework.http.HttpStatus.NO_CONTENT));
         fixture.server.expect(requestTo(WEBHOOK_URL))
                 .andExpect(method(HttpMethod.POST))
                 .andRespond(json("{\"webhookRegistrationResult\":[{\"createdWebhookId\":10}]}"));
@@ -423,6 +445,124 @@ class JiraProviderClientImplTest {
                         new JiraAgileBoardInfo("12", "Scrum", "scrum"),
                         new JiraAgileBoardInfo("13", "Kanban", "kanban")
                 );
+        fixture.server.verify();
+    }
+
+    @Test
+    void doesNotDeleteWebhookForAnotherJiraProject() {
+        Fixture fixture = fixture();
+        fixture.server.expect(requestTo(FIRST_WEBHOOK_PAGE_URL))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(json(listResponse("68", CALLBACK.toString())
+                        .replace("project = SDP", "project = OTHER")));
+        fixture.server.expect(requestTo(WEBHOOK_URL))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(json("{\"webhookRegistrationResult\":[{\"createdWebhookId\":69}]}"));
+
+        JiraWebhookRegistration result = fixture.client.ensureWebhook(
+                "ACCESS_TOKEN_SECRET", CLOUD_ID, "SDP", CALLBACK, null
+        );
+
+        assertEquals("69", result.webhookId());
+        fixture.server.verify();
+    }
+
+    @Test
+    void failsClosedWhenMoreThanOneSafeWebhookCandidateExists() {
+        Fixture fixture = fixture();
+        fixture.server.expect(requestTo(FIRST_WEBHOOK_PAGE_URL))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(json(page(
+                        true,
+                        0,
+                        100,
+                        2,
+                        webhookValue("70", CALLBACK.toString(), "") + ","
+                                + webhookValue(
+                                        "71",
+                                        "https://callback.test/api/webhooks/jira?token=OLD_SECRET",
+                                        ""
+                                )
+                )));
+
+        IntegrationException error = assertThrows(IntegrationException.class,
+                () -> fixture.client.ensureWebhook(
+                        "ACCESS_TOKEN_SECRET", CLOUD_ID, "SDP", CALLBACK, null
+                ));
+
+        assertEquals("JIRA_WEBHOOK_ORPHAN_AMBIGUOUS", error.getCode());
+        fixture.server.verify();
+    }
+
+    @Test
+    void doesNotRegisterWhenSafeWebhookDeletionFails() {
+        Fixture fixture = fixture();
+        fixture.server.expect(requestTo(FIRST_WEBHOOK_PAGE_URL))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(json(listResponse("72", CALLBACK.toString())));
+        fixture.server.expect(requestTo(WEBHOOK_URL))
+                .andExpect(method(HttpMethod.DELETE))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR));
+
+        IntegrationException error = assertThrows(IntegrationException.class,
+                () -> fixture.client.ensureWebhook(
+                        "ACCESS_TOKEN_SECRET", CLOUD_ID, "SDP", CALLBACK, null
+                ));
+
+        assertEquals("JIRA_PROVIDER_UNAVAILABLE", error.getCode());
+        fixture.server.verify();
+    }
+
+    @Test
+    void replacesExactlyOneSafeOrphanWebhookWhenNoLocalWebhookIdExists() {
+        Fixture fixture = fixture();
+        fixture.server.expect(requestTo(FIRST_WEBHOOK_PAGE_URL))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(json(listResponse(
+                        "44",
+                        "https://callback.test/api/webhooks/jira?token=ORPHAN_SECRET"
+                )));
+        fixture.server.expect(requestTo(WEBHOOK_URL))
+                .andExpect(method(HttpMethod.DELETE))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.NO_CONTENT));
+        fixture.server.expect(requestTo(WEBHOOK_URL))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(json("{\"webhookRegistrationResult\":[{\"createdWebhookId\":45}]}"));
+
+        JiraWebhookRegistration result = fixture.client.ensureWebhook(
+                "ACCESS_TOKEN_SECRET", CLOUD_ID, "SDP", CALLBACK, null
+        );
+
+        assertEquals("45", result.webhookId());
+        assertThat(result.created()).isTrue();
+        fixture.server.verify();
+    }
+
+    @Test
+    void doesNotDeleteAnUnrelatedWebhookDuringOrphanRecovery() {
+        Fixture fixture = fixture();
+        fixture.server.expect(requestTo(FIRST_WEBHOOK_PAGE_URL))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(json(page(
+                        true,
+                        0,
+                        100,
+                        1,
+                        webhookValue(
+                                "66",
+                                "https://other.example/api/webhooks/jira?token=UNRELATED_SECRET",
+                                ""
+                        )
+                )));
+        fixture.server.expect(requestTo(WEBHOOK_URL))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(json("{\"webhookRegistrationResult\":[{\"createdWebhookId\":67}]}"));
+
+        JiraWebhookRegistration result = fixture.client.ensureWebhook(
+                "ACCESS_TOKEN_SECRET", CLOUD_ID, "SDP", CALLBACK, null
+        );
+
+        assertEquals("67", result.webhookId());
         fixture.server.verify();
     }
 
