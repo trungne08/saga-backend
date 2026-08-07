@@ -281,6 +281,46 @@ public class JiraProviderClientImpl implements JiraProviderClient {
     }
 
     @Override
+    public List<JiraBoardFeature> getBoardFeatures(
+            String accessToken, String cloudId, String boardId
+    ) {
+        try {
+            JsonNode response = get(jiraUri(
+                    cloudId,
+                    "/rest/agile/1.0/board/" + requiredNumericBoardId(boardId) + "/features"
+            ), accessToken);
+            JsonNode values = response.path("features");
+            if (!values.isArray()) {
+                throw providerResponseInvalid();
+            }
+            List<JiraBoardFeature> features = new ArrayList<>();
+            for (JsonNode value : values) {
+                String boardFeature = text(value, "boardFeature");
+                String featureId = text(value, "featureId");
+                if ((boardFeature == null || boardFeature.isBlank())
+                        && (featureId == null || featureId.isBlank())) {
+                    throw providerResponseInvalid();
+                }
+                features.add(new JiraBoardFeature(
+                        boardFeature,
+                        featureId,
+                        text(value, "state"),
+                        text(value, "boardId")
+                ));
+            }
+            return List.copyOf(features);
+        } catch (IntegrationException exception) {
+            if ("JIRA_RESOURCE_NOT_FOUND".equals(exception.getCode())) {
+                throw IntegrationException.conflict(
+                        "JIRA_BOARD_NOT_FOUND",
+                        "The selected Jira board is no longer accessible"
+                );
+            }
+            throw exception;
+        }
+    }
+
+    @Override
     public List<JiraCreateIssueType> getCreateIssueTypes(
             String accessToken,
             String cloudId,
@@ -1768,6 +1808,16 @@ public class JiraProviderClientImpl implements JiraProviderClient {
             throw IntegrationException.invalid(
                     "JIRA_IDENTIFIER_INVALID",
                     "The Jira identifier is invalid"
+            );
+        }
+        return value;
+    }
+
+    private String requiredNumericBoardId(String value) {
+        if (value == null || !value.matches("\\d+")) {
+            throw IntegrationException.invalid(
+                    "JIRA_IDENTIFIER_INVALID",
+                    "The Jira board identifier is invalid"
             );
         }
         return value;

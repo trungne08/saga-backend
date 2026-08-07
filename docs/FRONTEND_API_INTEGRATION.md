@@ -1,5 +1,13 @@
 # SAGA Frontend API Integration Guide
 
+## Jira Sprint-capable board link — 2026-08-07
+
+`POST /api/projects/{projectId}/jira/link` vẫn dùng browser session + CSRF và không nhận Bearer/provider credential từ FE. Backend tự resolve board Sprint-capable: Scrum được nhận trực tiếp; board simple chỉ được nhận khi Jira board-features xác nhận machine feature `SPRINTS=ENABLED`. FE không gửi board ID, feature key, localized name hay provider response để ép quyết định.
+
+Với Jira Project SDP, evidence production an toàn là board external `35`, `type=simple`, association `10034/SDP`; sau deploy/re-consent, relink thành công phải lưu board `35`. Nếu Sprints bị tắt, backend trả `409 JIRA_SPRINTS_NOT_ENABLED` với message an toàn; FE hướng người dùng bật Sprints trong Jira rồi relink, không tự chọn Kanban hay board khác. `JIRA_BOARD_SELECTION_REQUIRED` vẫn yêu cầu xử lý lựa chọn nghiệp vụ thay vì FE tự lấy board đầu tiên.
+
+Board-features là provider call của link nên grant thiếu `read:board-scope.admin:jira-software` trả `JIRA_SCOPE_INSUFFICIENT` trước provider I/O. Feature 401/403/404/429/5xx vẫn là các category an toàn `JIRA_ACCESS_REVOKED`, `JIRA_ACCESS_FORBIDDEN`, `JIRA_BOARD_NOT_FOUND`, `JIRA_RATE_LIMITED`, `JIRA_PROVIDER_UNAVAILABLE`; không parse/log raw Jira response.
+
 ## Jira 3LO re-consent và lỗi scope — 2026-08-07
 
 Jira 3LO site API do backend gọi qua `https://api.atlassian.com/ex/jira/{cloudId}/...`. FE chỉ nhận danh sách site an toàn từ callback result, gửi `cloudId` cùng Jira project đã chọn tới `POST /api/projects/{projectId}/jira/link`, và không gửi Bearer, access token, refresh token, provider response hoặc site URL để backend tin cậy.

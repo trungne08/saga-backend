@@ -1,5 +1,17 @@
 # SAGA — Nhật ký quyết định kỹ thuật
 
+## DEC-045 — Resolve Jira board theo Sprint capability, không chỉ type (2026-08-07)
+
+**Status: ACCEPTED.**
+
+**Context.** Production diagnostics xác nhận Jira Project `SDP` có đúng một board visible: ID `35`, `type=simple`, association `10034/SDP`. Resolver cũ chỉ nhận `type=scrum`, nên trả `JIRA_SCRUM_BOARD_NOT_FOUND` dù board tồn tại và OAuth user nhìn thấy nó.
+
+**Decision.** Giữ Scrum là candidate Sprint-capable trực tiếp. Với board simple, gọi `GET /rest/agile/1.0/board/{boardId}/features` qua 3LO gateway và chỉ nhận candidate khi machine `boardFeature=SPRINTS` có `state=ENABLED`. Parser chỉ giữ `boardFeature`, `featureId`, `state`, `boardId`; không dùng localized text hay raw payload. Kanban/unknown, feature không chứng minh Sprint và association location mâu thuẫn với canonical Jira Project đều fail closed. `SPRINTS=DISABLED` không còn candidate trả `JIRA_SPRINTS_NOT_ENABLED`; nhiều candidate trả `JIRA_BOARD_SELECTION_REQUIRED`.
+
+**Security and operations.** Link preflight yêu cầu thêm `read:board-scope.admin:jira-software`, vốn đã thuộc capability default. 401/403/404/429/5xx-network từ board-features map an toàn thành `JIRA_ACCESS_REVOKED`, `JIRA_ACCESS_FORBIDDEN`, `JIRA_BOARD_NOT_FOUND`, `JIRA_RATE_LIMITED`, `JIRA_PROVIDER_UNAVAILABLE`. Diagnostics chỉ ghi facts machine-safe (project/board/type/feature/state/reason/result), không token, credential, cookie/CSRF, Authorization hay raw provider body.
+
+**Consequences.** Không migration; không đổi 3LO/access-resource/scope baseline ngoài preflight của operation mới, retained-row upsert, cross-project conflict, disconnect/scheduler protection, Task/Sprint idempotency, session/CSRF hoặc Project Manager mutation rule. Runtime fix vẫn **TBD** đến deploy + fresh consent + relink SDP, xác nhận persist `35`, Create Sprint và hydration.
+
 ## DEC-044 — Jira relink là provider-identity-aware upsert (2026-08-07)
 
 **Status: ACCEPTED.**

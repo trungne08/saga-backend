@@ -3,6 +3,7 @@ package com.saga.be.integration.project;
 import com.saga.be.entity.JiraBoard;
 import com.saga.be.exception.IntegrationException;
 import com.saga.be.integration.provider.JiraAgileBoardInfo;
+import com.saga.be.integration.provider.JiraBoardFeature;
 import com.saga.be.integration.provider.JiraProviderClient;
 import com.saga.be.repository.JiraBoardRepository;
 import java.util.List;
@@ -83,24 +84,100 @@ public class JiraBoardResolutionService {
         }
         List<JiraAgileBoardInfo> discoveredBoards = provider.discoverAgileBoards(
                 accessToken, board.getCloudId(), board.getJiraProjectId());
-        List<JiraAgileBoardInfo> scrumBoards = discoveredBoards.stream()
-                .filter(value -> "scrum".equalsIgnoreCase(value.type()))
+        List<BoardCandidate> candidates = discoveredBoards.stream()
+                .map(value -> assessCandidate(board, accessToken, value))
                 .toList();
-        if (scrumBoards.isEmpty()) {
-            logDiscoveryRejection(board, discoveredBoards, "NO_SCRUM_BOARD");
+        List<BoardCandidate> sprintCapableBoards = candidates.stream()
+                .filter(BoardCandidate::sprintCapable)
+                .toList();
+        if (sprintCapableBoards.isEmpty()) {
+            if (candidates.stream().anyMatch(BoardCandidate::sprintsDisabled)) {
+                logDiscoveryRejection(board, discoveredBoards, "SPRINT_FEATURE_DISABLED");
+                throw IntegrationException.conflict(
+                        "JIRA_SPRINTS_NOT_ENABLED",
+                        "Sprints are not enabled for the linked Jira project"
+                );
+            }
+            logDiscoveryRejection(board, discoveredBoards, "NO_SPRINT_CAPABLE_BOARD");
             throw IntegrationException.conflict("JIRA_SCRUM_BOARD_NOT_FOUND",
                     "No Scrum board is available for the linked Jira project");
         }
-        if (scrumBoards.size() != 1) {
-            logDiscoveryRejection(board, discoveredBoards, "MULTIPLE_SCRUM_BOARDS");
+        if (sprintCapableBoards.size() != 1) {
+            logDiscoveryRejection(board, discoveredBoards, "MULTIPLE_SPRINT_CAPABLE_BOARDS");
             throw IntegrationException.conflict("JIRA_BOARD_SELECTION_REQUIRED",
-                    "More than one Scrum board is available for the linked Jira project");
+                    "More than one Sprint-capable board is available for the linked Jira project");
         }
-        String discovered = scrumBoards.get(0).boardId();
+        String discovered = sprintCapableBoards.get(0).board().boardId();
         if (!isExternalBoardId(discovered)) {
             throw IntegrationException.unavailable("JIRA_RESPONSE_INVALID");
         }
         return discovered;
+    }
+
+    private BoardCandidate assessCandidate(
+            JiraBoard board,
+            String accessToken,
+            JiraAgileBoardInfo discoveredBoard
+    ) {
+        if (!matchesLinkedProject(board, discoveredBoard)) {
+            return logCandidate(board, discoveredBoard, List.of(), "NOT_REQUESTED",
+                    "PROJECT_ASSOCIATION_MISMATCH", false, false);
+        }
+        if ("scrum".equalsIgnoreCase(discoveredBoard.type())) {
+            return logCandidate(board, discoveredBoard, List.of(), "NOT_APPLICABLE",
+                    "SCRUM_BOARD_TYPE", true, false);
+        }
+        if (!"simple".equalsIgnoreCase(discoveredBoard.type())) {
+            return logCandidate(board, discoveredBoard, List.of(), "NOT_REQUESTED",
+                    "NON_SPRINT_BOARD_TYPE", false, false);
+        }
+
+        List<JiraBoardFeature> features = provider.getBoardFeatures(
+                accessToken, board.getCloudId(), discoveredBoard.boardId());
+        List<String> identifiers = features.stream().map(JiraBoardFeature::identifier).toList();
+        List<JiraBoardFeature> sprintFeatures = features.stream()
+                .filter(JiraBoardFeature::isSprintsFeature)
+                .toList();
+        if (sprintFeatures.stream().anyMatch(feature ->
+                JiraBoardFeature.ENABLED_STATE.equals(feature.state()))) {
+            return logCandidate(board, discoveredBoard, identifiers, JiraBoardFeature.ENABLED_STATE,
+                    "SPRINT_FEATURE_ENABLED", true, false);
+        }
+        if (sprintFeatures.stream().anyMatch(feature ->
+                JiraBoardFeature.DISABLED_STATE.equals(feature.state()))) {
+            return logCandidate(board, discoveredBoard, identifiers, JiraBoardFeature.DISABLED_STATE,
+                    "SPRINT_FEATURE_DISABLED", false, true);
+        }
+        String state = sprintFeatures.isEmpty() ? "NOT_REPORTED" : "UNCONFIRMED";
+        return logCandidate(board, discoveredBoard, identifiers, state,
+                "SPRINT_FEATURE_UNCONFIRMED", false, false);
+    }
+
+    private boolean matchesLinkedProject(JiraBoard board, JiraAgileBoardInfo discoveredBoard) {
+        boolean projectIdMatches = discoveredBoard.locationProjectId() == null
+                || discoveredBoard.locationProjectId().equals(board.getJiraProjectId());
+        boolean projectKeyMatches = discoveredBoard.locationProjectKey() == null
+                || (board.getProjectKey() != null
+                && discoveredBoard.locationProjectKey().equalsIgnoreCase(board.getProjectKey()));
+        return projectIdMatches && projectKeyMatches;
+    }
+
+    private BoardCandidate logCandidate(
+            JiraBoard linkedBoard,
+            JiraAgileBoardInfo discoveredBoard,
+            List<String> featureIdentifiers,
+            String sprintFeatureState,
+            String candidateReason,
+            boolean sprintCapable,
+            boolean sprintsDisabled
+    ) {
+        String selectionResult = sprintCapable ? "CANDIDATE" : "REJECTED";
+        log.info("Jira board capability evaluated: projectKey={}, boardId={}, boardType={}, "
+                        + "boardFeatureIdentifiers={}, sprintFeatureState={}, candidateReason={}, "
+                        + "selectionResult={}",
+                linkedBoard.getProjectKey(), discoveredBoard.boardId(), discoveredBoard.type(), featureIdentifiers,
+                sprintFeatureState, candidateReason, selectionResult);
+        return new BoardCandidate(discoveredBoard, sprintCapable, sprintsDisabled);
     }
 
     private void logDiscoveryRejection(
@@ -116,6 +193,13 @@ public class JiraBoardResolutionService {
                 discoveredBoards.stream().map(JiraAgileBoardInfo::boardId).toList(),
                 discoveredBoards.stream().map(JiraAgileBoardInfo::projectAssociation).toList(),
                 rejectionReason);
+    }
+
+    private record BoardCandidate(
+            JiraAgileBoardInfo board,
+            boolean sprintCapable,
+            boolean sprintsDisabled
+    ) {
     }
 
     private String persistResolved(java.util.UUID boardEntityId, String discovered) {

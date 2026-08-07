@@ -68,12 +68,13 @@ class JiraSprintWriteServiceTest {
     }
 
     @Test
-    void createsRemotelyThenCanonicalizesUsingBoardOwnedOrigin() {
+    void createsRemotelyUsingResolvedSprintCapableBoard35ThenCanonicalizes() {
         Fixture f = new Fixture();
         JiraWriteOperation op = f.operation(JiraWriteOperationType.SPRINT_CREATE, JiraWriteOperationStatus.PENDING);
         JiraSprintSnapshot snapshot = f.snapshot("future", "Sprint");
         when(f.operations.claim(eq(f.project), eq(f.actor), eq(JiraWriteOperationType.SPRINT_CREATE), eq("key"), eq("f"))).thenReturn(op);
-        when(f.provider.createSprint(eq("token"), eq("cloud"), eq("99"), eq("Sprint"), any(), any(), any())).thenReturn(snapshot);
+        when(f.boardResolver.resolve(f.board)).thenReturn("35");
+        when(f.provider.createSprint(eq("token"), eq("cloud"), eq("35"), eq("Sprint"), any(), any(), any())).thenReturn(snapshot);
         when(f.provider.getSprint("token", "cloud", "42")).thenReturn(snapshot);
         when(f.upserts.upsert(f.board.getId(), snapshot)).thenReturn(f.sprint("future"));
 
@@ -81,7 +82,7 @@ class JiraSprintWriteServiceTest {
 
         InOrder order = inOrder(f.authorization, f.provider, f.upserts);
         order.verify(f.authorization).requireProjectManager(f.actor, f.projectId);
-        order.verify(f.provider).createSprint(eq("token"), eq("cloud"), eq("99"), eq("Sprint"), any(), any(), any());
+        order.verify(f.provider).createSprint(eq("token"), eq("cloud"), eq("35"), eq("Sprint"), any(), any(), any());
         order.verify(f.provider).getSprint("token", "cloud", "42");
         order.verify(f.upserts).upsert(f.board.getId(), snapshot);
         verify(f.operations).complete(op.getId());

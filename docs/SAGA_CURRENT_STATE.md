@@ -1,5 +1,12 @@
 # SAGA — Trạng thái hiện tại
 
+## Update 2026-08-07 — Jira board Sprint-capable
+
+- **CONFIRMED:** runtime evidence của SDP là một board external `35`, `type=simple`, association `10034/SDP`; OAuth user nhìn thấy board. 409 cũ xuất phát từ filter `type=scrum` duy nhất.
+- **CONFIRMED:** policy hiện tại supersede “only type=scrum”: Scrum là candidate trực tiếp; simple chỉ là candidate khi board-features trả machine identifier `SPRINTS` ở `ENABLED`. Không dùng tên/localized description, không mặc định simple là Scrum, không nhận Kanban/unknown hay association mismatch.
+- **CONFIRMED:** simple `SPRINTS=DISABLED` trả `JIRA_SPRINTS_NOT_ENABLED`; simple thiếu evidence fail closed; nhiều Sprint-capable boards trả `JIRA_BOARD_SELECTION_REQUIRED`. Board-features dùng scope `read:board-scope.admin:jira-software` trong preflight link, giữ nguyên 3LO, fresh grant và retained-row relink.
+- **TBD runtime:** sau deploy cần fresh consent và relink SDP; expected persisted `jiraBoardId=35`, rồi smoke Create Sprint và Sprint hydration. FE tiếp tục browser session + CSRF, không Bearer/provider credential.
+
 ## Update 2026-08-07 — Jira relink provider-identity-aware upsert
 
 - **CONFIRMED:** `jira_board` vừa là history anchor theo ownership local `project_id`, vừa có provider identity duy nhất `(cloud_id, jira_project_id)`. Disconnect vẫn giữ row/history nhưng retire credential và webhook state.

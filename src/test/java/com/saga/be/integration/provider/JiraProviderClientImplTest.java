@@ -42,6 +42,7 @@ class JiraProviderClientImplTest {
             + "/rest/agile/1.0/sprint/42";
     private static final String AGILE_BOARD_URL = BASE + "/ex/jira/" + CLOUD_ID
             + "/rest/agile/1.0/board";
+    private static final String BOARD_FEATURES_URL = AGILE_BOARD_URL + "/35/features";
     private static final String PROJECT_URL = BASE + "/ex/jira/" + CLOUD_ID
             + "/rest/api/3/project/search?startAt=0&maxResults=50&orderBy=key";
     private static final URI CALLBACK = URI.create(
@@ -423,6 +424,27 @@ class JiraProviderClientImplTest {
     }
 
     @Test
+    void getsOnlySafeMachineReadableBoardFeatureFactsThroughThe3loGateway() {
+        Fixture fixture = fixture();
+        fixture.server.expect(requestTo(BOARD_FEATURES_URL))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(json("""
+                        {"features":[{
+                          "boardFeature":"SPRINTS",
+                          "featureId":"sprints",
+                          "state":"ENABLED",
+                          "boardId":35,
+                          "localisedName":"Sprints",
+                          "localisedDescription":"Not retained"
+                        }]}
+                        """));
+
+        assertThat(fixture.client.getBoardFeatures("ACCESS_TOKEN_SECRET", CLOUD_ID, "35"))
+                .containsExactly(new JiraBoardFeature("SPRINTS", "sprints", "ENABLED", "35"));
+        fixture.server.verify();
+    }
+
+    @Test
     void uses3loGatewayForProjectAndBoardDiscoveryAndParsesResourceScopes() {
         Fixture fixture = fixture();
         fixture.server.expect(requestTo(BASE + "/oauth/token/accessible-resources"))
@@ -730,6 +752,20 @@ class JiraProviderClientImplTest {
     }
 
     @Test
+    void getBoardFeaturesMapsFailuresWithoutExposingProviderBodies() {
+        assertBoardFeaturesFailure(org.springframework.http.HttpStatus.UNAUTHORIZED,
+                "JIRA_ACCESS_REVOKED", 1);
+        assertBoardFeaturesFailure(org.springframework.http.HttpStatus.FORBIDDEN,
+                "JIRA_ACCESS_FORBIDDEN", 1);
+        assertBoardFeaturesFailure(org.springframework.http.HttpStatus.NOT_FOUND,
+                "JIRA_BOARD_NOT_FOUND", 1);
+        assertBoardFeaturesFailure(org.springframework.http.HttpStatus.TOO_MANY_REQUESTS,
+                "JIRA_RATE_LIMITED", 3);
+        assertBoardFeaturesFailure(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,
+                "JIRA_PROVIDER_UNAVAILABLE", 3);
+    }
+
+    @Test
     void mapsTimeoutAndMalformedMetadataResponsesSafely() {
         Fixture timeout = fixture();
         timeout.server.expect(request -> { }).andRespond(
@@ -809,6 +845,27 @@ class JiraProviderClientImplTest {
                 () -> fixture.client.getSprint(
                         "ACCESS_TOKEN_SECRET", CLOUD_ID, "42"
                 )
+        );
+
+        assertEquals(expectedCode, exception.getCode());
+        assertThat(exception.getMessage()).doesNotContain("PROVIDER_SECRET");
+        fixture.server.verify();
+    }
+
+    private void assertBoardFeaturesFailure(
+            org.springframework.http.HttpStatus status,
+            String expectedCode,
+            int calls
+    ) {
+        Fixture fixture = fixture();
+        fixture.server.expect(ExpectedCount.times(calls), requestTo(BOARD_FEATURES_URL))
+                .andRespond(withStatus(status)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"error\":\"PROVIDER_SECRET\"}"));
+
+        IntegrationException exception = assertThrows(
+                IntegrationException.class,
+                () -> fixture.client.getBoardFeatures("ACCESS_TOKEN_SECRET", CLOUD_ID, "35")
         );
 
         assertEquals(expectedCode, exception.getCode());
