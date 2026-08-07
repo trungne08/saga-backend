@@ -48,11 +48,11 @@ public class ProjectSprintService {
     @Transactional(readOnly = true)
     public SprintListResponse getByTeam(SagaPrincipal principal, UUID teamId) {
         Team team = teamRepository.findWithCourseAndInstructorById(teamId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Team not found"));
-        if (team.getProject() == null) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Team has no project");
-        }
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "TEAM_NOT_FOUND"));
         requireTeamAccess(principal, team);
+        if (team.getProject() == null) {
+            return SprintListResponse.projectNotCreated(teamId);
+        }
         return SprintListResponse.from(
                 team.getProject().getId(),
                 teamId,

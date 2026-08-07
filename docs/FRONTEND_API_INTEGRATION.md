@@ -1161,3 +1161,12 @@ STUDENT nhận 403, anonymous nhận 401.
 Mọi URL có Team/Student đều kiểm quan hệ lồng nhau với `courseId`; ID tồn tại ở
 Course khác không làm lộ dữ liệu. Recent Activities không dựng Jira transition event
 vì database chỉ giữ trạng thái hiện tại.
+# P1 — Contract response/error (2026-08-07)
+
+`GET /api/v1/teams/{teamId}/sprints` trả thêm `state` (additive):
+
+- `PROJECT_NOT_CREATED`: Team đã truy cập được nhưng chưa có Project; `projectId: null`, `sprints: []` và HTTP 200.
+- `EMPTY`: Project có nhưng chưa có Sprint; `sprints: []` và HTTP 200.
+- `READY`: có Sprint; HTTP 200.
+
+Team không tồn tại trả HTTP 404 với `error: "TEAM_NOT_FOUND"`. Generic error JSON dùng `timestamp`, `status`, `error`, `message`, `path`; FE phân nhánh bằng `status` và `error`, không parse `message`. Session/CSRF không đổi.

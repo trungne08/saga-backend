@@ -333,3 +333,8 @@ BASE HEAD của snapshot cũ: `0bc30be`. HEAD audit hiện hành là `4f3dee9`; 
 - **Verification:** targeted analytics 21 tests và Team roster security 13 tests pass;
   regression GitHub/Jira/Contribution 20 tests pass; full Maven 77 suites / 339 tests /
   0 failures / 0 errors / 0 skipped.
+# Update 2026-08-07 — P1 response/error semantics
+
+- **CONFIRMED:** `GET /api/v1/teams/{teamId}/sprints` giữ nguyên authorization hiện có và kiểm quyền trước khi xét Team chưa có Project. Team tồn tại, actor được phép, `projectId = null` trả `200` với `projectId: null`, `teamId`, `state: PROJECT_NOT_CREATED`, `sprints: []`; Project có zero Sprint trả `state: EMPTY`; có Sprint trả `state: READY`.
+- **CONFIRMED:** Team không tồn tại trả `404` với error code `TEAM_NOT_FOUND`. `SprintListResponse` chỉ bổ sung trường `state`; không bỏ/đổi tên field cũ.
+- **CONFIRMED:** error JSON thống nhất `timestamp`, `status`, `error`, `message`, `path`. Generic validation/request/security/not-found/conflict/runtime có code ổn định; `IntegrationException` tiếp tục giữ nguyên các code `JIRA_*`, `GITHUB_*`, `INTEGRATION_*`.

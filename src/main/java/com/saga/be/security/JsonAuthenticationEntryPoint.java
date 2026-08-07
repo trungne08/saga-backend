@@ -27,7 +27,7 @@ public class JsonAuthenticationEntryPoint implements AuthenticationEntryPoint {
                 request,
                 response,
                 HttpStatus.UNAUTHORIZED.value(),
-                "Unauthorized",
+                "AUTHENTICATION_REQUIRED",
                 "Authentication is required"
         );
     }

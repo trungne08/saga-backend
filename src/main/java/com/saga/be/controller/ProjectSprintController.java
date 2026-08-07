@@ -93,10 +93,11 @@ public class ProjectSprintController {
     @Operation(summary = "List sprints by team")
     @PreAuthorize("hasAnyRole('ADMIN', 'LECTURER', 'STUDENT')")
     @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "Sprint list for the team"),
+            @ApiResponse(responseCode = "200", description = "Danh sách Sprint. state=PROJECT_NOT_CREATED khi Team đã được phép truy cập nhưng chưa có Project; EMPTY khi Project chưa có Sprint; READY khi có Sprint."),
+            @ApiResponse(responseCode = "400", description = "teamId không phải UUID hợp lệ."),
             @ApiResponse(responseCode = "401", description = "Authentication is required"),
             @ApiResponse(responseCode = "403", description = "Not permitted to view this team"),
-            @ApiResponse(responseCode = "404", description = "Team does not exist")
+            @ApiResponse(responseCode = "404", description = "Team does not exist (error=TEAM_NOT_FOUND)")
     })
     public ResponseEntity<SprintListResponse> getTeamSprints(
             @AuthenticationPrincipal SagaPrincipal principal,

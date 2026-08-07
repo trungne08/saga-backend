@@ -533,3 +533,8 @@ Không có secret hoặc thông tin đăng nhập thật trong decision log này
   `currentPlannedPoints`, aggregate Contribution hiện tại, null severity/không có heatmap level.
 - Evidence: `LecturerAnalyticsController`, `LecturerAnalyticsAuthorizationService`, các query
   service và `LecturerAnalytics*Test`.
+# Quyết định 2026-08-07 — P1 response/error semantics
+
+- Quyết định: optional child chưa được tạo không tự động là 404. Chỉ endpoint Team Sprint có evidence runtime và được đổi trong milestone này sang success state `PROJECT_NOT_CREATED`.
+- Quyết định: authorization Team Sprint phải chạy trước nhánh `project == null`, tránh lộ state Team cho actor không có quyền.
+- Quyết định: generic/framework error được serialize an toàn theo `ApiErrorResponse`; provider/domain error từ `IntegrationException` không bị map sang code generic.

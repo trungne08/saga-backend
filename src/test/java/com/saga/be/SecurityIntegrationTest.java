@@ -88,11 +88,13 @@ class SecurityIntegrationTest {
         mockMvc.perform(get("/api/v1/subjects"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.status").value(401))
+                .andExpect(jsonPath("$.error").value("AUTHENTICATION_REQUIRED"))
                 .andExpect(jsonPath("$.message").value("Authentication is required"));
 
         mockMvc.perform(get("/api/auth/csrf"))
                 .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.status").value(401));
+                .andExpect(jsonPath("$.status").value(401))
+                .andExpect(jsonPath("$.error").value("AUTHENTICATION_REQUIRED"));
     }
 
     @Test
@@ -283,7 +285,8 @@ class SecurityIntegrationTest {
                                 }
                                 """))
                 .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.status").value(403));
+                .andExpect(jsonPath("$.status").value(403))
+                .andExpect(jsonPath("$.error").value("ACCESS_DENIED"));
     }
 
     @Test

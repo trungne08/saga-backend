@@ -27,7 +27,7 @@ public class JsonAccessDeniedHandler implements AccessDeniedHandler {
                 request,
                 response,
                 HttpStatus.FORBIDDEN.value(),
-                "Forbidden",
+                "ACCESS_DENIED",
                 "The authenticated user does not have permission for this operation"
         );
     }

@@ -6,6 +6,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.saga.be.OAuth2TestConfiguration;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Map;
@@ -43,6 +45,7 @@ class GeneratedOpenApiDocumentationIntegrationTest {
         String body = mockMvc.perform(get("/v3/api-docs"))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
+        Files.writeString(Path.of("target", "generated-openapi.json"), body);
         JsonNode root = JsonMapper.builder().build().readTree(body);
         Set<String> documentedTags = documentedTagNames(root);
         int operationCount = 0;
@@ -84,6 +87,13 @@ class GeneratedOpenApiDocumentationIntegrationTest {
                 .toString().contains("branch"));
         assertTrue(root.at("/paths/~1api~1v1~1projects~1{projectId}~1sprints/post/parameters")
                 .toString().contains("Idempotency-Key"));
+        JsonNode teamSprint = root.at("/paths/~1api~1v1~1teams~1{teamId}~1sprints/get");
+        assertTrue(teamSprint.at("/responses/200").isObject());
+        assertTrue(teamSprint.at("/responses/400").isObject());
+        assertTrue(teamSprint.at("/responses/401").isObject());
+        assertTrue(teamSprint.at("/responses/403").isObject());
+        assertTrue(teamSprint.at("/responses/404").isObject());
+        assertTrue(root.at("/components/schemas/SprintListResponse/properties/state").isObject());
     }
 
     private Set<String> documentedTagNames(JsonNode root) {

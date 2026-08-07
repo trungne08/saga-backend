@@ -497,7 +497,7 @@ FE nên gọi API list sprint trước để lấy danh sách `sprintId`, sau đ
 - Route theo Team: ADMIN xem mọi Team; LECTURER phải là instructor của Course;
   STUDENT phải thuộc đúng Team.
 - Không có pagination. Sprint sort theo `startDate` tăng dần.
-- Team chưa có Project trả `404`; không có Sprint trả `sprints: []` với `200`.
+- Team chưa có Project trả `200`, `projectId: null`, `state: PROJECT_NOT_CREATED`, `sprints: []`; không có Sprint trả `state: EMPTY`, `sprints: []` với `200`; có Sprint trả `state: READY`.
 - `teamId` trong route theo Project có thể `null`.
 
 ```json

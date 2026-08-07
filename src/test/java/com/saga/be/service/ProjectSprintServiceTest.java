@@ -2,9 +2,11 @@ package com.saga.be.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.saga.be.dto.response.SprintListResponse;
+import com.saga.be.dto.response.SprintListState;
 import com.saga.be.entity.Course;
 import com.saga.be.entity.Project;
 import com.saga.be.entity.Sprint;
@@ -29,6 +31,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.web.server.ResponseStatusException;
 
 @ExtendWith(MockitoExtension.class)
 class ProjectSprintServiceTest {
@@ -90,6 +93,7 @@ class ProjectSprintServiceTest {
 
         assertEquals(projectId, response.projectId());
         assertEquals(teamId, response.teamId());
+        assertEquals(SprintListState.READY, response.state());
         assertEquals(2, response.sprints().size());
         assertEquals("Sprint 1", response.sprints().get(0).sprintName());
         assertEquals(
@@ -131,7 +135,70 @@ class ProjectSprintServiceTest {
 
         assertEquals(projectId, response.projectId());
         assertEquals(teamId, response.teamId());
+        assertEquals(SprintListState.READY, response.state());
         assertEquals(1, response.sprints().size());
+    }
+
+    @Test
+    void returnsProjectNotCreatedAfterAuthorizationForAccessibleTeam() {
+        UUID teamId = UUID.randomUUID();
+        Team team = entityWithId(new Team(), teamId);
+
+        when(teamRepository.findWithCourseAndInstructorById(teamId)).thenReturn(Optional.of(team));
+
+        SprintListResponse response = service.getByTeam(
+                studentOrLecturerPrincipal(ApplicationRole.ADMIN, UUID.randomUUID()), teamId);
+
+        assertEquals(null, response.projectId());
+        assertEquals(teamId, response.teamId());
+        assertEquals(SprintListState.PROJECT_NOT_CREATED, response.state());
+        assertEquals(List.of(), response.sprints());
+        verifyNoInteractions(sprintRepository);
+    }
+
+    @Test
+    void deniesUnauthorizedActorBeforeReturningProjectNotCreated() {
+        UUID teamId = UUID.randomUUID();
+        UUID studentId = UUID.randomUUID();
+        Team team = entityWithId(new Team(), teamId);
+        team.setCourse(entityWithId(new Course(), UUID.randomUUID()));
+
+        when(teamRepository.findWithCourseAndInstructorById(teamId)).thenReturn(Optional.of(team));
+        when(teamMemberRepository.existsByTeamIdAndStudentId(teamId, studentId)).thenReturn(false);
+
+        assertThrows(AccessDeniedException.class, () -> service.getByTeam(
+                studentOrLecturerPrincipal(ApplicationRole.STUDENT, studentId), teamId));
+
+        verifyNoInteractions(sprintRepository);
+    }
+
+    @Test
+    void returnsEmptyStateWhenProjectHasNoSprints() {
+        UUID projectId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
+        Team team = entityWithId(new Team(), teamId);
+        team.setProject(entityWithId(new Project(), projectId));
+
+        when(teamRepository.findWithCourseAndInstructorById(teamId)).thenReturn(Optional.of(team));
+        when(sprintRepository.findByBoardProjectIdOrderByStartDateAsc(projectId)).thenReturn(List.of());
+
+        SprintListResponse response = service.getByTeam(
+                studentOrLecturerPrincipal(ApplicationRole.ADMIN, UUID.randomUUID()), teamId);
+
+        assertEquals(SprintListState.EMPTY, response.state());
+        assertEquals(List.of(), response.sprints());
+    }
+
+    @Test
+    void marksMissingTeamWithStableMachineReadableReason() {
+        UUID teamId = UUID.randomUUID();
+        when(teamRepository.findWithCourseAndInstructorById(teamId)).thenReturn(Optional.empty());
+
+        ResponseStatusException exception = assertThrows(ResponseStatusException.class, () -> service.getByTeam(
+                studentOrLecturerPrincipal(ApplicationRole.ADMIN, UUID.randomUUID()), teamId));
+
+        assertEquals(404, exception.getStatusCode().value());
+        assertEquals("TEAM_NOT_FOUND", exception.getReason());
     }
 
     @Test
