@@ -1,5 +1,22 @@
 # SAGA Frontend API Integration Guide
 
+## Jira 3LO re-consent và lỗi scope — 2026-08-07
+
+Jira 3LO site API do backend gọi qua `https://api.atlassian.com/ex/jira/{cloudId}/...`. FE chỉ nhận danh sách site an toàn từ callback result, gửi `cloudId` cùng Jira project đã chọn tới `POST /api/projects/{projectId}/jira/link`, và không gửi Bearer, access token, refresh token, provider response hoặc site URL để backend tin cậy.
+
+Backend đối chiếu `cloudId` với `accessible-resources` của fresh grant. Nếu site không còn trong resource, backend trả `JIRA_SITE_NOT_AUTHORIZED`; FE yêu cầu người dùng kết nối lại/chọn site hợp lệ, không retry provider call với URL tự ghép.
+
+Nếu resource thiếu scope cần cho chính link (project read, board discovery hoặc dynamic webhook), backend trả `409 JIRA_SCOPE_INSUFFICIENT`:
+
+```json
+{
+  "code": "JIRA_SCOPE_INSUFFICIENT",
+  "message": "Jira authorization does not include the permissions required by this integration"
+}
+```
+
+FE hiển thị hướng dẫn reconnect/re-consent; không diễn giải lỗi này là session login failure hay Jira credential revoked. Scope Sprint/Task không dùng trong link được kiểm tra khi người dùng gọi operation đó. Sau khi deploy bộ scope mới trong Atlassian Developer Console, flow bắt buộc là disconnect Jira → `/jira/connect` mới → Atlassian consent mới → callback/result mới → `POST /jira/link`. Scope chính xác do backend dùng gồm Platform read/write, webhook, `offline_access`, và Jira Software board/sprint/issue scopes được ghi trong SAGA system context/decision log; `offline_access` không phải scope site-resource. Quyền Jira thực tế của user vẫn có thể gây `JIRA_ACCESS_FORBIDDEN` dù scope đã đủ.
+
 ## Jira sync/relink status contract — 2026-08-06
 
 - Jira hydration chạy nền; FE không gửi provider credential và không nhận raw Jira response. Theo dõi qua sync status/history đã có, chỉ dùng safe `errorCategory`/failure stage.

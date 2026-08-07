@@ -30,6 +30,7 @@ import com.saga.be.integration.provider.JiraOAuthToken;
 import com.saga.be.integration.provider.JiraProjectInfo;
 import com.saga.be.integration.provider.JiraProviderClient;
 import com.saga.be.integration.provider.JiraWebhookRegistration;
+import com.saga.be.integration.provider.JiraWriteScope;
 import com.saga.be.integration.security.IntegrationAttemptLimiter;
 import com.saga.be.integration.security.IntegrationSecretCipher;
 import com.saga.be.integration.security.OAuthFlow;
@@ -76,15 +77,6 @@ public class ProjectIntegrationService {
     private static final Logger log = LoggerFactory.getLogger(
             ProjectIntegrationService.class
     );
-    private static final Set<String> CLASSIC_WEBHOOK_SCOPES = Set.of(
-            "read:jira-work",
-            "manage:jira-webhook"
-    );
-    private static final Set<String> GRANULAR_WEBHOOK_SCOPES = Set.of(
-            "read:webhook:jira",
-            "write:webhook:jira"
-    );
-
     private final ProjectIntegrationAuthorizationService authorization;
     private final OAuthStateService stateService;
     private final ProjectIntegrationSessionStore sessionStore;
@@ -187,6 +179,7 @@ public class ProjectIntegrationService {
     ) {
         authorization.requireProjectManager(principal, projectId);
         limit(principal, "project-jira-connect");
+        requireConfiguredJiraScopes();
         String state = stateService.issue(
                 session,
                 principal,
@@ -248,53 +241,65 @@ public class ProjectIntegrationService {
     ) {
         Project project = authorization.requireProjectManager(principal, projectId);
         limit(principal, "project-jira-link");
-        ProjectIntegrationSessionStore.ResolvedJiraGrant grant =
-                sessionStore.requireJiraGrant(session, projectId);
-        requireJiraWebhookScopes(grant.scopes());
-        JiraAccessibleResource resource = grant.resources().stream()
-                .filter(value -> value.cloudId().equals(request.cloudId()))
-                .findFirst()
-                .orElseThrow(() -> IntegrationException.conflict(
-                        "JIRA_SITE_NOT_AUTHORIZED",
-                        "The selected Jira site was not authorized in this session"
-                ));
-        JiraProjectInfo jiraProject = jiraClient.projects(
+        JiraLinkStage stage = JiraLinkStage.LOAD_FRESH_GRANT;
+        String verifiedCloudId = null;
+        Set<String> missingScopeNames = Set.of();
+        try {
+            ProjectIntegrationSessionStore.ResolvedJiraGrant grant =
+                    sessionStore.requireJiraGrant(session, projectId);
+            stage = JiraLinkStage.VERIFY_ACCESSIBLE_RESOURCE;
+            JiraAccessibleResource resource = grant.resources().stream()
+                    .filter(value -> value.cloudId().equals(request.cloudId()))
+                    .findFirst()
+                    .orElseThrow(() -> IntegrationException.conflict(
+                            "JIRA_SITE_NOT_AUTHORIZED",
+                            "The selected Jira site was not authorized in this session"
+                    ));
+            verifiedCloudId = resource.cloudId();
+            stage = JiraLinkStage.SCOPE_PREFLIGHT;
+            missingScopeNames = JiraWriteScope.missing(
+                    resource.scopes(),
+                    JiraWriteScope.linkScopes().toArray(String[]::new)
+            );
+            requireJiraLinkScopes(resource.scopes());
+            stage = JiraLinkStage.RESOLVE_PROJECT;
+            JiraProjectInfo jiraProject = jiraClient.projects(
                         grant.accessToken(),
                         resource.cloudId()
-                )
-                .stream()
-                .filter(value -> matchesJiraProject(
-                        value,
-                        request.jiraProjectId()
-                ))
-                .findFirst()
-                .orElseThrow(() -> IntegrationException.conflict(
-                        "JIRA_PROJECT_NOT_ACCESSIBLE",
-                        "The selected Jira project is not accessible"
-                ));
+                    )
+                    .stream()
+                    .filter(value -> matchesJiraProject(
+                            value,
+                            request.jiraProjectId()
+                    ))
+                    .findFirst()
+                    .orElseThrow(() -> IntegrationException.conflict(
+                            "JIRA_PROJECT_NOT_ACCESSIBLE",
+                            "The selected Jira project is not accessible"
+                    ));
 
-        JiraBoard board = jiraBoardRepository.findForLinkByProjectId(projectId)
+            JiraBoard board = jiraBoardRepository.findForLinkByProjectId(projectId)
                 // The fallback preserves callers and test doubles that do
                 // not use the locking query. Production locks a retained row
                 // before it is repurposed for relinking.
                 .or(() -> jiraBoardRepository.findByProjectId(projectId))
-                .orElseGet(() -> JiraBoard.builder()
+                    .orElseGet(() -> JiraBoard.builder()
                         .project(project)
                         .type(BoardType.OTHER)
                         .connectionStatus(IntegrationStatus.CONNECTING)
-                        .build());
-        if (
+                            .build());
+            if (
             board.getJiraProjectId() != null
             && !board.getJiraProjectId().equals(jiraProject.id())
             && board.getConnectionStatus() != IntegrationStatus.DISCONNECTED
-        ) {
+            ) {
             throw IntegrationException.conflict(
                     "JIRA_PROJECT_ALREADY_LINKED",
                     "Disconnect the current Jira project before linking another one"
             );
-        }
+            }
 
-        board.setName(jiraProject.name());
+            board.setName(jiraProject.name());
         board.setCloudId(resource.cloudId());
         board.setSiteUrl(resource.siteUrl());
         board.setJiraProjectId(jiraProject.id());
@@ -306,9 +311,9 @@ public class ProjectIntegrationService {
                         : null
         );
         board.setConnectionStatus(IntegrationStatus.CONNECTING);
-        if (board.getId() == null) {
-            board = jiraBoardRepository.saveAndFlush(board);
-        }
+            if (board.getId() == null) {
+                board = jiraBoardRepository.saveAndFlush(board);
+            }
         board.setEncryptedAccessToken(jiraCredentialService.encryptAccess(
                 board,
                 grant.accessToken()
@@ -321,15 +326,17 @@ public class ProjectIntegrationService {
                 grant.tokenExpiresAt(),
                 ZoneOffset.UTC
         ));
-        board.setGrantedScopes(String.join(" ", grant.scopes()));
+            board.setGrantedScopes(String.join(" ", resource.scopes()));
 
-        // Discovery is read-only and persists only a verified external numeric Agile id.
-        jiraBoardResolutionService.resolveForLinking(board, grant.accessToken());
+            // Discovery is read-only and persists only a verified external numeric Agile id.
+            stage = JiraLinkStage.DISCOVER_SCRUM_BOARDS;
+            jiraBoardResolutionService.resolveForLinking(board, grant.accessToken());
 
-        String webhookSecret = randomSecret();
-        URI callback = jiraWebhookCallback(webhookSecret);
-        JiraWebhookRegistration registration = null;
-        try {
+            String webhookSecret = randomSecret();
+            URI callback = jiraWebhookCallback(webhookSecret);
+            JiraWebhookRegistration registration = null;
+            try {
+                stage = JiraLinkStage.REGISTER_WEBHOOK;
             registration = jiraClient.ensureWebhook(
                     grant.accessToken(),
                     resource.cloudId(),
@@ -358,13 +365,19 @@ public class ProjectIntegrationService {
                     "BACKFILLING",
                     remoteAddress
             );
-            return integrations(principal, projectId);
-        } catch (RuntimeException exception) {
-            compensateCreatedWebhook(
-                    registration,
-                    grant.accessToken(),
-                    resource.cloudId(),
-                    projectId
+                return integrations(principal, projectId);
+            } catch (RuntimeException exception) {
+                compensateCreatedWebhook(
+                        registration,
+                        grant.accessToken(),
+                        resource.cloudId(),
+                        projectId
+                );
+                throw exception;
+            }
+        } catch (IntegrationException exception) {
+            logJiraLinkFailure(
+                    projectId, stage, verifiedCloudId, missingScopeNames, exception
             );
             throw exception;
         }
@@ -961,34 +974,48 @@ public class ProjectIntegrationService {
                 .toUri();
     }
 
-    private void requireJiraWebhookScopes(Set<String> grantedScopes) {
-        Set<String> configuredScopes = java.util.Arrays.stream(
-                        jiraProperties.scopes() == null
-                                ? new String[0]
-                                : jiraProperties.scopes().trim().split("\\s+")
-                )
-                .filter(scope -> !scope.isBlank())
-                .collect(Collectors.toSet());
-        requireJiraWebhookScopeSet(configuredScopes);
-        Set<String> scopes = grantedScopes == null ? Set.of() : grantedScopes;
-        // OAuth may omit `scope` from the token response when it is unchanged
-        // from the requested scope. In that case the provider's explicit 403
-        // mapping remains the authoritative signal rather than blocking a
-        // valid grant locally.
-        if (!scopes.isEmpty()) {
-            requireJiraWebhookScopeSet(scopes);
-        }
+    private void requireConfiguredJiraScopes() {
+        Set<String> required = new HashSet<>(JiraWriteScope.projectIntegrationScopes());
+        required.add(JiraWriteScope.OFFLINE_ACCESS_SCOPE);
+        JiraWriteScope.requireGranted(
+                JiraWriteScope.scopes(jiraProperties.scopes()),
+                required.toArray(String[]::new)
+        );
     }
 
-    private void requireJiraWebhookScopeSet(Set<String> scopes) {
-        boolean classicGranted = scopes.containsAll(CLASSIC_WEBHOOK_SCOPES);
-        boolean granularGranted = scopes.containsAll(GRANULAR_WEBHOOK_SCOPES);
-        if (!classicGranted && !granularGranted) {
-            throw new IntegrationException(
-                    org.springframework.http.HttpStatus.FORBIDDEN,
-                    "JIRA_WEBHOOK_SCOPE_MISSING",
-                    "Reconnect Jira with read:jira-work and manage:jira-webhook"
-            );
+    private void requireJiraLinkScopes(Set<String> resourceScopes) {
+        JiraWriteScope.requireGranted(
+                resourceScopes,
+                JiraWriteScope.linkScopes().toArray(String[]::new)
+        );
+    }
+
+    private void logJiraLinkFailure(
+            UUID projectId,
+            JiraLinkStage stage,
+            String verifiedCloudId,
+            Set<String> missingScopeNames,
+            IntegrationException exception
+    ) {
+        log.warn("Jira link failed: projectId={}, stage={}, providerOperation={}, cloudId={}, "
+                        + "upstreamHttpStatus={}, providerErrorCategory={}, requiredScopeCount={}, missingScopeNames={}",
+                projectId, stage, stage.providerOperation, verifiedCloudId,
+                exception.getStatus().value(), exception.getCode(),
+                JiraWriteScope.linkScopes().size(), missingScopeNames);
+    }
+
+    private enum JiraLinkStage {
+        LOAD_FRESH_GRANT("sessionGrant"),
+        VERIFY_ACCESSIBLE_RESOURCE("accessibleResources"),
+        SCOPE_PREFLIGHT("scopePreflight"),
+        RESOLVE_PROJECT("resolveProject"),
+        DISCOVER_SCRUM_BOARDS("discoverScrumBoards"),
+        REGISTER_WEBHOOK("registerWebhook");
+
+        private final String providerOperation;
+
+        JiraLinkStage(String providerOperation) {
+            this.providerOperation = providerOperation;
         }
     }
 

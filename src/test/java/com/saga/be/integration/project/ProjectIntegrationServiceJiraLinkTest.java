@@ -22,6 +22,7 @@ import com.saga.be.integration.provider.JiraAccessibleResource;
 import com.saga.be.integration.provider.JiraProjectInfo;
 import com.saga.be.integration.provider.JiraProviderClient;
 import com.saga.be.integration.provider.JiraWebhookRegistration;
+import com.saga.be.integration.provider.JiraWriteScope;
 import com.saga.be.integration.security.IntegrationAttemptLimiter;
 import com.saga.be.integration.security.IntegrationSecretCipher;
 import com.saga.be.integration.security.OAuthStateService;
@@ -110,6 +111,25 @@ class ProjectIntegrationServiceJiraLinkTest {
     }
 
     @Test
+    void rejectsMissingAgileBoardScopeBeforeCallingTheProvider() {
+        Fixture fixture = fixture(Set.of("read:jira-work", "manage:jira-webhook"));
+
+        IntegrationException exception = assertThrows(
+                IntegrationException.class,
+                () -> fixture.service.linkJira(
+                        fixture.principal,
+                        fixture.projectId,
+                        fixture.session,
+                        new JiraProjectLinkRequest("cloud-a", "SAGA"),
+                        "127.0.0.1"
+                )
+        );
+
+        assertEquals("JIRA_SCOPE_INSUFFICIENT", exception.getCode());
+        verify(fixture.jira, never()).projects(any(), any());
+    }
+
+    @Test
     void relinkUpdatesTheRetainedDisconnectedRowUsingTheFreshSessionGrant() {
         Fixture fixture = fixture();
         JiraBoard retained = new JiraBoard();
@@ -138,6 +158,24 @@ class ProjectIntegrationServiceJiraLinkTest {
         verify(fixture.credentialService).encryptRefresh(
                 retained, "test-refresh-token"
         );
+        verify(fixture.jira).projects("test-access-token", "cloud-a");
+        verify(fixture.jira).ensureWebhook(
+                eq("test-access-token"), eq("cloud-a"), eq("SAGA"), any(), any()
+        );
+    }
+
+    @Test
+    void linksWhenWriteOnlyRuntimeScopesAreMissing() {
+        Fixture fixture = fixture(JiraWriteScope.linkScopes());
+
+        fixture.service.linkJira(
+                fixture.principal,
+                fixture.projectId,
+                fixture.session,
+                new JiraProjectLinkRequest("cloud-a", "SAGA"),
+                "127.0.0.1"
+        );
+
         verify(fixture.jira).projects("test-access-token", "cloud-a");
         verify(fixture.jira).ensureWebhook(
                 eq("test-access-token"), eq("cloud-a"), eq("SAGA"), any(), any()
@@ -177,6 +215,10 @@ class ProjectIntegrationServiceJiraLinkTest {
     }
 
     private Fixture fixture() {
+        return fixture(JiraWriteScope.projectIntegrationScopes());
+    }
+
+    private Fixture fixture(Set<String> resourceScopes) {
         UUID projectId = UUID.randomUUID();
         Project project = new Project();
         project.setId(projectId);
@@ -219,7 +261,7 @@ class ProjectIntegrationServiceJiraLinkTest {
                         Instant.now().plusSeconds(3600),
                         Set.of("read:jira-work", "manage:jira-webhook"),
                         List.of(new JiraAccessibleResource(
-                                "cloud-a", "SAGA site", "https://site.example"
+                                "cloud-a", "SAGA site", "https://site.example", resourceScopes
                         ))
                 )
         );

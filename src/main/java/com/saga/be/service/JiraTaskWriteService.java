@@ -136,7 +136,15 @@ public class JiraTaskWriteService {
         if (operation.getStatus() == JiraWriteOperationStatus.COMPLETED) return TaskReadResponse.from(task);
         JiraBoard board = activeBoard(projectId);
         String token = credentialService.validAccessToken(board);
-        JiraWriteScope.requireGranted(board, JiraWriteScope.WRITE_SPRINT_SCOPE, JiraWriteScope.READ_SPRINT_SCOPE);
+        if (request.backlog()) {
+            JiraWriteScope.requireGranted(board, JiraWriteScope.WRITE_BOARD_SCOPE);
+        } else {
+            JiraWriteScope.requireGranted(
+                    board,
+                    JiraWriteScope.WRITE_SPRINT_SCOPE,
+                    JiraWriteScope.READ_SPRINT_SCOPE
+            );
+        }
         if (board.getJiraBoardId() == null || board.getJiraBoardId().isBlank()) {
             throw IntegrationException.conflict("JIRA_BOARD_NOT_CONFIGURED", "The Jira board is not configured");
         }
@@ -183,7 +191,12 @@ public class JiraTaskWriteService {
         }
         JiraBoard board = activeBoard(projectId);
         String token = credentialService.validAccessToken(board);
-        JiraWriteScope.requireGranted(board, JiraWriteScope.WRITE_ISSUE_SOFTWARE_SCOPE);
+        JiraWriteScope.requireGranted(
+                board,
+                JiraWriteScope.WRITE_ISSUE_SOFTWARE_SCOPE,
+                JiraWriteScope.READ_BOARD_ADMIN_SCOPE,
+                JiraWriteScope.READ_PROJECT_SCOPE
+        );
         if (board.getJiraBoardId() == null || board.getJiraBoardId().isBlank()) {
             throw IntegrationException.conflict("JIRA_BOARD_NOT_CONFIGURED", "The Jira board is not configured");
         }

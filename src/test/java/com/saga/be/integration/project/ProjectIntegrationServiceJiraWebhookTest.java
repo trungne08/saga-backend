@@ -20,6 +20,7 @@ import com.saga.be.integration.provider.GitHubProviderClient;
 import com.saga.be.integration.provider.JiraAccessibleResource;
 import com.saga.be.integration.provider.JiraProjectInfo;
 import com.saga.be.integration.provider.JiraProviderClient;
+import com.saga.be.integration.provider.JiraWriteScope;
 import com.saga.be.integration.provider.JiraWebhookRegistration;
 import com.saga.be.integration.security.IntegrationAttemptLimiter;
 import com.saga.be.integration.security.IntegrationSecretCipher;
@@ -115,7 +116,8 @@ class ProjectIntegrationServiceJiraWebhookTest {
                         Instant.now().plusSeconds(3600),
                         Set.of("read:jira-work", "manage:jira-webhook"),
                         List.of(new JiraAccessibleResource(
-                                "cloud", "site", "https://site.test"
+                                "cloud", "site", "https://site.test",
+                                JiraWriteScope.projectIntegrationScopes()
                         ))
                 )
         );

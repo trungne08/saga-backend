@@ -1,5 +1,14 @@
 # SAGA — Trạng thái hiện tại
 
+## Update 2026-08-07 — Jira OAuth scope và 3LO gateway
+
+- **CONFIRMED:** 3LO Jira Platform và Agile API dùng `api.atlassian.com/ex/jira/{cloudId}`, không dùng trực tiếp `{site}.atlassian.net` với bearer 3LO. `cloudId` chỉ được dùng sau khi match resource từ `accessible-resources` của fresh OAuth grant.
+- **CONFIRMED:** `/jira/link` preflight đúng bốn scope dùng tại link: `read:jira-work`, `manage:jira-webhook`, `read:board-scope:jira-software`, `read:project:jira`. Token chỉ có `read:jira-work` nhưng thiếu board scope bị chặn bằng `JIRA_SCOPE_INSUFFICIENT`; link không bị chặn chỉ vì thiếu Sprint/Task write-delete scope không dùng ở link.
+- **CONFIRMED:** error mapping sau preflight vẫn là 401 → `JIRA_ACCESS_REVOKED`, 403 → `JIRA_ACCESS_FORBIDDEN`, Sprint 404 → `JIRA_SPRINT_NOT_FOUND`, 429 → `JIRA_RATE_LIMITED`, network/5xx → `JIRA_PROVIDER_UNAVAILABLE`.
+- **CONFIRMED:** authorization request mặc định yêu cầu bộ scope as-built gồm classic Platform/webhook, `offline_access`, và Jira Software board/sprint/issue scopes vì source dùng các operation đó. `offline_access` không phải site product scope. Giá trị deploy vẫn có thể override qua property `app.integrations.jira.scopes`; override thiếu capability SAGA sẽ bị chặn trước khi mở project Jira OAuth.
+- **Verification:** `./mvnw.cmd clean test` hoàn tất **BUILD SUCCESS**: 97 suites / 549 tests / 0 failures / 0 errors / 0 skipped.
+- **TBD:** production smoke test chỉ có giá trị sau deploy, bật scope trong Developer Console và OAuth re-consent mới; FE không gửi Bearer/provider token.
+
 ## Update 2026-08-06 — Jira hydration/disconnect/relink hardening
 
 - **CONFIRMED:** reconciliation hydrate Sprint từ cả issue batch (`ISSUE_BATCH`) và local active Sprint (`LOCAL_SPRINT`), kể cả khi search Jira trả HTTP 200/0 issues hoặc local Sprint chưa có canonical dates.

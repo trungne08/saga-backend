@@ -194,7 +194,7 @@ class JiraSprintWriteServiceTest {
         f.board.setGrantedScopes("read:sprint:jira-software");
         when(f.operations.claim(any(), any(), eq(JiraWriteOperationType.SPRINT_START), any(), any()))
                 .thenReturn(f.operation(JiraWriteOperationType.SPRINT_START, JiraWriteOperationStatus.PENDING));
-        assertEquals("JIRA_REQUIRED_SCOPE_MISSING", assertThrows(IntegrationException.class,
+        assertEquals("JIRA_SCOPE_INSUFFICIENT", assertThrows(IntegrationException.class,
                 () -> f.service.start(f.actor, f.projectId, existing.getId(), "key")).getCode());
         verifyNoInteractions(f.provider);
     }

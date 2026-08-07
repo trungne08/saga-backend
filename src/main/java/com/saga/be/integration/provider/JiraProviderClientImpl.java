@@ -186,7 +186,8 @@ public class JiraProviderClientImpl implements JiraProviderClient {
         response.forEach(resource -> resources.add(new JiraAccessibleResource(
                 requiredText(resource, "id"),
                 text(resource, "name"),
-                text(resource, "url")
+                text(resource, "url"),
+                scopeSet(resource.path("scopes"))
         )));
         return resources;
     }
@@ -1340,12 +1341,34 @@ public class JiraProviderClientImpl implements JiraProviderClient {
     }
 
     private URI jiraUri(String cloudId, String path) {
+        String verifiedCloudId = requiredPathSegment(cloudId);
+        if (path == null || !path.startsWith("/") || path.startsWith("//")) {
+            throw IntegrationException.invalid(
+                    "JIRA_URI_INVALID",
+                    "The Jira API path is invalid"
+            );
+        }
         return UriComponentsBuilder.fromUriString(properties.apiBaseUrl())
-                .pathSegment("ex", "jira", cloudId)
+                .pathSegment("ex", "jira", verifiedCloudId)
                 .path(path)
                 .build()
                 .encode()
                 .toUri();
+    }
+
+    private Set<String> scopeSet(JsonNode scopes) {
+        if (scopes == null || !scopes.isArray()) {
+            throw providerResponseInvalid();
+        }
+        Set<String> result = new LinkedHashSet<>();
+        for (JsonNode scope : scopes) {
+            String value = scalarText(scope);
+            if (value == null || value.isBlank() || value.length() > 255) {
+                throw providerResponseInvalid();
+            }
+            result.add(value);
+        }
+        return Set.copyOf(result);
     }
 
     private JiraCreateField toCreateField(JsonNode field) {

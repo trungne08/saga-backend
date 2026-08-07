@@ -1,5 +1,19 @@
 # SAGA — Nhật ký quyết định kỹ thuật
 
+## DEC-043 — Xác thực Jira site scope trước link và chuẩn hóa 3LO gateway (2026-08-07)
+
+**Status: ACCEPTED.**
+
+**Context.** OAuth grant mới có thể hợp lệ nhưng thiếu Jira Software Agile scope. SAGA discover Scrum board trong `/jira/link`; vì thế HTTP 401 ở Agile API trước đây có thể bị hiểu nhầm là `JIRA_ACCESS_REVOKED` dù nguyên nhân là scope. 3LO cũng yêu cầu URL site-specific qua `api.atlassian.com/ex/jira/{cloudId}`.
+
+**Decision.** `accessible-resources` là nguồn xác thực cloudId/site scope sau token exchange. Link chỉ dùng resource đã match và preflight scope đúng với provider operation của link; capability Sprint/Task khác được preflight tại operation của chúng. Thiếu scope trả `JIRA_SCOPE_INSUFFICIENT`. `JIRA_ACCESS_REVOKED` giữ nghĩa upstream 401 xảy ra sau preflight. URI provider được tập trung qua builder gateway, reject cloudId/path không hợp lệ, và không dùng FE site URL cho bearer request.
+
+**Scope matrix (as-built).** Project/search/issue metadata read dùng `read:jira-work`; issue mutation dùng `write:jira-work`; dynamic webhook dùng `read:jira-work` + `manage:jira-webhook`; refresh cần `offline_access`; board discovery cần `read:board-scope:jira-software` + `read:project:jira`; board configuration dùng `read:board-scope.admin:jira-software` + `read:project:jira`; Sprint read/create-update-delete dùng lần lượt `read:sprint:jira-software`, `write:sprint:jira-software`, `delete:sprint:jira-software`; task backlog move/estimation dùng `write:board-scope:jira-software` và `write:issue:jira-software` theo operation hiện có.
+
+**Consequences.** Atlassian Developer Console phải bật đúng toàn bộ scope matrix và backend authorization request phải cùng bộ scope. `offline_access` nằm trong authorization request để nhận refresh token, nhưng không được yêu cầu trong `accessible-resources.scopes`. Sau thay đổi scope, deploy không đủ: người dùng phải bắt đầu OAuth consent mới; grant/access/refresh token cũ không được giả định có scope mới. Scope chỉ mở khả năng app, không vượt Jira permission của người dùng.
+
+**Evidence.** Jira Provider URI/resource tests, Jira link least-privilege preflight test và full Maven 97 suites / 549 tests / 0 failures / 0 errors / 0 skipped. Runtime production vẫn **TBD** đến deploy và smoke test.
+
 ## DEC-042 — Jira hydration fail-isolated, Sprint 404 retention và fresh-grant relink
 
 - Ngày: 2026-08-06; trạng thái: ACCEPTED.

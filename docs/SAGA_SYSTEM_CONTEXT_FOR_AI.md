@@ -1,5 +1,15 @@
 # SAGA — Context kỹ thuật hệ thống hiện tại
 
+## Update 2026-08-07 — Jira 3LO resource, scope preflight và link diagnostics
+
+- **CONFIRMED:** mọi Jira site-specific request của `JiraProviderClientImpl` đều đi qua 3LO gateway `https://api.atlassian.com/ex/jira/{verifiedCloudId}{apiPath}` cho Jira Platform (`/rest/api/3/...`) và Jira Software Agile (`/rest/agile/1.0/...`). URI builder chỉ nhận cloudId/path segment hợp lệ; không ghép site URL do FE gửi vào provider request.
+- **CONFIRMED:** callback đổi authorization code xong gọi `GET /oauth/token/accessible-resources`; SAGA lưu resource đã trả về trong session-bound fresh grant, bao gồm `cloudId`, site URL và `scopes`. `POST /jira/link` chỉ chấp nhận cloudId khớp đúng resource này; site không khớp trả `JIRA_SITE_NOT_AUTHORIZED` trước khi gọi provider.
+- **CONFIRMED:** preflight của `/jira/link` chỉ kiểm tra site product scopes cho đúng provider call của link: `read:jira-work`, `manage:jira-webhook`, `read:board-scope:jira-software`, `read:project:jira`. Thiếu scope trả `409 JIRA_SCOPE_INSUFFICIENT` với thông điệp an toàn, không map thành `JIRA_ACCESS_REVOKED` và không gọi provider. Sprint/Task write-delete kiểm scope tương ứng ngay tại runtime operation.
+- **CONFIRMED:** authorization request mặc định yêu cầu toàn bộ capability SAGA thực sự dùng: `read:jira-work`, `write:jira-work`, `manage:jira-webhook`, `offline_access`, `read:board-scope:jira-software`, `read:board-scope.admin:jira-software`, `read:project:jira`, `read:sprint:jira-software`, `write:sprint:jira-software`, `delete:sprint:jira-software`, `write:board-scope:jira-software`, `write:issue:jira-software`. `offline_access` chỉ là authorization-request scope để refresh token, không được đối chiếu với `accessible-resources.scopes`. Các scope Agile không được suy diễn từ `read:jira-work`.
+- **CONFIRMED:** link stages có safe structured diagnostic gồm `projectId`, stage/provider operation, verified cloudId, upstream HTTP status, error category, số scope cần và tên scope còn thiếu; không log access/refresh token, authorization code/state, cookie/header hay provider raw body.
+- **CONFIRMED:** thứ tự link là manager authorization → fresh session grant → verified accessible resource → link-scope preflight → resolve project → discover Scrum board → persist retained/new row và credential → dynamic webhook → dispatch backfill sau commit. Lỗi trước webhook không đưa integration thành active/backfill và không dispatch sync.
+- **TBD runtime:** trước production phải bật đúng scope trong Atlassian Developer Console, deploy, disconnect/re-consent OAuth, rồi smoke test link, board discovery, Get Sprint và Sprint CRUD. Thay đổi scope trên app hoặc consent không tự ban quyền mới cho token/grant cũ.
+
 ## Update 2026-08-06 — Jira hydration, disconnect và relink
 
 - **CONFIRMED:** Jira search HTTP 200 với 0 issues vẫn hydrate mọi Sprint local active (`deletedAt is null`) của board. Candidate hydration được gắn nguồn `ISSUE_BATCH` hoặc `LOCAL_SPRINT`; Sprint local có thể còn thiếu canonical dates.

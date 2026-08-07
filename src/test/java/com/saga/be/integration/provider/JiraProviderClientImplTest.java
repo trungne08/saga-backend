@@ -42,6 +42,8 @@ class JiraProviderClientImplTest {
             + "/rest/agile/1.0/sprint/42";
     private static final String AGILE_BOARD_URL = BASE + "/ex/jira/" + CLOUD_ID
             + "/rest/agile/1.0/board";
+    private static final String PROJECT_URL = BASE + "/ex/jira/" + CLOUD_ID
+            + "/rest/api/3/project/search?startAt=0&maxResults=50&orderBy=key";
     private static final URI CALLBACK = URI.create(
             "https://callback.test/api/webhooks/jira?token=CALLBACK_SECRET"
     );
@@ -421,6 +423,34 @@ class JiraProviderClientImplTest {
     }
 
     @Test
+    void uses3loGatewayForProjectAndBoardDiscoveryAndParsesResourceScopes() {
+        Fixture fixture = fixture();
+        fixture.server.expect(requestTo(BASE + "/oauth/token/accessible-resources"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(json("""
+                        [{"id":"cloud-123","name":"SAGA","url":"https://site.example",
+                          "scopes":["read:jira-work","read:board-scope:jira-software"]}]
+                        """));
+        fixture.server.expect(requestTo(PROJECT_URL))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(json("{\"isLast\":true,\"values\":[]}"));
+        fixture.server.expect(request -> assertThat(request.getURI().toString())
+                        .startsWith(AGILE_BOARD_URL + "?projectKeyOrId=10034"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(json("{\"isLast\":true,\"values\":[]}"));
+
+        assertThat(fixture.client.accessibleResources("ACCESS_TOKEN_SECRET"))
+                .singleElement()
+                .satisfies(resource -> assertThat(resource.scopes())
+                        .containsExactlyInAnyOrder(
+                                "read:jira-work", "read:board-scope:jira-software"
+                        ));
+        fixture.client.projects("ACCESS_TOKEN_SECRET", CLOUD_ID);
+        fixture.client.discoverAgileBoards("ACCESS_TOKEN_SECRET", CLOUD_ID, "10034");
+        fixture.server.verify();
+    }
+
+    @Test
     void normalizesCanonicalSprintOffsetsToUtcAndKeepsNull() {
         Fixture fixture = fixture();
         fixture.server.expect(requestTo(SPRINT_URL))
@@ -736,7 +766,7 @@ class JiraProviderClientImplTest {
                 () -> JiraWriteScope.requireGranted("read:jira-work")
         );
 
-        assertEquals("JIRA_WRITE_SCOPE_MISSING", exception.getCode());
+        assertEquals("JIRA_SCOPE_INSUFFICIENT", exception.getCode());
         assertThat(exception.getMessage()).doesNotContain("ACCESS_TOKEN_SECRET");
     }
 
