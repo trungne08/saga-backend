@@ -797,7 +797,7 @@ public class JiraProviderClientImpl implements JiraProviderClient {
         if (changes == null || changes.isEmpty()) {
             throw IntegrationException.invalid("JIRA_SPRINT_UPDATE_EMPTY", "No sprint changes were supplied");
         }
-        return toSprint(patchJson(jiraUri(
+        return toSprint(postJson(jiraUri(
                 cloudId, "/rest/agile/1.0/sprint/" + requiredPathSegment(sprintId)
         ), accessToken, changes));
     }
@@ -1248,24 +1248,6 @@ public class JiraProviderClientImpl implements JiraProviderClient {
             if (response == null) {
                 throw providerResponseInvalid();
             }
-            return response;
-        } catch (RestClientResponseException exception) {
-            throw translate(exception);
-        } catch (RestClientException exception) {
-            throw providerUnavailable();
-        }
-    }
-
-    private JsonNode patchJson(URI uri, String token, Object body) {
-        try {
-            JsonNode response = restClient.patch()
-                    .uri(uri)
-                    .headers(headers -> bearer(headers, token))
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(body)
-                    .retrieve()
-                    .body(JsonNode.class);
-            if (response == null) throw providerResponseInvalid();
             return response;
         } catch (RestClientResponseException exception) {
             throw translate(exception);

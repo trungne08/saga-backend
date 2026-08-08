@@ -24,6 +24,7 @@ import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
@@ -778,10 +779,11 @@ class JiraProviderClientImplTest {
     }
 
     @Test
-    void updatesSprintStateThroughTheAgileSprintPatchEndpoint() {
+    void startsSprintThroughTheAgileSprintPartialUpdateEndpoint() {
         Fixture fixture = fixture();
         fixture.server.expect(requestTo(SPRINT_URL))
-                .andExpect(method(HttpMethod.PATCH))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(this::assertJsonBearerRequest)
                 .andExpect(content().json("{\"state\":\"active\"}"))
                 .andRespond(json("{\"id\":\"42\",\"name\":\"Sprint 42\",\"state\":\"active\"}"));
 
@@ -790,6 +792,40 @@ class JiraProviderClientImplTest {
         );
 
         assertEquals("active", sprint.state());
+        fixture.server.verify();
+    }
+
+    @Test
+    void closesSprintThroughTheAgileSprintPartialUpdateEndpoint() {
+        Fixture fixture = fixture();
+        fixture.server.expect(requestTo(SPRINT_URL))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(this::assertJsonBearerRequest)
+                .andExpect(content().json("{\"state\":\"closed\"}"))
+                .andRespond(json("{\"id\":\"42\",\"name\":\"Sprint 42\",\"state\":\"closed\"}"));
+
+        JiraSprintSnapshot sprint = fixture.client.updateSprint(
+                "ACCESS_TOKEN_SECRET", CLOUD_ID, "42", java.util.Map.of("state", "closed")
+        );
+
+        assertEquals("closed", sprint.state());
+        fixture.server.verify();
+    }
+
+    @Test
+    void partiallyUpdatesSprintThroughPostWithoutReplacingOmittedFields() {
+        Fixture fixture = fixture();
+        fixture.server.expect(requestTo(SPRINT_URL))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(this::assertJsonBearerRequest)
+                .andExpect(content().json("{\"name\":\"Renamed\"}"))
+                .andRespond(json("{\"id\":\"42\",\"name\":\"Renamed\",\"state\":\"future\"}"));
+
+        JiraSprintSnapshot sprint = fixture.client.updateSprint(
+                "ACCESS_TOKEN_SECRET", CLOUD_ID, "42", java.util.Map.of("name", "Renamed")
+        );
+
+        assertEquals("Renamed", sprint.name());
         fixture.server.verify();
     }
 
@@ -1147,6 +1183,17 @@ class JiraProviderClientImplTest {
         assertEquals(expectedCode, exception.getCode());
         assertThat(exception.getMessage()).doesNotContain("PROVIDER_SECRET");
         fixture.server.verify();
+    }
+
+    private void assertJsonBearerRequest(
+            org.springframework.http.client.ClientHttpRequest request
+    ) {
+        String authorization = request.getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
+        assertThat(authorization != null
+                && authorization.startsWith("Bearer ")
+                && authorization.length() > "Bearer ".length()).isTrue();
+        assertThat(request.getHeaders().getAccept()).contains(MediaType.APPLICATION_JSON);
+        assertThat(request.getHeaders().getContentType()).isEqualTo(MediaType.APPLICATION_JSON);
     }
 
     private void assertSprintFailure(
