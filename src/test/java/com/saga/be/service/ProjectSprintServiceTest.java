@@ -79,23 +79,31 @@ class ProjectSprintServiceTest {
 
         Sprint sprintOne = entityWithId(new Sprint(), UUID.randomUUID());
         sprintOne.setName("Sprint 1");
+        sprintOne.setState("future");
         sprintOne.setStartDate(LocalDateTime.parse("2026-08-01T02:00:00"));
         sprintOne.setEndDate(LocalDateTime.parse("2026-08-15T02:00:00"));
         Sprint sprintTwo = entityWithId(new Sprint(), UUID.randomUUID());
         sprintTwo.setName("Sprint 2");
+        sprintTwo.setState("active");
+        Sprint sprintThree = entityWithId(new Sprint(), UUID.randomUUID());
+        sprintThree.setName("Sprint 3");
+        sprintThree.setState("closed");
 
         when(projectRepository.findById(projectId)).thenReturn(Optional.of(project));
         when(teamRepository.findByProjectId(projectId)).thenReturn(Optional.of(team));
         when(sprintRepository.findByBoardProjectIdOrderByStartDateAsc(projectId))
-                .thenReturn(List.of(sprintOne, sprintTwo));
+                .thenReturn(List.of(sprintOne, sprintTwo, sprintThree));
 
         SprintListResponse response = service.getByProject(studentOrLecturerPrincipal(ApplicationRole.LECTURER, lecturerId), projectId);
 
         assertEquals(projectId, response.projectId());
         assertEquals(teamId, response.teamId());
         assertEquals(SprintListState.READY, response.state());
-        assertEquals(2, response.sprints().size());
+        assertEquals(3, response.sprints().size());
         assertEquals("Sprint 1", response.sprints().get(0).sprintName());
+        assertEquals("future", response.sprints().get(0).state());
+        assertEquals("active", response.sprints().get(1).state());
+        assertEquals("closed", response.sprints().get(2).state());
         assertEquals(
                 LocalDateTime.parse("2026-08-01T02:00:00"),
                 response.sprints().get(0).startDate()
@@ -126,6 +134,7 @@ class ProjectSprintServiceTest {
 
         Sprint sprint = entityWithId(new Sprint(), UUID.randomUUID());
         sprint.setName("Sprint 1");
+        sprint.setState("closed");
 
         when(teamRepository.findWithCourseAndInstructorById(teamId)).thenReturn(Optional.of(team));
         when(teamMemberRepository.existsByTeamIdAndStudentId(teamId, studentId)).thenReturn(true);
@@ -137,6 +146,29 @@ class ProjectSprintServiceTest {
         assertEquals(teamId, response.teamId());
         assertEquals(SprintListState.READY, response.state());
         assertEquals(1, response.sprints().size());
+        assertEquals("closed", response.sprints().get(0).state());
+    }
+
+    @Test
+    void reflectsCanonicalSprintStateChangesInProjectList() {
+        UUID projectId = UUID.randomUUID();
+        Project project = entityWithId(new Project(), projectId);
+        Team team = entityWithId(new Team(), UUID.randomUUID());
+        team.setProject(project);
+        Sprint sprint = entityWithId(new Sprint(), UUID.randomUUID());
+        sprint.setState("future");
+
+        when(projectRepository.findById(projectId)).thenReturn(Optional.of(project));
+        when(teamRepository.findByProjectId(projectId)).thenReturn(Optional.of(team));
+        when(sprintRepository.findByBoardProjectIdOrderByStartDateAsc(projectId))
+                .thenReturn(List.of(sprint));
+        SagaPrincipal admin = studentOrLecturerPrincipal(ApplicationRole.ADMIN, UUID.randomUUID());
+
+        assertEquals("future", service.getByProject(admin, projectId).sprints().get(0).state());
+        sprint.setState("active");
+        assertEquals("active", service.getByProject(admin, projectId).sprints().get(0).state());
+        sprint.setState("closed");
+        assertEquals("closed", service.getByProject(admin, projectId).sprints().get(0).state());
     }
 
     @Test

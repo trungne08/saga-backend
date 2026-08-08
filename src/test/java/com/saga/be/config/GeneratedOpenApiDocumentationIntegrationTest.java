@@ -94,6 +94,7 @@ class GeneratedOpenApiDocumentationIntegrationTest {
         assertTrue(teamSprint.at("/responses/403").isObject());
         assertTrue(teamSprint.at("/responses/404").isObject());
         assertTrue(root.at("/components/schemas/SprintListResponse/properties/state").isObject());
+        assertTrue(root.at("/components/schemas/SprintSummaryResponse/properties/state").isObject());
     }
 
     private Set<String> documentedTagNames(JsonNode root) {

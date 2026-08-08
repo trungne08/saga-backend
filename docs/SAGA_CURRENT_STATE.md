@@ -1,5 +1,11 @@
 # SAGA — Trạng thái hiện tại
 
+## Update 2026-08-08 — Jira Sprint state trong list response
+
+- **CONFIRMED:** hai list route Project/Team cùng dùng `SprintSummaryResponse`; mỗi item nay có `state` (`String` nullable) lấy trực tiếp từ canonical local `Sprint.state`. Các giá trị Jira được giữ nguyên, gồm `future`, `active`, `closed`; không tạo business state mới, không suy diễn theo ngày và không gọi Jira provider khi GET.
+- **CONFIRMED:** `response.state` cấp danh sách vẫn là `PROJECT_NOT_CREATED` / `EMPTY` / `READY`; `response.sprints[i].state` là trạng thái của Sprint cụ thể. Start/Close write-through hiện hữu làm canonical state đổi, nên GET list kế tiếp phản ánh `active` hoặc `closed`.
+- **Verification:** Project/Team list, state future/active/closed, canonical state transition mapping và generated OpenAPI schema được kiểm thử; không thay entity/schema/migration, authorization, provider hay Jira write flow.
+
 ## Update 2026-08-08 — CORS preflight cho Jira Task/Sprint idempotency
 
 - **CONFIRMED:** CORS giữ explicit origin allowlist, `allowCredentials=true` và methods `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS`. Allowed request headers là `Authorization`, `Content-Type`, `X-XSRF-TOKEN`, `Accept`, `Idempotency-Key`; không dùng wildcard.

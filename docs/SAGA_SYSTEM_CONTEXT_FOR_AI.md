@@ -1,5 +1,11 @@
 # SAGA — Context kỹ thuật hệ thống hiện tại
 
+## Update 2026-08-08 — Jira Sprint state trong list response
+
+- **CONFIRMED:** `Sprint.state` đã tồn tại là `String` nullable trong canonical local read model và `JiraSprintResponse` đã trả nguyên representation này. `SprintSummaryResponse` nay trả thêm `state` từ trực tiếp `Sprint#getState()` cho cả `GET /api/v1/projects/{projectId}/sprints` và `GET /api/v1/teams/{teamId}/sprints`.
+- **CONFIRMED:** list service chỉ đọc repository local, không inject/gọi Jira provider, không suy diễn state theo thời gian. Top-level `SprintListResponse.state` giữ nguyên `PROJECT_NOT_CREATED` / `EMPTY` / `READY`; item `sprints[i].state` là state Jira Sprint như `future`, `active`, `closed`.
+- **CONFIRMED:** Start/Close hiện hữu canonical fetch/upsert local trước khi hoàn tất, nên list read model phản ánh state mới mà không đổi business write flow, authorization, idempotency, entity hay migration.
+
 ## Update 2026-08-07 — Jira simple-board Sprint capability probe
 
 - **CONFIRMED runtime evidence:** SDP có đúng một board nhìn thấy được: external ID `35`, `type=simple`, association `projectId=10034` / `projectKey=SDP`. Board Features trả machine-identifier rỗng; Project Features không có Sprint identifier hữu dụng. Hai metadata source này không đủ để quyết định capability.

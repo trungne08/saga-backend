@@ -8,6 +8,7 @@ public record SprintSummaryResponse(
         UUID sprintId,
         String sprintName,
         String externalSprintId,
+        String state,
         LocalDateTime startDate,
         LocalDateTime endDate,
         String goal
@@ -17,6 +18,7 @@ public record SprintSummaryResponse(
                 sprint.getId(),
                 sprint.getName(),
                 sprint.getExternalSprintId(),
+                sprint.getState(),
                 sprint.getStartDate(),
                 sprint.getEndDate(),
                 sprint.getGoal()

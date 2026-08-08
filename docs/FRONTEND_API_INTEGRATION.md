@@ -1,5 +1,11 @@
 # SAGA Frontend API Integration Guide
 
+## Sprint list item state — 2026-08-08
+
+`GET /api/v1/projects/{projectId}/sprints` và `GET /api/v1/teams/{teamId}/sprints` cùng trả thêm trường additive `state` trong từng phần tử `sprints`. Đây là Jira Sprint state canonical cục bộ, kiểu `string`, giữ nguyên giá trị Jira như `future`, `active` hoặc `closed`; không suy diễn từ ngày tháng và không gọi Jira khi đọc danh sách.
+
+Ví dụ một item: `sprintId`, `sprintName`, `externalSprintId`, `state`, `startDate`, `endDate`, `goal`. `response.state` ở cấp danh sách vẫn giữ nghĩa cũ `PROJECT_NOT_CREATED` / `EMPTY` / `READY`; nó khác với `response.sprints[i].state`. Sau Start/Close đã canonical write-through, lần GET list tiếp theo phản ánh state local mới.
+
 ## Jira simple-board Sprint capability probe — 2026-08-07
 
 `POST /api/projects/{projectId}/jira/link` vẫn dùng browser session + CSRF và không nhận Bearer/provider credential từ FE. Runtime SDP có board `35`, `type=simple`, association `10034/SDP`; Board/Project Features không đưa ra Sprint identifier hữu dụng nên FE không được suy diễn từ chúng.

@@ -111,4 +111,5 @@ Quy ước: `OAS` là response được khai báo trực tiếp trong OpenAPI; `
 
 - 96/96 operation được liệt kê. Phần lớn operation hiện chỉ khai báo success trong OpenAPI nên các semantics failure/empty chi tiết vẫn **TBD** cho task riêng.
 - `GET /api/v1/teams/{teamId}/sprints` là false-error đã xác nhận duy nhất được sửa trong milestone này: Team được phép truy cập nhưng chưa có Project trả 200 state `PROJECT_NOT_CREATED`, không còn 404.
+- `GET /api/v1/projects/{projectId}/sprints` và `GET /api/v1/teams/{teamId}/sprints` trả thêm additive `sprints[i].state`, lấy nguyên `String` từ canonical local Sprint (`future` / `active` / `closed` khi Jira cung cấp). Top-level list `state` giữ semantics `PROJECT_NOT_CREATED` / `EMPTY` / `READY`; list read không gọi Jira provider.
 - Không có API mới, migration, entity hay repository query được tạo từ audit này.
