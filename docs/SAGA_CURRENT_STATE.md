@@ -1,5 +1,11 @@
 # SAGA — Trạng thái hiện tại
 
+## Update 2026-08-08 — CORS preflight cho Jira Task/Sprint idempotency
+
+- **CONFIRMED:** CORS giữ explicit origin allowlist, `allowCredentials=true` và methods `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS`. Allowed request headers là `Authorization`, `Content-Type`, `X-XSRF-TOKEN`, `Accept`, `Idempotency-Key`; không dùng wildcard.
+- **CONFIRMED:** mọi Jira Task/Sprint mutation vẫn bắt buộc `Idempotency-Key`. Vì FE có thể gọi cross-origin bằng browser session với `credentials: "include"`, preflight nay cho phép header này trước khi POST/PUT/PATCH/DELETE tới controller; không thêm Bearer và không đổi session, CSRF hay authorization.
+- **Verification:** `SecurityIntegrationTest` kiểm chứng preflight cho cả `/api/v1/projects/{projectId}/sprints` và `/api/v1/projects/{projectId}/tasks`, gồm origin cấu hình, credentials, POST và các request header viết thường theo HTTP case-insensitive semantics. Targeted Maven: 95 tests / 0 failures / 0 errors / 0 skipped.
+
 ## Update 2026-08-07 — Jira simple-board Sprint capability probe
 
 - **CONFIRMED runtime:** SDP board `35`, `type=simple`, association `10034/SDP`; Board Features rỗng và Project Features không expose Sprint identifier hữu dụng. Vì vậy metadata feature không còn là nguồn quyết định Sprint capability.

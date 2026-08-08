@@ -352,11 +352,11 @@ Tài liệu ghi lại quyết định đã được code/runtime fact chứng mi
 - Ngày: 2026-08-02
 - Trạng thái: ACCEPTED
 - Bối cảnh: Browser cross-origin mutation cần preflight.
-- Quyết định: Explicit allowed origins; credentials true; GET/POST/PUT/PATCH/DELETE/OPTIONS; cho `X-XSRF-TOKEN`, Content-Type, Authorization, Accept.
-- Lý do: Hỗ trợ API session + CSRF.
+- Quyết định: Explicit allowed origins; credentials true; GET/POST/PUT/PATCH/DELETE/OPTIONS; allowed request headers là `Authorization`, `Content-Type`, `X-XSRF-TOKEN`, `Accept`, `Idempotency-Key`.
+- Lý do: Hỗ trợ API session + CSRF và Jira Task/Sprint mutation bắt buộc `Idempotency-Key`; browser cross-origin phải được preflight allow header này trước khi request thật tới controller.
 - Hệ quả: `FRONTEND_ORIGINS` là config bắt buộc, không wildcard.
 - Rủi ro: Origin thiếu/sai scheme hoặc port sẽ bị từ chối.
-- Evidence: `CorsConfig#corsConfigurationSource`, `SecurityIntegrationTest#corsAllowsTheConfiguredFrontendToSendTheCsrfHeaderWithCredentials`.
+- Evidence: `CorsConfig#corsConfigurationSource`, `SecurityIntegrationTest#corsAllowsTheConfiguredFrontendToSendTheCsrfHeaderWithCredentials`, preflight regression cho Jira Task/Sprint.
 - Việc cần theo dõi: Đồng bộ danh sách origins theo môi trường.
 
 ## DEC-014 — Railway deploy không tự động deploy Cognito Lambda

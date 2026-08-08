@@ -21,6 +21,7 @@ import com.saga.be.security.ApplicationRole;
 import com.saga.be.security.NoStoreOAuth2AuthorizedClientRepository;
 import com.saga.be.security.SagaPrincipal;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import jakarta.servlet.http.Cookie;
@@ -253,6 +254,20 @@ class SecurityIntegrationTest {
     }
 
     @Test
+    void corsPreflightAllowsJiraSprintMutationIdempotencyHeader() throws Exception {
+        assertJiraMutationPreflightIsAllowed(
+                "/api/v1/projects/10000000-0000-0000-0000-000000000001/sprints"
+        );
+    }
+
+    @Test
+    void corsPreflightAllowsJiraTaskMutationIdempotencyHeader() throws Exception {
+        assertJiraMutationPreflightIsAllowed(
+                "/api/v1/projects/10000000-0000-0000-0000-000000000001/tasks"
+        );
+    }
+
+    @Test
     void corsDoesNotGrantCredentialsToAnUnconfiguredOrigin() throws Exception {
         mockMvc.perform(options("/api/v1/subjects")
                         .header("Origin", "http://localhost:3001")
@@ -411,6 +426,37 @@ class SecurityIntegrationTest {
 
     private Authentication adminAuthentication() {
         return authenticationFor(ApplicationRole.ADMIN);
+    }
+
+    private void assertJiraMutationPreflightIsAllowed(String route) throws Exception {
+        MvcResult result = mockMvc.perform(options(route)
+                        .header("Origin", "http://localhost:3000")
+                        .header("Access-Control-Request-Method", "POST")
+                        .header(
+                                "Access-Control-Request-Headers",
+                                "content-type, x-xsrf-token, idempotency-key"
+                        ))
+                .andExpect(status().isOk())
+                .andExpect(header().string(
+                        "Access-Control-Allow-Origin",
+                        "http://localhost:3000"
+                ))
+                .andExpect(header().string(
+                        "Access-Control-Allow-Credentials",
+                        "true"
+                ))
+                .andExpect(header().string(
+                        "Access-Control-Allow-Methods",
+                        containsString("POST")
+                ))
+                .andReturn();
+
+        String allowedHeaders = result.getResponse().getHeader("Access-Control-Allow-Headers");
+        assertNotNull(allowedHeaders);
+        String normalizedAllowedHeaders = allowedHeaders.toLowerCase(Locale.ROOT);
+        assertTrue(normalizedAllowedHeaders.contains("content-type"));
+        assertTrue(normalizedAllowedHeaders.contains("x-xsrf-token"));
+        assertTrue(normalizedAllowedHeaders.contains("idempotency-key"));
     }
 
     private Authentication authenticationFor(ApplicationRole role) {

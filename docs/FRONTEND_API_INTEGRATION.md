@@ -492,7 +492,7 @@ sách cách nhau bằng dấu phẩy). Mỗi origin phải là HTTP(S) origin r�
 chứa wildcard, path, query, fragment hoặc user info. CORS cho phép:
 
 - methods: `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS`;
-- request headers: `Authorization`, `Content-Type`, `X-XSRF-TOKEN`, `Accept`;
+- request headers: `Authorization`, `Content-Type`, `X-XSRF-TOKEN`, `Accept`, `Idempotency-Key`;
 - exposed header: `Location`;
 - credentials: `true`.
 
@@ -531,10 +531,16 @@ có của backend; `COGNITO_DOMAIN` là tùy chọn nếu muốn chỉ định o
 HTTPS, nếu trống backend suy ra domain từ authorization URI. Không truyền
 `logout_uri` từ query string người dùng: backend chỉ dùng URI cấu hình.
 
+`Idempotency-Key` là bắt buộc cho mọi Jira Task/Sprint mutation. Khi frontend gọi
+cross-origin với browser session và `credentials: "include"`, browser sẽ preflight
+header này; backend cho phép nó cùng `Content-Type` và `X-XSRF-TOKEN` trước khi
+request mutation thật đến controller. Đây không thay đổi authentication contract:
+frontend tiếp tục dùng session + credentials, không dùng Bearer.
+
 `FRONTEND_ORIGINS` được tách bằng dấu phẩy, trim từng phần, bỏ phần rỗng,
 deduplicate và chỉ chấp nhận HTTP(S) origin không wildcard/path/query/fragment.
 CORS cho phép `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS`; các request
-header `Authorization`, `Content-Type`, `X-XSRF-TOKEN`, `Accept`; và
+header `Authorization`, `Content-Type`, `X-XSRF-TOKEN`, `Accept`, `Idempotency-Key`; và
 `allowCredentials=true`. Preflight `OPTIONS` vì vậy không cần session.
 
 ---
