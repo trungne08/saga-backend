@@ -176,6 +176,31 @@ class JiraWriteRecoveryServiceTest {
     }
 
     @Test
+    void remoteSucceededStartWithCanonical401IsRetainedForCanonicalRepairWithoutReplay() {
+        JiraWriteOperationRepository operations = mock(JiraWriteOperationRepository.class);
+        JiraBoardRepository boards = mock(JiraBoardRepository.class);
+        JiraCredentialService credentials = mock(JiraCredentialService.class);
+        JiraProviderClient provider = mock(JiraProviderClient.class);
+        JiraWriteOperationService operationService = mock(JiraWriteOperationService.class);
+        Project project = Project.builder().build(); project.setId(UUID.randomUUID());
+        JiraBoard board = JiraBoard.builder().project(project).cloudId("cloud").build(); board.setId(UUID.randomUUID());
+        JiraWriteOperation operation = operation(project, JiraWriteOperationType.SPRINT_START, "42");
+        when(operations.findByStatusIn(any())).thenReturn(List.of(operation));
+        when(boards.findByProjectId(project.getId())).thenReturn(Optional.of(board));
+        when(credentials.validAccessToken(board)).thenReturn("token");
+        when(provider.getSprint("token", "cloud", "42"))
+                .thenThrow(IntegrationException.conflict("JIRA_ACCESS_REVOKED", "safe"));
+
+        assertThrows(IntegrationException.class, () -> recovery(operations, boards, credentials, provider,
+                mock(JiraIssueUpsertService.class), mock(JiraSprintUpsertService.class), mock(TaskRepository.class),
+                mock(SprintRepository.class), operationService).recoverRemoteSuccesses());
+
+        assertEquals(JiraWriteOperationStatus.REMOTE_SUCCEEDED, operation.getStatus());
+        verify(operationService, never()).complete(operation.getId());
+        verify(provider, never()).updateSprint(any(), any(), any(), any());
+    }
+
+    @Test
     void pendingAndUnknownAreNotSelectedForBlindRecovery() {
         JiraWriteOperationRepository operations = mock(JiraWriteOperationRepository.class);
         JiraProviderClient provider = mock(JiraProviderClient.class);

@@ -33,6 +33,11 @@ public interface JiraBoardRepository extends JpaRepository<JiraBoard, UUID> {
     @Query("select board from JiraBoard board where board.id = :id")
     Optional<JiraBoard> findForSyncClaimById(@Param("id") UUID id);
 
+    /** Serializes refresh-token rotation for every caller of a Jira connection. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select board from JiraBoard board where board.id = :id")
+    Optional<JiraBoard> findForCredentialRefreshById(@Param("id") UUID id);
+
     List<JiraBoard> findByConnectionStatusIn(List<IntegrationStatus> statuses);
 
     List<JiraBoard> findByWebhookExpiresAtBeforeAndConnectionStatusNot(

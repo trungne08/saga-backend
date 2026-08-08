@@ -9,6 +9,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -198,6 +199,50 @@ class JiraSprintWriteServiceTest {
         assertEquals("JIRA_SCOPE_INSUFFICIENT", assertThrows(IntegrationException.class,
                 () -> f.service.start(f.actor, f.projectId, existing.getId(), "key")).getCode());
         verifyNoInteractions(f.provider);
+        verify(f.credentials, never()).validAccessToken(f.board);
+        verify(f.operations).failed(org.mockito.ArgumentMatchers.any(), eq("JIRA_SCOPE_INSUFFICIENT"));
+    }
+
+    @Test
+    void providerStart401IsMappedAndMarkedAsKnownRemoteFailure() {
+        Fixture f = new Fixture(); Sprint existing = f.sprint("future"); f.stubSprint(existing);
+        JiraWriteOperation op = f.operation(JiraWriteOperationType.SPRINT_START, JiraWriteOperationStatus.PENDING);
+        when(f.operations.claim(any(), any(), eq(JiraWriteOperationType.SPRINT_START), any(), any())).thenReturn(op);
+        org.mockito.Mockito.doThrow(IntegrationException.conflict("JIRA_ACCESS_REVOKED", "safe"))
+                .when(f.provider).updateSprint("token", "cloud", "42", Map.of("state", "active"));
+
+        assertEquals("JIRA_ACCESS_REVOKED", assertThrows(IntegrationException.class,
+                () -> f.service.start(f.actor, f.projectId, existing.getId(), "key")).getCode());
+        verify(f.operations).failed(op.getId(), "JIRA_ACCESS_REVOKED");
+        verifyNoInteractions(f.upserts);
+    }
+
+    @Test
+    void providerStart403IsMappedAndMarkedAsKnownRemoteFailure() {
+        Fixture f = new Fixture(); Sprint existing = f.sprint("future"); f.stubSprint(existing);
+        JiraWriteOperation op = f.operation(JiraWriteOperationType.SPRINT_START, JiraWriteOperationStatus.PENDING);
+        when(f.operations.claim(any(), any(), eq(JiraWriteOperationType.SPRINT_START), any(), any())).thenReturn(op);
+        org.mockito.Mockito.doThrow(new IntegrationException(HttpStatus.FORBIDDEN, "JIRA_ACCESS_FORBIDDEN", "safe"))
+                .when(f.provider).updateSprint("token", "cloud", "42", Map.of("state", "active"));
+
+        assertEquals("JIRA_ACCESS_FORBIDDEN", assertThrows(IntegrationException.class,
+                () -> f.service.start(f.actor, f.projectId, existing.getId(), "key")).getCode());
+        verify(f.operations).failed(op.getId(), "JIRA_ACCESS_FORBIDDEN");
+        verifyNoInteractions(f.upserts);
+    }
+
+    @Test
+    void credentialRefreshFailureStopsStartBeforeRemoteMutation() {
+        Fixture f = new Fixture(); Sprint existing = f.sprint("future"); f.stubSprint(existing);
+        JiraWriteOperation op = f.operation(JiraWriteOperationType.SPRINT_START, JiraWriteOperationStatus.PENDING);
+        when(f.operations.claim(any(), any(), eq(JiraWriteOperationType.SPRINT_START), any(), any())).thenReturn(op);
+        when(f.credentials.validAccessToken(f.board)).thenThrow(IntegrationException.conflict(
+                "JIRA_REFRESH_TOKEN_MISSING", "safe"));
+
+        assertEquals("JIRA_REFRESH_TOKEN_MISSING", assertThrows(IntegrationException.class,
+                () -> f.service.start(f.actor, f.projectId, existing.getId(), "key")).getCode());
+        verify(f.operations).failed(op.getId(), "JIRA_REFRESH_TOKEN_MISSING");
+        verifyNoInteractions(f.provider);
     }
 
     @Test
@@ -252,6 +297,39 @@ class JiraSprintWriteServiceTest {
         verify(f.operations).markRemoteSucceeded(op.getId(), "42", null);
         verify(f.operations, never()).complete(op.getId());
         assertEquals("future", existing.getState());
+    }
+
+    @Test
+    void canonicalGet401AfterStartKeepsRemoteSuccessAndDoesNotReplayMutation() {
+        Fixture f = new Fixture(); Sprint existing = f.sprint("future"); f.stubSprint(existing);
+        JiraWriteOperation op = f.operation(JiraWriteOperationType.SPRINT_START, JiraWriteOperationStatus.PENDING);
+        when(f.operations.claim(any(), any(), eq(JiraWriteOperationType.SPRINT_START), any(), any())).thenReturn(op);
+        when(f.provider.getSprint("token", "cloud", "42"))
+                .thenThrow(IntegrationException.conflict("JIRA_ACCESS_REVOKED", "safe"));
+
+        assertEquals("JIRA_ACCESS_REVOKED", assertThrows(IntegrationException.class,
+                () -> f.service.start(f.actor, f.projectId, existing.getId(), "key")).getCode());
+        verify(f.operations).markRemoteSucceeded(op.getId(), "42", null);
+        verify(f.operations, never()).complete(op.getId());
+        verify(f.provider, times(1)).updateSprint("token", "cloud", "42", Map.of("state", "active"));
+        assertEquals("future", existing.getState());
+    }
+
+    @Test
+    void retryOfRemoteSucceededStartUsesCanonicalRepairOnly() {
+        Fixture f = new Fixture(); Sprint existing = f.sprint("future"); f.stubSprint(existing);
+        JiraWriteOperation op = f.operation(JiraWriteOperationType.SPRINT_START, JiraWriteOperationStatus.REMOTE_SUCCEEDED);
+        op.setRemoteResourceId("42");
+        JiraSprintSnapshot snapshot = f.snapshot("active", "Sprint");
+        when(f.operations.claim(any(), any(), eq(JiraWriteOperationType.SPRINT_START), any(), any())).thenReturn(op);
+        when(f.provider.getSprint("token", "cloud", "42")).thenReturn(snapshot);
+        when(f.upserts.upsert(f.board.getId(), snapshot)).thenAnswer(invocation -> {
+            existing.setState("active"); return existing;
+        });
+
+        assertEquals("active", f.service.start(f.actor, f.projectId, existing.getId(), "key").state());
+        verify(f.provider, never()).updateSprint(any(), any(), any(), any());
+        verify(f.operations).complete(op.getId());
     }
 
     @Test

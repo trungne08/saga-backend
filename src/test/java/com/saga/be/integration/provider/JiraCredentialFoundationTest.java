@@ -15,6 +15,7 @@ import com.saga.be.repository.JiraBoardRepository;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.Set;
+import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
@@ -66,6 +67,29 @@ class JiraCredentialFoundationTest {
                 .contains("write:jira-work");
         JiraWriteScope.requireGranted(board);
         verify(boards).saveAndFlush(board);
+    }
+
+    @Test
+    void reloadsTheLockedCredentialRowBeforeDecryptingToAvoidStaleCallerToken() {
+        IntegrationSecretCipher cipher = mock(IntegrationSecretCipher.class);
+        JiraProviderClient client = mock(JiraProviderClient.class);
+        JiraBoardRepository boards = mock(JiraBoardRepository.class);
+        JiraBoard staleCallerBoard = board();
+        staleCallerBoard.setEncryptedAccessToken("stale-ciphertext");
+        staleCallerBoard.setTokenExpiresAt(LocalDateTime.now().plusMinutes(5));
+        JiraBoard refreshedBoard = board();
+        refreshedBoard.setEncryptedAccessToken("fresh-ciphertext");
+        refreshedBoard.setTokenExpiresAt(LocalDateTime.now().plusMinutes(5));
+        refreshedBoard.setGrantedScopes("write:sprint:jira-software");
+        when(boards.findForCredentialRefreshById(staleCallerBoard.getId())).thenReturn(Optional.of(refreshedBoard));
+        when(cipher.decrypt("fresh-ciphertext", accessPurpose(refreshedBoard))).thenReturn("FRESH_ACCESS_TOKEN");
+
+        String accessToken = new JiraCredentialService(cipher, client, boards)
+                .validAccessToken(staleCallerBoard);
+
+        assertEquals("FRESH_ACCESS_TOKEN", accessToken);
+        verify(cipher, never()).decrypt("stale-ciphertext", accessPurpose(staleCallerBoard));
+        verify(client, never()).refresh(any());
     }
 
     private JiraBoard board() {

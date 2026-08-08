@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 
 import ch.qos.logback.classic.Logger;
@@ -773,6 +774,22 @@ class JiraProviderClientImplTest {
                 sprint.endDate()
         );
         assertEquals(sprint.startDate(), sprint.completeDate());
+        fixture.server.verify();
+    }
+
+    @Test
+    void updatesSprintStateThroughTheAgileSprintPatchEndpoint() {
+        Fixture fixture = fixture();
+        fixture.server.expect(requestTo(SPRINT_URL))
+                .andExpect(method(HttpMethod.PATCH))
+                .andExpect(content().json("{\"state\":\"active\"}"))
+                .andRespond(json("{\"id\":\"42\",\"name\":\"Sprint 42\",\"state\":\"active\"}"));
+
+        JiraSprintSnapshot sprint = fixture.client.updateSprint(
+                "ACCESS_TOKEN_SECRET", CLOUD_ID, "42", java.util.Map.of("state", "active")
+        );
+
+        assertEquals("active", sprint.state());
         fixture.server.verify();
     }
 
