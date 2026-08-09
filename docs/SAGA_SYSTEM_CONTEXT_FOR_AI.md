@@ -802,3 +802,9 @@ và reliability regression 20 tests đều pass.
 - **CONFIRMED:** `GET /api/admin/users` chỉ là danh sách tài khoản được quản lý: `STUDENT` và `LECTURER`; `ADMIN` bị loại ở union cơ sở dữ liệu trước cả phân trang nội dung và đếm `totalElements`. `role=ADMIN` vẫn hợp lệ theo enum parser hiện hữu và trả trang rỗng.
 - **CONFIRMED:** `GET /api/admin/system-stats` là chỉ số profile toàn cục riêng, vẫn đếm Admin + Lecturer + Student.
 - **CONFIRMED:** `SystemAuditLog.timestamp` là `Instant`, được ghi bằng `Instant.now()`, lưu Mongo BSON Date theo epoch-milliseconds và `GET /api/admin/audit-logs` trả ISO-8601 UTC có `Z`. BSON Date lịch sử đọc lại cùng instant; không backfill Mongo hay diễn giải lại timezone.
+
+## J1D canonical Task confirmation trong MySQL REPEATABLE_READ — 2026-08-10
+
+- **CONFIRMED_RUNTIME:** production MySQL chạy `REPEATABLE_READ`. Sau Jira POST và canonical GET/upsert, outer `JiraTaskWriteService#create` có thể giữ snapshot cũ nên không thấy Task vừa commit ở child `REQUIRES_NEW`, dù reconciliation transaction mới thấy Task.
+- **CONFIRMED_SOURCE:** canonical upsert commit bằng `REQUIRES_NEW` + `saveAndFlush`; confirmation nay gọi `JiraCanonicalTaskReadService` là bean riêng, `REQUIRES_NEW` + `readOnly`, nên không tái sử dụng snapshot outer. Response được map trong fresh transaction.
+- **CONFIRMED:** recovery Task operation dùng cùng fresh confirmation; nếu Task chưa thấy thì giữ `REMOTE_SUCCEEDED`, không complete và không replay Jira mutation. Không đổi global isolation, không sleep/poll, retry Jira POST hay scheduler-completion semantics.

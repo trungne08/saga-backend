@@ -709,3 +709,10 @@ Không có secret hoặc thông tin đăng nhập thật trong decision log này
 - Quyết định: `GET /api/admin/users` chỉ phục vụ lifecycle `STUDENT`/`LECTURER`. SQL union không gồm bảng `admin`, vì vậy content, `totalElements` và `totalPages` đều không tính Admin. `role=ADMIN` vẫn parse theo enum hiện hữu và cho kết quả rỗng; PATCH Admin status vẫn bị từ chối.
 - Quyết định: `SystemAuditLog.timestamp` dùng `Instant.now()`. Spring Data Mongo lưu `Instant` thành BSON Date epoch-milliseconds; DTO Admin trả UTC ISO-8601 có `Z`. BSON Date lịch sử được đọc theo epoch-millis, không rewrite/backfill hoặc cộng offset backend.
 - Hệ quả FE: parse ISO timestamp rồi dùng `Intl.DateTimeFormat` với `Asia/Ho_Chi_Minh` (hoặc timezone người dùng đã chốt); không substring timestamp hay cộng +7 thủ công.
+
+## DEC-060 — J1D confirmation Task canonical bằng transaction mới
+
+- Ngày: 2026-08-10; trạng thái: ACCEPTED.
+- Evidence production MySQL `REPEATABLE_READ` và source cho thấy outer `JiraTaskWriteService#create` đọc dữ liệu trước khi `JiraIssueUpsertService` child `REQUIRES_NEW` commit. Lookup Task tiếp theo trong outer transaction có thể không thấy row vừa commit.
+- Quyết định: dùng bean `JiraCanonicalTaskReadService`, `@Transactional(propagation = REQUIRES_NEW, readOnly = true)`, sau canonical upsert cho cả create và recovery Task flow. Không self-invocation, không đổi global isolation hay clear EntityManager.
+- Chỉ complete write operation sau fresh confirmation. Failure sau remote success giữ `REMOTE_SUCCEEDED`; retry cùng idempotency key chỉ canonical recovery, không remote POST mới. Không dùng sleep, polling, scheduler hay FE retry để che lỗi.

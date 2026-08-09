@@ -45,6 +45,7 @@ class JiraWriteRecoveryServiceTest {
         JiraProviderClient provider = mock(JiraProviderClient.class);
         JiraIssueUpsertService issueUpserts = mock(JiraIssueUpsertService.class);
         JiraWriteOperationService operationService = mock(JiraWriteOperationService.class);
+        JiraCanonicalTaskReadService canonicalReads = mock(JiraCanonicalTaskReadService.class);
         Project project = Project.builder().build(); project.setId(UUID.randomUUID());
         JiraBoard board = JiraBoard.builder().project(project).cloudId("cloud").build(); board.setId(UUID.randomUUID());
         JiraWriteOperation operation = JiraWriteOperation.builder().project(project)
@@ -56,16 +57,49 @@ class JiraWriteRecoveryServiceTest {
         when(boards.findByProjectId(project.getId())).thenReturn(Optional.of(board));
         when(credentials.validAccessToken(board)).thenReturn("token");
         when(provider.getIssue("token", "cloud", "101")).thenReturn(snapshot);
+        when(canonicalReads.exists(project.getId(), "101")).thenReturn(true);
 
         new JiraWriteRecoveryService(operations, boards, credentials, provider, issueUpserts,
-                mock(JiraSprintUpsertService.class), mock(TaskRepository.class), mock(SprintRepository.class), operationService)
+                mock(JiraSprintUpsertService.class), mock(TaskRepository.class), mock(SprintRepository.class), operationService, canonicalReads)
                 .recoverRemoteSuccesses();
 
         verify(issueUpserts).upsert(board.getId(), snapshot);
+        verify(canonicalReads).exists(project.getId(), "101");
         verify(operationService).complete(operation.getId());
         verify(provider, never()).createIssue(any(), any(), any());
         verify(provider, never()).updateIssue(any(), any(), any(), any());
         verify(provider, never()).deleteIssue(any(), any(), any());
+    }
+
+    @Test
+    void canonicalTaskMissingAfterUpsertStaysRemoteSucceededAndDoesNotComplete() {
+        JiraWriteOperationRepository operations = mock(JiraWriteOperationRepository.class);
+        JiraBoardRepository boards = mock(JiraBoardRepository.class);
+        JiraCredentialService credentials = mock(JiraCredentialService.class);
+        JiraProviderClient provider = mock(JiraProviderClient.class);
+        JiraIssueUpsertService issueUpserts = mock(JiraIssueUpsertService.class);
+        JiraWriteOperationService operationService = mock(JiraWriteOperationService.class);
+        JiraCanonicalTaskReadService canonicalReads = mock(JiraCanonicalTaskReadService.class);
+        Project project = Project.builder().build(); project.setId(UUID.randomUUID());
+        JiraBoard board = JiraBoard.builder().project(project).cloudId("cloud").build(); board.setId(UUID.randomUUID());
+        JiraWriteOperation operation = operation(project, JiraWriteOperationType.TASK_UPDATE, "101");
+        JiraIssueSnapshot snapshot = new JiraIssueSnapshot("101", "P-1", "Task", "Task", "To Do", null,
+                null, null, null, null, null, LocalDateTime.now(), null, null, null, null, null);
+        when(operations.findByStatusIn(any())).thenReturn(List.of(operation));
+        when(boards.findByProjectId(project.getId())).thenReturn(Optional.of(board));
+        when(credentials.validAccessToken(board)).thenReturn("token");
+        when(provider.getIssue("token", "cloud", "101")).thenReturn(snapshot);
+        when(canonicalReads.exists(project.getId(), "101")).thenReturn(false);
+
+        new JiraWriteRecoveryService(operations, boards, credentials, provider, issueUpserts,
+                mock(JiraSprintUpsertService.class), mock(TaskRepository.class), mock(SprintRepository.class),
+                operationService, canonicalReads).recoverRemoteSuccesses();
+
+        verify(issueUpserts).upsert(board.getId(), snapshot);
+        verify(canonicalReads).exists(project.getId(), "101");
+        verify(operationService, never()).complete(operation.getId());
+        assertEquals(JiraWriteOperationStatus.REMOTE_SUCCEEDED, operation.getStatus());
+        verify(provider, never()).createIssue(any(), any(), any());
     }
 
     @Test
@@ -221,7 +255,9 @@ class JiraWriteRecoveryServiceTest {
             JiraCredentialService credentials, JiraProviderClient provider, JiraIssueUpsertService issueUpserts,
             JiraSprintUpsertService sprintUpserts, TaskRepository tasks, SprintRepository sprints,
             JiraWriteOperationService operationService) {
+        JiraCanonicalTaskReadService canonicalReads = mock(JiraCanonicalTaskReadService.class);
+        when(canonicalReads.exists(any(), any())).thenReturn(true);
         return new JiraWriteRecoveryService(operations, boards, credentials, provider, issueUpserts, sprintUpserts,
-                tasks, sprints, operationService);
+                tasks, sprints, operationService, canonicalReads);
     }
 }

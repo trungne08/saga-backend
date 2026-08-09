@@ -1346,3 +1346,7 @@ Backend chỉ cho origin explicit từ `FRONTEND_ORIGINS`; credentials=true, COR
 `GET /api/admin/users` chỉ trả `STUDENT` và `LECTURER`; FE không tự lọc Admin. `role=ADMIN` hiện trả page rỗng. System stats là metric độc lập nên total profile vẫn có Admin.
 
 `GET /api/admin/audit-logs` trả `timestamp` theo ISO-8601 UTC, ví dụ `2026-08-09T16:30:00Z`. FE phải parse bằng `new Date(timestamp)` rồi format bằng `Intl.DateTimeFormat`; khuyến nghị `timeZone: "Asia/Ho_Chi_Minh"`. Không cắt chuỗi timestamp hoặc cộng `+7` thủ công.
+
+## J1D Task Create recovery — 2026-08-10
+
+Khi `POST` Task trả `409 JIRA_WRITE_RECOVERY_REQUIRED`, FE không tự động retry, polling hay tạo `Idempotency-Key` mới. Nếu có luồng gửi lại đã được product chấp thuận, phải giữ nguyên key và request để backend chỉ canonical recovery, không Jira POST mới. Backend chỉ trả success sau fresh local canonical confirmation; failure sau remote success vẫn là recovery state, không phải tín hiệu tạo issue mới.

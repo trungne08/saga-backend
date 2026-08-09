@@ -18,10 +18,13 @@ import java.time.LocalDateTime;
 import java.util.List;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** Recovers only persisted remote success; it never replays a Jira mutation. */
 @Service
 public class JiraWriteRecoveryService {
+    private static final Logger log = LoggerFactory.getLogger(JiraWriteRecoveryService.class);
     private final JiraWriteOperationRepository operations;
     private final JiraBoardRepository boards;
     private final JiraCredentialService credentials;
@@ -31,14 +34,16 @@ public class JiraWriteRecoveryService {
     private final TaskRepository tasks;
     private final SprintRepository sprints;
     private final JiraWriteOperationService operationService;
+    private final JiraCanonicalTaskReadService canonicalTaskReadService;
 
     public JiraWriteRecoveryService(JiraWriteOperationRepository operations, JiraBoardRepository boards,
             JiraCredentialService credentials, JiraProviderClient provider, JiraIssueUpsertService issueUpserts,
             JiraSprintUpsertService sprintUpserts, TaskRepository tasks, SprintRepository sprints,
-            JiraWriteOperationService operationService) {
+            JiraWriteOperationService operationService, JiraCanonicalTaskReadService canonicalTaskReadService) {
         this.operations = operations; this.boards = boards; this.credentials = credentials; this.provider = provider;
         this.issueUpserts = issueUpserts; this.sprintUpserts = sprintUpserts; this.tasks = tasks; this.sprints = sprints;
         this.operationService = operationService;
+        this.canonicalTaskReadService = canonicalTaskReadService;
     }
 
     @Transactional
@@ -62,6 +67,11 @@ public class JiraWriteRecoveryService {
         } else if (operation.getOperationType().name().startsWith("TASK_")) {
             String token = credentials.validAccessToken(board);
             issueUpserts.upsert(board.getId(), provider.getIssue(token, board.getCloudId(), operation.getRemoteResourceId()));
+            if (!canonicalTaskReadService.exists(operation.getProject().getId(), operation.getRemoteResourceId())) {
+                log.warn("Jira write recovery remains pending: stage=CANONICAL_ISSUE_FETCH writeOperationStatus=REMOTE_SUCCEEDED operationType={}",
+                        operation.getOperationType());
+                return;
+            }
         } else if (operation.getOperationType().name().startsWith("SPRINT_")) {
             String token = credentials.validAccessToken(board);
             sprintUpserts.upsert(board.getId(), provider.getSprint(token, board.getCloudId(), operation.getRemoteResourceId()));

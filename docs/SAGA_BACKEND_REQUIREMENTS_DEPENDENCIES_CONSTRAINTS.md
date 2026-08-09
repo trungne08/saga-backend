@@ -773,3 +773,9 @@ chặn nullable repair.
 - `GET /api/admin/users` phải query và đếm chỉ trên Lecturer/Student; không được lấy page gồm Admin rồi lọc trong Java. Keyword, role `STUDENT|LECTURER` và accountStatus chạy trên cùng union. `role=ADMIN` hiện parse được và trả rỗng.
 - `GET /api/admin/system-stats` không bị đổi theo user-list contract; vẫn là tổng profile toàn cục.
 - `SystemAuditLog.timestamp` là absolute `Instant`; Mongo BSON Date là epoch-millis và Admin audit JSON phải là ISO UTC có `Z`. Không đổi JVM timezone, không cộng +7, không migration/backfill hay reinterpret historical document.
+
+## Ràng buộc J1D fresh canonical read — 2026-08-10
+
+- Với MySQL production `REPEATABLE_READ`, không được dùng outer orchestration transaction để confirm Task vừa được child canonical upsert `REQUIRES_NEW` commit. Confirmation phải qua bean/proxy transaction mới `REQUIRES_NEW`, `readOnly`.
+- `REMOTE_SUCCEEDED` chỉ complete sau fresh local confirmation. Missing Task giữ status đó và trả `JIRA_WRITE_RECOVERY_REQUIRED` ở create; recovery không complete. Cấm global isolation change, EntityManager clear, sleep/polling, blind Jira create retry, new idempotency key hoặc chờ scheduler.
+- J1C metadata resolution, scope, auth/session/CSRF, Jira write operation state machine và schema/migration không đổi.

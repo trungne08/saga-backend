@@ -38,12 +38,14 @@ import com.saga.be.integration.security.ProjectIntegrationAuthorizationService;
 import com.saga.be.integration.sync.JiraIssueUpsertService;
 import com.saga.be.integration.sync.JiraSprintUpsertService;
 import com.saga.be.integration.write.JiraWriteOperationService;
+import com.saga.be.integration.write.JiraCanonicalTaskReadService;
 import com.saga.be.repository.IdentityMapRepository;
 import com.saga.be.repository.JiraBoardRepository;
 import com.saga.be.repository.TaskRepository;
 import com.saga.be.repository.SprintRepository;
 import com.saga.be.security.ApplicationRole;
 import com.saga.be.security.SagaPrincipal;
+import com.saga.be.dto.response.TaskReadResponse;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -66,6 +68,7 @@ class JiraTaskWriteServiceTest {
         JiraProviderClient provider = mock(JiraProviderClient.class);
         JiraIssueUpsertService upserts = mock(JiraIssueUpsertService.class);
         JiraWriteOperationService operations = mock(JiraWriteOperationService.class);
+        JiraCanonicalTaskReadService canonicalReads = mock(JiraCanonicalTaskReadService.class);
         TaskRepository tasks = mock(TaskRepository.class);
         UUID projectId = UUID.randomUUID();
         UUID boardId = UUID.randomUUID();
@@ -90,9 +93,9 @@ class JiraTaskWriteServiceTest {
         when(provider.createIssue(eq("token"), eq("cloud"), any())).thenReturn(new JiraIssueReference("101", "P-1"));
         JiraIssueSnapshot canonical = snapshot();
         when(provider.getIssue("token", "cloud", "101")).thenReturn(canonical);
-        when(tasks.findByProjectIdAndExternalId(projectId, "101")).thenReturn(Optional.of(task));
+        when(canonicalReads.findResponse(projectId, "101")).thenReturn(Optional.of(TaskReadResponse.from(task)));
 
-        assertEquals(task.getId(), new JiraTaskWriteService(authorization, boards, credentials, provider, upserts, operations, tasks,
+        assertEquals(task.getId(), new JiraTaskWriteService(authorization, boards, credentials, provider, upserts, operations, canonicalReads, tasks,
                 mock(IdentityMapRepository.class), mock(SprintRepository.class), mock(JiraSprintUpsertService.class)).create(principal, projectId, "key", request).id());
 
         InOrder ordered = inOrder(authorization, provider, upserts);
@@ -123,7 +126,7 @@ class JiraTaskWriteServiceTest {
         when(provider.getCreateFields("token", "cloud", "10000", "3")).thenReturn(List.of(new JiraCreateField("summary", "Summary", true, "string", null, List.of()), new JiraCreateField("issuetype", "Type", true, "string", null, List.of())));
 
         assertEquals("JIRA_CREATE_FIELD_NOT_ALLOWED", assertThrows(IntegrationException.class, () -> new JiraTaskWriteService(authorization, boards, credentials, provider,
-                mock(JiraIssueUpsertService.class), operations, mock(TaskRepository.class), mock(IdentityMapRepository.class), mock(SprintRepository.class), mock(JiraSprintUpsertService.class)).create(principal, projectId, "key", new JiraTaskCreateRequest("Task", "3", "desc", null, null, null, null, null))).getCode());
+                mock(JiraIssueUpsertService.class), operations, mock(JiraCanonicalTaskReadService.class), mock(TaskRepository.class), mock(IdentityMapRepository.class), mock(SprintRepository.class), mock(JiraSprintUpsertService.class)).create(principal, projectId, "key", new JiraTaskCreateRequest("Task", "3", "desc", null, null, null, null, null))).getCode());
         verify(provider, never()).createIssue(any(), any(), any());
     }
 
@@ -223,7 +226,8 @@ class JiraTaskWriteServiceTest {
         when(fixture.provider.getIssue("token", "cloud", "101")).thenReturn(canonical);
         Task task = Task.builder().project(fixture.project).externalId("101").externalKey("P-1").title("Task").build();
         task.setId(UUID.randomUUID());
-        when(fixture.tasks.findByProjectIdAndExternalId(fixture.projectId, "101")).thenReturn(Optional.of(task));
+        when(fixture.canonicalReads.findResponse(fixture.projectId, "101"))
+                .thenReturn(Optional.of(TaskReadResponse.from(task)));
 
         assertEquals(task.getId(), fixture.service().create(fixture.principal, fixture.projectId, "key",
                 new JiraTaskCreateRequest("Task", TaskType.TASK, null, Priority.HIGH, null,
@@ -508,9 +512,9 @@ class JiraTaskWriteServiceTest {
         fixture.service().create(fixture.principal, fixture.projectId, "key",
                 new JiraTaskCreateRequest("Task", "3", null, null, null, null, null, null));
 
-        InOrder ordered = inOrder(fixture.upserts, fixture.tasks, fixture.operations);
+        InOrder ordered = inOrder(fixture.upserts, fixture.canonicalReads, fixture.operations);
         ordered.verify(fixture.upserts).upsert(eq(fixture.boardId), any(JiraIssueSnapshot.class));
-        ordered.verify(fixture.tasks).findByProjectIdAndExternalId(fixture.projectId, "101");
+        ordered.verify(fixture.canonicalReads).findResponse(fixture.projectId, "101");
         ordered.verify(fixture.operations).complete(fixture.operation.getId());
         assertEquals(JiraWriteOperationStatus.COMPLETED, fixture.operation.getStatus());
     }
@@ -521,7 +525,7 @@ class JiraTaskWriteServiceTest {
         when(fixture.provider.createIssue(eq("token"), eq("cloud"), any()))
                 .thenReturn(new JiraIssueReference("101", "P-1"));
         when(fixture.provider.getIssue("token", "cloud", "101")).thenReturn(snapshot());
-        when(fixture.tasks.findByProjectIdAndExternalId(fixture.projectId, "101")).thenReturn(Optional.empty());
+        when(fixture.canonicalReads.findResponse(fixture.projectId, "101")).thenReturn(Optional.empty());
 
         assertEquals("JIRA_WRITE_RECOVERY_REQUIRED", assertThrows(IntegrationException.class,
                 () -> fixture.service().create(fixture.principal, fixture.projectId, "key",
@@ -540,8 +544,8 @@ class JiraTaskWriteServiceTest {
         when(fixture.provider.getIssue("token", "cloud", "101")).thenReturn(snapshot());
         Task task = Task.builder().project(fixture.project).externalId("101").externalKey("P-1").title("Task").build();
         task.setId(UUID.randomUUID());
-        when(fixture.tasks.findByProjectIdAndExternalId(fixture.projectId, "101"))
-                .thenReturn(Optional.empty(), Optional.of(task));
+        when(fixture.canonicalReads.findResponse(fixture.projectId, "101"))
+                .thenReturn(Optional.empty(), Optional.of(TaskReadResponse.from(task)));
 
         assertEquals("JIRA_WRITE_RECOVERY_REQUIRED", assertThrows(IntegrationException.class,
                 () -> fixture.service().create(fixture.principal, fixture.projectId, "key",
@@ -565,7 +569,8 @@ class JiraTaskWriteServiceTest {
         when(fixture.provider.getIssue("token", "cloud", "101")).thenReturn(snapshot());
         Task task = Task.builder().project(fixture.project).externalId("101").externalKey("P-1").title("Task").build();
         task.setId(UUID.randomUUID());
-        when(fixture.tasks.findByProjectIdAndExternalId(fixture.projectId, "101")).thenReturn(Optional.of(task));
+        when(fixture.canonicalReads.findResponse(fixture.projectId, "101"))
+                .thenReturn(Optional.of(TaskReadResponse.from(task)));
 
         assertEquals(task.getId(), fixture.service().create(fixture.principal, fixture.projectId, "key",
                 new JiraTaskCreateRequest("Task", "3", null, null, null, null, null, null)).id());
@@ -634,7 +639,8 @@ class JiraTaskWriteServiceTest {
         when(fixture.provider.getIssue("token", "cloud", "101")).thenReturn(canonical);
         Task task = Task.builder().project(fixture.project).externalId("101").externalKey("P-1").title("Task").build();
         task.setId(UUID.randomUUID());
-        when(fixture.tasks.findByProjectIdAndExternalId(fixture.projectId, "101")).thenReturn(Optional.of(task));
+        when(fixture.canonicalReads.findResponse(fixture.projectId, "101"))
+                .thenReturn(Optional.of(TaskReadResponse.from(task)));
     }
 
     private List<JiraCreateField> requiredFields() {
@@ -659,6 +665,7 @@ class JiraTaskWriteServiceTest {
         JiraProviderClient provider = mock(JiraProviderClient.class);
         JiraIssueUpsertService upserts = mock(JiraIssueUpsertService.class);
         JiraWriteOperationService operations = mock(JiraWriteOperationService.class);
+        JiraCanonicalTaskReadService canonicalReads = mock(JiraCanonicalTaskReadService.class);
         TaskRepository tasks = mock(TaskRepository.class);
         IdentityMapRepository identities = mock(IdentityMapRepository.class);
         UUID projectId = UUID.randomUUID();
@@ -684,7 +691,7 @@ class JiraTaskWriteServiceTest {
                 new JiraCreateField("issuetype", "Issue type", true, "string", null, List.of()),
                 new JiraCreateField("assignee", "Assignee", false, "string", null, List.of())
         ));
-        return new CreateFixture(authorization, boards, credentials, provider, upserts, operations, tasks,
+        return new CreateFixture(authorization, boards, credentials, provider, upserts, operations, canonicalReads, tasks,
                 identities, boardId, projectId, project, operation, principal);
     }
 
@@ -695,6 +702,7 @@ class JiraTaskWriteServiceTest {
             JiraProviderClient provider,
             JiraIssueUpsertService upserts,
             JiraWriteOperationService operations,
+            JiraCanonicalTaskReadService canonicalReads,
             TaskRepository tasks,
             IdentityMapRepository identities,
             UUID boardId,
@@ -704,7 +712,7 @@ class JiraTaskWriteServiceTest {
             SagaPrincipal principal
     ) {
         private JiraTaskWriteService service() {
-            return new JiraTaskWriteService(authorization, boards, credentials, provider, upserts, operations, tasks,
+            return new JiraTaskWriteService(authorization, boards, credentials, provider, upserts, operations, canonicalReads, tasks,
                     identities, mock(SprintRepository.class), mock(JiraSprintUpsertService.class));
         }
     }

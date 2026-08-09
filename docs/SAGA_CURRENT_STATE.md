@@ -549,3 +549,9 @@ BASE HEAD của snapshot cũ: `0bc30be`. HEAD audit hiện hành là `4f3dee9`; 
 - **CONFIRMED:** `GET /api/admin/users` đã supersede contract cũ: chỉ `STUDENT` + `LECTURER`; `ADMIN` không có `AccountStatus` lifecycle nên bị loại trong SQL union trước pagination/count. `role=ADMIN` giữ parser enum tương thích nhưng trả page rỗng.
 - **CONFIRMED:** Audit mới dùng `Instant` → BSON Date → JSON UTC `Z`; tài liệu BSON Date cũ đọc đúng same instant, không migration/backfill. FE phải parse timestamp ISO bằng `Date`/`Intl` và format `Asia/Ho_Chi_Minh`, không cộng cứng +7.
 - **CONFIRMED:** System stats không đổi, vẫn là count profile toàn cục Admin + Lecturer + Student.
+
+## J1D Jira Task canonical confirmation — 2026-08-10
+
+- **CONFIRMED_RUNTIME/SOURCE:** incident `CANONICAL_ISSUE_FETCH` với `REMOTE_SUCCEEDED` phù hợp stale outer snapshot MySQL `REPEATABLE_READ`: outer create đã đọc Project/board/local state trước child canonical upsert `REQUIRES_NEW` commit.
+- **CONFIRMED:** create và recovery Task canonical flow dùng `JiraCanonicalTaskReadService.findResponse/exists`, mỗi call là fresh `REQUIRES_NEW` read-only transaction. Chỉ complete sau confirmation; missing Task giữ recovery-required/`REMOTE_SUCCEEDED` và không POST Jira lần hai.
+- **PARTIAL:** test infrastructure hiện chỉ H2 MySQL-mode, không có Testcontainers/Docker MySQL; không tuyên bố đã tái tạo MySQL MVCC trong test.
