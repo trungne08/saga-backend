@@ -99,6 +99,27 @@ class GeneratedOpenApiDocumentationIntegrationTest {
         assertTrue(taskCreateRequired.toString().contains("title"));
         assertFalse(taskCreateRequired.toString().contains("issueTypeId"));
         assertFalse(taskCreateRequired.toString().contains("priorityId"));
+        assertTrue(root.path("paths").has("/api/admin/users"));
+        assertTrue(root.path("paths").has("/api/admin/audit-logs"));
+        assertTrue(root.path("paths").has("/api/admin/system-stats"));
+        assertTrue(root.path("paths").has("/api/admin/teams"));
+        assertTrue(root.path("paths").has("/api/admin/projects"));
+        JsonNode adminStatusPatch = root.at("/paths/~1api~1admin~1users~1{id}~1status/patch");
+        assertTrue(adminStatusPatch.isObject());
+        assertTrue(adminStatusPatch.toString().contains("AdminUserStatusRequest"));
+        JsonNode adminUserProperties = root.at("/components/schemas/AdminUserReadResponse/properties");
+        JsonNode adminAuditProperties = root.at("/components/schemas/AdminAuditLogResponse/properties");
+        JsonNode adminProjectProperties = root.at("/components/schemas/AdminProjectReadResponse/properties");
+        assertTrue(adminUserProperties.has("localProfileId"));
+        assertFalse(adminUserProperties.has("cognitoSub"));
+        assertFalse(adminAuditProperties.has("oldValues"));
+        assertFalse(adminAuditProperties.has("newValues"));
+        assertFalse(adminAuditProperties.has("ipAddress"));
+        assertFalse(adminProjectProperties.has("repositoryUrl"));
+        assertTrue(root.at("/paths/~1api~1v1~1semesters~1{id}/put").isObject());
+        assertTrue(root.at("/paths/~1api~1v1~1semesters~1{id}/delete").isObject());
+        assertTrue(root.at("/paths/~1api~1v1~1courses~1{id}/put").isObject());
+        assertTrue(root.at("/paths/~1api~1v1~1courses~1{id}/delete").isObject());
     }
 
     private Set<String> documentedTagNames(JsonNode root) {

@@ -545,3 +545,14 @@ Các điểm dưới đây là behavior/risk hiện tại, chưa được mô t�
 - File này bám theo code hiện tại, không mô tả endpoint giả định.
 - Các response `Page<>` ở API roster/course không nằm trong tài liệu này.
 - Nếu FE cần sample request/response chi tiết hơn cho từng DTO, mình sẽ tách tiếp ra theo từng màn hình.
+
+## Cập nhật 2026-08-09 — trạng thái rubric database
+
+- Runtime/baselined production được báo cáo có V10/V13 `SUCCESS`, nhưng
+  `rubric_template` hiện có 0 row và `subject_id` vẫn `NOT NULL`. Vì vậy các ví dụ
+  bốn rubric/UUID phía trên chỉ là SQL/sample lịch sử, không phải runtime guarantee.
+- V22 chỉ làm nullable `subject_id` cho **EXISTING_BASELINED_DB_UPGRADE**; không seed
+  default/global rubric. FE tiếp tục phải xử lý `criteria: []` và không hard-code ID.
+- **REPLAY_FROM_EXTERNAL_V1_BASELINE** cần baseline legacy và decision riêng trước
+  V13; **TRUE_EMPTY_DATABASE_BOOTSTRAP** là `BLOCKED_EXISTING_BASELINE_GAP`.
+- Không có thay đổi authorization, visibility, submit hoặc contribution trong update này.

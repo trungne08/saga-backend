@@ -308,6 +308,9 @@ public class AuthenticatedProfileService {
         lecturer.setCognitoSub(identity.cognitoSub());
         lecturer.setEmail(identity.email());
         lecturer.setFullName(identity.fullName());
+        if (lecturer.getAccountStatus() == null) {
+            lecturer.setAccountStatus(AccountStatus.ACTIVE);
+        }
         Lecturer saved = lecturerRepository.saveAndFlush(lecturer);
         return toProfile(saved);
     }
@@ -364,6 +367,7 @@ public class AuthenticatedProfileService {
                         .cognitoSub(identity.cognitoSub())
                         .email(identity.email())
                         .fullName(identity.fullName())
+                        .accountStatus(AccountStatus.ACTIVE)
                         .build();
                 yield toProfile(lecturerRepository.saveAndFlush(lecturer));
             }
@@ -398,7 +402,7 @@ public class AuthenticatedProfileService {
                 lecturer.getFullName(),
                 ApplicationRole.LECTURER,
                 lecturer.getId(),
-                null
+                lecturer.getAccountStatus()
         );
     }
 

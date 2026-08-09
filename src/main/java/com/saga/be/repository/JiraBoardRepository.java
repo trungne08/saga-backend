@@ -40,6 +40,10 @@ public interface JiraBoardRepository extends JpaRepository<JiraBoard, UUID> {
 
     List<JiraBoard> findByConnectionStatusIn(List<IntegrationStatus> statuses);
 
+    List<JiraBoard> findByProjectIdIn(List<UUID> projectIds);
+
+    long countByConnectionStatus(IntegrationStatus connectionStatus);
+
     List<JiraBoard> findByWebhookExpiresAtBeforeAndConnectionStatusNot(
             LocalDateTime expiresBefore,
             IntegrationStatus excludedStatus

@@ -1,5 +1,36 @@
 # SAGA — Trạng thái hiện tại
 
+## Cập nhật 2026-08-09 — Account lifecycle M3B
+
+- **CONFIRMED:** Student và Lecturer có AccountStatus; Admin vẫn null/không có schema. Lecturer default ACTIVE qua V21 và provisioning, không re-login thành ACTIVE khi DB là INACTIVE/SUSPENDED.
+- **CONFIRMED:** PATCH Admin chỉ thay status Student/Lecturer, same-status idempotent; Admin target, PENDING target và unknown ID fail controlled.
+- **CONFIRMED:** filter browser-session tra DB local cho business API; auth me/csrf/logout không bị chặn, `/me` trả current status. Không Cognito call, role/membership/Course/Project/provider mutation.
+
+## Cập nhật 2026-08-09 — AccountStatus M3A audit
+
+- **CONFIRMED:** Admin user union dùng local profile ID; Student có status, Admin/Lecturer trả null và không có schema status.
+- **CONFIRMED:** Status trong `SagaPrincipal` là snapshot session sau OIDC login. Hiện không có request-time DB enforcement, SessionRegistry hoặc invalidation session khi status đổi.
+- **TBD:** Admin status transition, self-target và access policy cho PENDING chưa có evidence. Do đó PATCH status chưa triển khai.
+
+## Cập nhật 2026-08-09 — Course M2B
+
+- **CONFIRMED:** `PUT`/`DELETE /api/v1/courses/{id}` đã có, ADMIN-only; PUT dùng `CourseRequest`, DELETE trả 204 khi Course không còn dependency.
+- **CONFIRMED:** V20 thêm `course.deleted_at`; active read ẩn tombstone, code tombstone vẫn unique. Create/update từ chối Subject/Class/Semester tombstone bằng 404.
+- **CONFIRMED:** Guard xóa kiểm tra Team, Project, StudentCourseInvitation, TaskWeightConfig và trả 409; không có cascade/hard delete.
+- **PARTIAL:** import và Contribution mutation đã resolve Course active-only; các read resolver analytics/roster/Contribution còn raw theo phạm vi cũ, chưa refactor trong M2B.
+
+## Cập nhật 2026-08-09 — Semester Update và Soft Delete
+
+- **CONFIRMED:** `SemesterRequest` được tái sử dụng cho PUT nguyên khối; validation code/name/date và `endDate >= startDate` giữ nguyên. Missing/deleted Semester là 404, duplicate code là 409.
+- **CONFIRMED:** DELETE là soft-delete V19, active read loại tombstone và repeated delete 404. Course đang tham chiếu gây 409, không detach/cascade/xóa Course.
+- **CONFIRMED:** code của tombstone không được tái sử dụng. Course create/read business logic không thay đổi.
+
+## Cập nhật 2026-08-09 — Admin Read Foundation
+
+- **CONFIRMED:** năm Admin-only GET dưới `/api/admin` đã có controller/service; URL rule `/api/admin/**` và method rule đều yêu cầu ADMIN.
+- **CONFIRMED:** Users trả localProfileId/role/fullName/email/status/studentCode an toàn, phân trang DB; Audit Mongo chỉ trả id/action/targetEntity/timestamp.
+- **CONFIRMED:** Stats/Teams/Projects chỉ dùng repository local. Project chỉ trả Course summary, Jira connectionStatus và GitHub aggregate; không provider call, secret, repository URL hay Project DELETE.
+
 ## Update 2026-08-09 — Create Task không cần Jira numeric IDs
 
 - **CONFIRMED:** normal `POST /api/v1/projects/{projectId}/tasks` dùng `type` và `priority` business optional để resolve exact Jira IDs từ metadata của Jira Project hiện tại.
@@ -356,3 +387,19 @@ BASE HEAD của snapshot cũ: `0bc30be`. HEAD audit hiện hành là `4f3dee9`; 
 - **CONFIRMED:** `GET /api/v1/teams/{teamId}/sprints` giữ nguyên authorization hiện có và kiểm quyền trước khi xét Team chưa có Project. Team tồn tại, actor được phép, `projectId = null` trả `200` với `projectId: null`, `teamId`, `state: PROJECT_NOT_CREATED`, `sprints: []`; Project có zero Sprint trả `state: EMPTY`; có Sprint trả `state: READY`.
 - **CONFIRMED:** Team không tồn tại trả `404` với error code `TEAM_NOT_FOUND`. `SprintListResponse` chỉ bổ sung trường `state`; không bỏ/đổi tên field cũ.
 - **CONFIRMED:** error JSON thống nhất `timestamp`, `status`, `error`, `message`, `path`. Generic validation/request/security/not-found/conflict/runtime có code ổn định; `IntegrationException` tiếp tục giữ nguyên các code `JIRA_*`, `GITHUB_*`, `INTEGRATION_*`.
+
+## Cập nhật 2026-08-09 — Rubric schema repair M4-R2
+
+- **Runtime fact do người dùng cung cấp:** production/baselined MySQL ghi V10/V13
+  `SUCCESS`; `rubric_template.subject_id` là `CHAR(36) NOT NULL`, có 0 rubric và hai
+  FK `subject_id -> subject(id)`.
+- **Đã hoàn thành trong source:** V22 đổi duy nhất cột đó thành nullable cho
+  **EXISTING_BASELINED_DB_UPGRADE**. Không có seed rubric, Admin CRUD hoặc thay đổi
+  Peer Review/Contribution.
+- **PARTIAL:** contract test xác nhận V22 chỉ có `ALTER`, không DML và V10/V13 không
+  đổi source. Full Maven pass 105 suites / 646 tests / 0 failures / 0 errors /
+  0 skipped. MySQL execution test chưa có vì repository không có MySQL/Testcontainers
+  infrastructure.
+- **Tách biệt:** **REPLAY_FROM_EXTERNAL_V1_BASELINE** vẫn cần external baseline và
+  compatibility decision trước V13; **TRUE_EMPTY_DATABASE_BOOTSTRAP** là
+  `BLOCKED_EXISTING_BASELINE_GAP`, không tạo V1 trong milestone này.

@@ -1,5 +1,35 @@
 # SAGA Frontend API Integration Guide
 
+## Account lifecycle M3B — 2026-08-09
+
+`PATCH /api/admin/users/{id}/status` đã có. Chỉ ADMIN, `credentials: "include"` và `X-XSRF-TOKEN`; body là `{ "status": "ACTIVE" | "INACTIVE" | "SUSPENDED" }`. Response 200 là safe `AdminUserReadResponse`; Student/Lecturer hỗ trợ, Admin target 400 `ACCOUNT_STATUS_TARGET_UNSUPPORTED`, PENDING 400 `ACCOUNT_STATUS_PENDING_NOT_ALLOWED`, ID không có 404. Sau status change, business API của session đó bị check DB ngay request tiếp theo; `/api/auth/me` vẫn 200 và trả status hiện tại, logout vẫn dùng được.
+
+## AccountStatus M3A audit — 2026-08-09
+
+`PATCH /api/admin/users/{id}/status` **chưa tồn tại**. Không gọi route này hoặc suy diễn có thể suspend user qua UI. `GET /api/admin/users` trả localProfileId và status chỉ cho Student; Admin/Lecturer có `accountStatus: null`. Khi có policy được phê duyệt, endpoint sau này sẽ cần ADMIN session + CSRF; không dùng Bearer.
+
+## Course Update và Soft Delete — 2026-08-09
+
+`PUT /api/v1/courses/{id}` dùng nguyên `CourseRequest`; `DELETE /api/v1/courses/{id}` không body. Cả hai cần `ADMIN`, `credentials: "include"` và CSRF. PUT thành công 200; DELETE thành công 204. Subject/Class/Semester tombstone hoặc Course missing/tombstone trả 404; courseCode duplicate và Course còn Team/Project/invitation/weight config trả 409. Sau DELETE, GET Course detail/list/filter không trả tombstone; không gọi lại DELETE và không tái dùng code.
+
+## Semester Update và Soft Delete — 2026-08-09
+
+`PUT /api/v1/semesters/{id}` dùng nguyên `SemesterRequest`; `DELETE /api/v1/semesters/{id}` không body. Cả hai cần `ADMIN`, `credentials: "include"` và CSRF. PUT thành công 200; DELETE thành công 204. Missing/tombstoned Semester 404, code duplicate 409, endDate trước startDate 400, Semester đang được Course dùng 409. Sau DELETE, GET detail/list/search không trả tombstone; code không tái sử dụng.
+
+## Admin Read Foundation — 2026-08-09
+
+Các API sau yêu cầu session browser `ADMIN`, gọi `credentials: "include"`; là GET nên không gửi CSRF hoặc Bearer. Anonymous `401`, Lecturer/Student `403`.
+
+| Path | Query | Response |
+| --- | --- | --- |
+| `GET /api/admin/users` | keyword, role, accountStatus, page=0, size=20 (1..100) | Page local profile an toàn |
+| `GET /api/admin/audit-logs` | page=0, size=20 (1..100) | Page newest-first, không raw payload/IP/actor |
+| `GET /api/admin/system-stats` | — | local counts, active integration count, generatedAt |
+| `GET /api/admin/teams` | page=0, size=20 (1..100) | Team/Course/nullable Project summary |
+| `GET /api/admin/projects` | page=0, size=20 (1..100) | Project/Course/Jira local/GitHub aggregate |
+
+Không phụ thuộc hay render Cognito sub, token, raw provider response, raw audit JSON, IP, repository URL hoặc secret. accountStatus chỉ có semantic cho Student.
+
 ## Jira Task Create metadata — 2026-08-09
 
 `POST /api/v1/projects/{projectId}/tasks` normal không yêu cầu FE hiển thị hoặc nhập Jira numeric IDs. FE gửi `title`, business `type` (`BUG`, `FEATURE`, `STORY`, `TASK`, `EPIC`, `SUBTASK`) và, khi cần đặt priority, business `priority` (`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`). Backend resolve Jira issue type/priority theo metadata của đúng Project hiện tại.

@@ -22,11 +22,16 @@ import com.saga.be.repository.LecturerRepository;
 import com.saga.be.repository.SemesterRepository;
 import com.saga.be.repository.SubjectRepository;
 import com.saga.be.repository.TeamMemberRepository;
+import com.saga.be.repository.TeamRepository;
+import com.saga.be.repository.ProjectRepository;
+import com.saga.be.repository.StudentCourseInvitationRepository;
+import com.saga.be.repository.TaskWeightConfigRepository;
 import com.saga.be.security.SagaPrincipal;
 import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 import java.util.Locale;
+import java.time.LocalDateTime;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -49,10 +54,18 @@ public class CourseService {
     private final SemesterRepository semesterRepository;
     private final LecturerRepository lecturerRepository;
     private final TeamMemberRepository teamMemberRepository;
+    private final TeamRepository teamRepository;
+    private final ProjectRepository projectRepository;
+    private final StudentCourseInvitationRepository studentCourseInvitationRepository;
+    private final TaskWeightConfigRepository taskWeightConfigRepository;
     private final CourseImportAuthorizationService courseImportAuthorizationService;
 
     public Course getCourseById(UUID id) {
-        return courseRepository.findById(id)
+        return requireActiveCourse(id);
+    }
+
+    private Course requireActiveCourse(UUID id) {
+        return courseRepository.findByIdAndDeletedAtIsNull(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Course not found"));
     }
 
@@ -63,23 +76,16 @@ public class CourseService {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Course code already exists");
         }
 
-        Subject subject = subjectRepository.findByIdAndDeletedAtIsNull(request.getSubjectId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Subject not found"));
-        Class clazz = classRepository.findByIdAndDeletedAtIsNull(request.getClassId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Class not found"));
-        Semester semester = semesterRepository.findById(request.getSemesterId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Semester not found"));
-        Lecturer instructor = lecturerRepository.findById(request.getInstructorId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Lecturer not found"));
+        CourseReferences references = resolveActiveReferences(request);
         ContributionSliceWeights defaultWeights = ContributionSliceWeights.fromCourse(null);
 
         Course course = Course.builder()
                 .courseCode(courseCode)
                 .name(request.getName().trim())
-                .subject(subject)
-                .clazz(clazz)
-                .semester(semester)
-                .instructor(instructor)
+                .subject(references.subject())
+                .clazz(references.clazz())
+                .semester(references.semester())
+                .instructor(references.instructor())
                 .codeContributionWeight(defaultWeights.codeValue())
                 .documentContributionWeight(defaultWeights.documentValue())
                 .designContributionWeight(defaultWeights.designValue())
@@ -88,8 +94,39 @@ public class CourseService {
         return courseRepository.save(course);
     }
 
+    @Transactional
+    public Course updateCourse(UUID id, CourseRequest request) {
+        Course course = requireActiveCourse(id);
+        String courseCode = request.getCourseCode().trim();
+        if (courseRepository.existsByCourseCodeAndIdNot(courseCode, id)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Course code already exists");
+        }
+        CourseReferences references = resolveActiveReferences(request);
+        course.setCourseCode(courseCode);
+        course.setName(request.getName().trim());
+        course.setSubject(references.subject());
+        course.setClazz(references.clazz());
+        course.setSemester(references.semester());
+        course.setInstructor(references.instructor());
+        return courseRepository.save(course);
+    }
+
+    @Transactional
+    public void softDeleteCourse(UUID id) {
+        Course course = requireActiveCourse(id);
+        if (teamRepository.existsByCourseId(id)
+                || projectRepository.existsByCourseId(id)
+                || studentCourseInvitationRepository.existsByCourseId(id)
+                || taskWeightConfigRepository.existsByCourseId(id)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Course is currently in use");
+        }
+        course.setDeletedAt(LocalDateTime.now());
+        courseRepository.save(course);
+    }
+
     public Page<Course> getCoursesWithFilters(UUID subjectId, UUID semesterId, UUID instructorId, Pageable pageable) {
-        Specification<Course> specification = (root, query, criteriaBuilder) -> criteriaBuilder.conjunction();
+        Specification<Course> specification = (root, query, criteriaBuilder) ->
+                criteriaBuilder.isNull(root.get("deletedAt"));
 
         if (subjectId != null) {
             specification = specification.and((root, query, criteriaBuilder) ->
@@ -105,6 +142,18 @@ public class CourseService {
         }
 
         return courseRepository.findAll(specification, pageable);
+    }
+
+    private CourseReferences resolveActiveReferences(CourseRequest request) {
+        Subject subject = subjectRepository.findByIdAndDeletedAtIsNull(request.getSubjectId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Subject not found"));
+        Class clazz = classRepository.findByIdAndDeletedAtIsNull(request.getClassId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Class not found"));
+        Semester semester = semesterRepository.findByIdAndDeletedAtIsNull(request.getSemesterId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Semester not found"));
+        Lecturer instructor = lecturerRepository.findById(request.getInstructorId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Lecturer not found"));
+        return new CourseReferences(subject, clazz, semester, instructor);
     }
 
     @Transactional(readOnly = true)
@@ -357,5 +406,8 @@ public class CourseService {
 
     private static ResponseStatusException badRequest(String reason) {
         return new ResponseStatusException(HttpStatus.BAD_REQUEST, reason);
+    }
+
+    private record CourseReferences(Subject subject, Class clazz, Semester semester, Lecturer instructor) {
     }
 }

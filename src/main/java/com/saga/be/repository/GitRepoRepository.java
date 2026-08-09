@@ -48,4 +48,8 @@ public interface GitRepoRepository extends JpaRepository<GitRepo, UUID> {
     List<GitRepo> findByInstallationInstallationId(Long installationId);
 
     List<GitRepo> findByConnectionStatusIn(List<IntegrationStatus> statuses);
+
+    List<GitRepo> findByProjectIdIn(List<UUID> projectIds);
+
+    long countByConnectionStatus(IntegrationStatus connectionStatus);
 }

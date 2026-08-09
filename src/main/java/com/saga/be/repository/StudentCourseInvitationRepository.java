@@ -17,6 +17,8 @@ import org.springframework.stereotype.Repository;
 public interface StudentCourseInvitationRepository
         extends JpaRepository<StudentCourseInvitation, UUID> {
 
+    boolean existsByCourseId(UUID courseId);
+
     Optional<StudentCourseInvitation> findByStudentIdAndCourseIdAndInvitationType(
             UUID studentId,
             UUID courseId,

@@ -46,6 +46,22 @@ public class CourseController {
         return ResponseEntity.status(HttpStatus.CREATED).body(courseService.createCourse(request));
     }
 
+    @PutMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Course> updateCourse(
+            @PathVariable UUID id,
+            @Valid @RequestBody CourseRequest request
+    ) {
+        return ResponseEntity.ok(courseService.updateCourse(id, request));
+    }
+
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Void> deleteCourse(@PathVariable UUID id) {
+        courseService.softDeleteCourse(id);
+        return ResponseEntity.noContent().build();
+    }
+
     @GetMapping
     public ResponseEntity<Page<Course>> getCourses(
             @RequestParam(required = false) UUID subjectId,

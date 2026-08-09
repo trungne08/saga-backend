@@ -36,6 +36,7 @@ public class OpenApiConfig {
                 ))
                 .tags(List.of(
                         tag("Xác thực", "Đăng nhập, phiên làm việc và CSRF."),
+                        tag("Quản trị", "Các màn hình đọc dữ liệu vận hành toàn cục dành riêng cho quản trị viên."),
                         tag("Học kỳ", "Quản lý dữ liệu học kỳ."),
                         tag("Môn học", "Quản lý dữ liệu môn học."),
                         tag("Lớp học", "Quản lý dữ liệu lớp học."),

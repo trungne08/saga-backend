@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import com.saga.be.dto.response.AuthMeResponse;
 import com.saga.be.dto.response.CsrfTokenResponse;
@@ -11,6 +13,7 @@ import com.saga.be.entity.enums.AccountStatus;
 import com.saga.be.exception.UnauthenticatedRequestException;
 import com.saga.be.security.ApplicationRole;
 import com.saga.be.security.SagaPrincipal;
+import com.saga.be.service.CurrentAccountStatusService;
 import java.net.URI;
 import java.util.Arrays;
 import java.util.List;
@@ -23,7 +26,8 @@ import org.springframework.security.web.csrf.DefaultCsrfToken;
 
 class AuthControllerTest {
 
-    private final AuthController controller = new AuthController();
+    private final CurrentAccountStatusService accountStatusService = mock(CurrentAccountStatusService.class);
+    private final AuthController controller = new AuthController(accountStatusService);
 
     @Test
     void loginRedirectsToTheBackendCognitoAuthorizationEndpoint() {
@@ -49,6 +53,7 @@ class AuthControllerTest {
                 AccountStatus.ACTIVE
         );
 
+        when(accountStatusService.currentStatusForAuthRoute(principal)).thenReturn(AccountStatus.ACTIVE);
         AuthMeResponse response = controller.me(principal, new MockHttpServletRequest());
 
         assertEquals("cognito-subject", response.cognitoSub());

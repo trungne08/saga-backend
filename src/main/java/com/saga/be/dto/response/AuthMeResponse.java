@@ -14,13 +14,17 @@ public record AuthMeResponse(
         AccountStatus accountStatus
 ) {
     public static AuthMeResponse from(SagaPrincipal principal) {
+        return from(principal, principal.accountStatus());
+    }
+
+    public static AuthMeResponse from(SagaPrincipal principal, AccountStatus accountStatus) {
         return new AuthMeResponse(
                 principal.cognitoSub(),
                 principal.email(),
                 principal.fullName(),
                 principal.applicationRole(),
                 principal.localProfileId(),
-                principal.accountStatus()
+                accountStatus
         );
     }
 }

@@ -1,5 +1,29 @@
 # SAGA — Context kỹ thuật hệ thống hiện tại
 
+## Cập nhật 2026-08-09 — Account lifecycle M3B
+
+**CONFIRMED:** `AccountStatus` áp dụng cho Student và Lecturer; Admin không có status. V21 thêm `lecturer.account_status NOT NULL DEFAULT 'ACTIVE'`, backfill row cũ và Lecturer mới/cũ null đều ACTIVE. `PATCH /api/admin/users/{id}/status` là ADMIN + CSRF, resolve localProfileId cùng Admin user union; chỉ Student/Lecturer, chỉ nhận ACTIVE/INACTIVE/SUSPENDED, PENDING bị provisioning Student sở hữu.
+
+**CONFIRMED:** Business request trong browser session dùng current local DB status mỗi request: ACTIVE cho phép; Student PENDING/INACTIVE/SUSPENDED và Lecturer INACTIVE/SUSPENDED bị 403. `/api/auth/me`, `/api/auth/csrf`, `/api/auth/logout` được miễn; `/me` trả current DB status. Status mutation không cascade Course, membership, Project hay provider/history.
+
+## Cập nhật 2026-08-09 — Audit AccountStatus M3A
+
+**CONFIRMED:** Chỉ `Student` sở hữu `AccountStatus` (`ACTIVE`, `INACTIVE`, `SUSPENDED`, `PENDING`); Admin/Lecturer không có field này. Principal trong JSESSIONID mang snapshot status từ login; không có DB status check theo request, SessionRegistry hay thu hồi session khi status DB thay đổi. First-login imported Student chỉ PENDING -> ACTIVE; ACTIVE giữ nguyên; INACTIVE/SUSPENDED bị từ chối bind/activate.
+
+**TBD / BLOCKED BY POLICY:** Source không chứng minh Admin được set status nào, self-target, hay policy enforce API. `PATCH /api/admin/users/{id}/status` chưa được tạo; không thêm schema Admin/Lecturer, Cognito call hay arbitrary transition.
+
+## Cập nhật 2026-08-09 — Course Update và Soft Delete
+
+**CONFIRMED:** Course có `deletedAt` qua V20. `PUT`/`DELETE /api/v1/courses/{id}` là ADMIN-only và CSRF-protected. Create/update chỉ resolve Subject, Class, Semester active; Course tombstone không xuất hiện ở detail/list/filter và không tái dùng courseCode. DELETE chỉ soft-delete Course chưa dùng; Team, Project, StudentCourseInvitation hoặc TaskWeightConfig còn tham chiếu thì 409. Không hard-delete, cascade, detach hay thay đổi membership/import delivery.
+
+## Cập nhật 2026-08-09 — Semester Update và Soft Delete
+
+**CONFIRMED:** Semester có `deletedAt` theo migration V19. `PUT`/`DELETE /api/v1/semesters/{id}` là ADMIN-only, cần browser session và CSRF. DELETE đặt tombstone, active detail/list/search không trả row đó; hard delete/cascade không tồn tại. `CourseRepository.existsBySemesterId` chặn `409` khi Course còn tham chiếu. Code tombstone vẫn chiếm uniqueness. Course service không đổi trong milestone này.
+
+## Cập nhật 2026-08-09 — Admin Read Foundation
+
+**CONFIRMED:** `GET /api/admin/users`, `/audit-logs`, `/system-stats`, `/teams` và `/projects` yêu cầu session `ROLE_ADMIN`. Chúng chỉ đọc snapshot MySQL/Mongo local, không mutation hay provider call. DTO không trả Cognito subject, token, provider/raw audit payload, IP, repository URL hoặc secret integration. Users union ba local profile table với phân trang/count tại DB; audit logs sort timestamp giảm dần.
+
 ## Update 2026-08-09 — Jira Task Create metadata ownership
 
 - **CONFIRMED:** Backend sở hữu Jira create metadata theo từng Jira Project; FE normal gửi business `type` (`TaskType`) và `priority` (`Priority`), không nhập Jira numeric ID.
@@ -610,3 +634,21 @@ heatmap chỉ Commit UTC; interaction chỉ Peer Review record thật.
 Test checkpoint của milestone: 77 Surefire suites / 339 tests / 0 failures /
 0 errors / 0 skipped; targeted analytics 21 tests, Team roster security 13 tests
 và reliability regression 20 tests đều pass.
+
+## Cập nhật 2026-08-09 — Rubric schema repair M4-R2
+
+- **CONFIRMED (runtime fact do người dùng cung cấp):** Flyway production đã ghi V10 và
+  V13 thành công; `rubric_template.subject_id` vẫn là `CHAR(36) NOT NULL`, bảng có
+  0 row và V10 tạo hai FK cùng trỏ `subject(id)`.
+- **CONFIRMED:** V22 chỉ dành cho **EXISTING_BASELINED_DB_UPGRADE**: đổi
+  `rubric_template.subject_id` thành nullable, không seed/sửa/xóa rubric và không
+  đổi Peer Review. `RubricTemplate.subject` đã nullable trong JPA.
+- **PARTIAL:** **REPLAY_FROM_EXTERNAL_V1_BASELINE** cần baseline legacy thật ngoài
+  repository. V13 vẫn cố seed `subject_id = NULL` khi bảng rỗng, nên replay path cần
+  quyết định compatibility/baseline riêng; không thêm migration trước V13 trong M4-R2.
+- **BLOCKED:** **TRUE_EMPTY_DATABASE_BOOTSTRAP** là
+  `BLOCKED_EXISTING_BASELINE_GAP`, vì V1 là external/legacy và không được tạo lại
+  trong repository. Đây không được gọi là lỗi riêng của API Peer Review.
+- **CONFIRMED:** `RubricMigrationContractTest` khóa source V10/V13 và nội dung tối
+  thiểu của V22. Full Maven pass 105 suites / 646 tests / 0 failures / 0 errors /
+  0 skipped. Đây không phải MySQL execution evidence.

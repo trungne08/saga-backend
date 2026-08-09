@@ -1,5 +1,23 @@
 # SAGA — Nhật ký quyết định kỹ thuật
 
+## DEC-049 — Account lifecycle Student và Lecturer
+
+**Status: ACCEPTED / CONFIRMED bởi business decision, source và test.**
+
+Student và Lecturer sở hữu `AccountStatus`; Admin không có status trong milestone. Lecturer cũ/mới mặc định ACTIVE qua V21. Admin có thể đặt Student/Lecturer sang ACTIVE, INACTIVE hoặc SUSPENDED; PENDING là Student provisioning-only. Business API browser-session dùng current local DB status mỗi request, còn auth me/csrf/logout được miễn để hiển thị/làm sạch session. Mutation không cascade Course ownership, TeamMember, Project, integration hay history; Cognito và role không bị thay đổi.
+
+## DEC-048 — Course Update và Soft Delete có dependency guard
+
+**Status: ACCEPTED / CONFIRMED bởi source và test.**
+
+Course dùng tombstone `deletedAt` qua V20. Create/update phải resolve Subject, Class, Semester active trước khi ghi. DELETE chỉ đặt tombstone khi không có Team, Project, StudentCourseInvitation hay TaskWeightConfig trỏ tới Course; bất kỳ dependency nào trả 409 generic. Không hard-delete, cascade, detach hay sửa membership/import delivery. Course tombstone không xuất hiện active read và courseCode không được tái dùng. Import và Contribution mutation resolve Course active-only; resolver raw read trong analytics/roster/contribution cần audit retention riêng.
+
+## DEC-047 — Semester Update và Soft Delete có dependency guard
+
+**Status: ACCEPTED / CONFIRMED bởi source và test.**
+
+Semester dùng cùng retention model với Subject/Class nhưng chỉ sau audit riêng: inbound reference duy nhất được chứng minh là `Course.semester`. `DELETE` đặt `deletedAt` qua V19, active reads loại tombstone, và `existsBySemesterId` fail closed 409 trước khi delete nếu còn Course. Không hard-delete, detach, cascade, hay sửa Course service. Code tombstone vẫn unique; SemesterRequest được tái dùng cho PUT nguyên khối. Evidence: Semester entity/repository/service/controller, CourseRepository, V19, SemesterUpdateSoftDeleteIntegrationTest.
+
 ## DEC-046 — Backend sở hữu Jira Task create metadata (2026-08-09)
 
 **Status: ACCEPTED.**
@@ -548,3 +566,17 @@ Không có secret hoặc thông tin đăng nhập thật trong decision log này
 - Quyết định: optional child chưa được tạo không tự động là 404. Chỉ endpoint Team Sprint có evidence runtime và được đổi trong milestone này sang success state `PROJECT_NOT_CREATED`.
 - Quyết định: authorization Team Sprint phải chạy trước nhánh `project == null`, tránh lộ state Team cho actor không có quyền.
 - Quyết định: generic/framework error được serialize an toàn theo `ApiErrorResponse`; provider/domain error từ `IntegrationException` không bị map sang code generic.
+
+## DEC-032 — V22 chỉ repair upgrade database đã baseline
+
+- Quyết định: thêm `V22__make_rubric_subject_nullable.sql` với đúng một thay đổi
+  `rubric_template.subject_id CHAR(36) NULL`; không sửa V10/V13 có checksum runtime
+  production, không seed data và không cleanup duplicate FK trong cùng migration.
+- Phạm vi: **EXISTING_BASELINED_DB_UPGRADE**. V10/V13 đã thành công trên runtime
+  được báo cáo, nhưng schema hiện tại không khớp JPA nullable.
+- Hệ quả: **REPLAY_FROM_EXTERNAL_V1_BASELINE** phải có baseline legacy và decision
+  riêng vì V13 chèn global `NULL`; **TRUE_EMPTY_DATABASE_BOOTSTRAP** vẫn blocked do
+  V1 không nằm trong repository. Không bật `outOfOrder`, không đổi validation/ignore
+  pattern để chèn migration trước V13.
+- Evidence: V10, V13, V22, `RubricTemplate`, `application.properties`, runtime facts
+  do người dùng cung cấp và `RubricMigrationContractTest`.

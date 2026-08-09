@@ -22,7 +22,7 @@ public class CourseImportAuthorizationService {
 
     @Transactional(readOnly = true)
     public Course requireImportAccess(SagaPrincipal principal, UUID courseId) {
-        Course course = courseRepository.findById(courseId)
+        Course course = courseRepository.findByIdAndDeletedAtIsNull(courseId)
                 .orElseThrow(() -> new ResponseStatusException(
                         HttpStatus.NOT_FOUND,
                         "Course not found"

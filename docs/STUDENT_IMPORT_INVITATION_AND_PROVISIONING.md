@@ -1,5 +1,17 @@
 # Student import, invitation, and first-login provisioning
 
+## Account lifecycle M3B — 2026-08-09
+
+PENDING vẫn chỉ thuộc Student provisioning/import. Admin không thể set Student PENDING qua status API. First-login giữ nguyên PENDING -> ACTIVE và từ chối INACTIVE/SUSPENDED; request-time business API còn chặn PENDING/INACTIVE/SUSPENDED theo current DB status. Invitation, parser, identity matching và TeamMember không đổi.
+
+## AccountStatus audit — 2026-08-09
+
+Imported Student mới bắt đầu `PENDING`. First-login identity binding giữ nguyên: chỉ `PENDING -> ACTIVE`; target `ACTIVE` giữ ACTIVE; `INACTIVE`/`SUSPENDED` conflict trước bind/activate. M3A không thay đổi parser, invitation, provisioning, identity matching hay TeamMember.
+
+## Course retention lookup — 2026-08-09
+
+Import authorization chỉ resolve Course active. Course tombstone trả 404 trước khi import mutation chạy; parser CSV/XLSX, invitation outbox, delivery, provisioning, TeamMember và business rule import không thay đổi.
+
 ## Contribution isolation update (2026-08-04)
 
 - **CONFIRMED:** Contribution reads `CommitData`, SAGA `Document`, Jira-synced

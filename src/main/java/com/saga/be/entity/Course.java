@@ -1,5 +1,6 @@
 package com.saga.be.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
@@ -12,6 +13,7 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "course")
@@ -53,6 +55,10 @@ public class Course extends BaseEntity {
 
     @Column(name = "design_contribution_weight", nullable = false)
     private Double designContributionWeight;
+
+    @JsonIgnore
+    @Column(name = "deleted_at")
+    private LocalDateTime deletedAt;
 
     @PrePersist
     void applyDefaultContributionWeights() {

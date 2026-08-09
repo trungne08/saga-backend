@@ -4,6 +4,7 @@ import com.saga.be.dto.response.AuthMeResponse;
 import com.saga.be.dto.response.CsrfTokenResponse;
 import com.saga.be.exception.UnauthenticatedRequestException;
 import com.saga.be.security.SagaPrincipal;
+import com.saga.be.service.CurrentAccountStatusService;
 import jakarta.servlet.http.HttpServletRequest;
 import java.net.URI;
 import org.springframework.http.HttpStatus;
@@ -18,6 +19,12 @@ import org.springframework.web.bind.annotation.RestController;
 @io.swagger.v3.oas.annotations.tags.Tag(name = "Xác thực", description = "Đăng nhập, phiên làm việc và CSRF.")
 @RequestMapping("/api/auth")
 public class AuthController {
+
+    private final CurrentAccountStatusService accountStatusService;
+
+    public AuthController(CurrentAccountStatusService accountStatusService) {
+        this.accountStatusService = accountStatusService;
+    }
 
     @GetMapping("/login")
     public ResponseEntity<Void> login() {
@@ -40,7 +47,7 @@ public class AuthController {
         if (csrfAttribute instanceof CsrfToken csrfToken) {
             csrfToken.getToken();
         }
-        return AuthMeResponse.from(principal);
+        return AuthMeResponse.from(principal, accountStatusService.currentStatusForAuthRoute(principal));
     }
 
     @GetMapping("/csrf")

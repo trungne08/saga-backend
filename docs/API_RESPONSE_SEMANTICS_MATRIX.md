@@ -1,5 +1,43 @@
 # Ma trận semantics response API
 
+## Account lifecycle M3B — 2026-08-09
+
+| Method | Path | Success | Failure | Safety |
+| --- | --- | --- | --- | --- |
+| PATCH | `/api/admin/users/{id}/status` | 200 safe user response | 400 PENDING/Admin target; 404 unknown; 401/403 auth/CSRF | Student/Lecturer only; no cascade/provider |
+| Any business API | `/api/**` trừ auth routes | existing success | 403 `ACCOUNT_STATUS_ACCESS_DENIED` khi current DB status không ACTIVE | current local status, không Cognito |
+| GET | `/api/auth/me` | 200, current Student/Lecturer status | 401 anonymous | exempt status enforcement |
+
+## AccountStatus M3A audit — 2026-08-09
+
+`PATCH /api/admin/users/{id}/status` chưa được expose, nên không có success/failure contract runtime. Policy transition, target Admin/Lecturer, PENDING access và enforcement session cần được chốt trước khi thêm semantics API.
+
+## Course M2B — 2026-08-09
+
+| Method | Path | Success | Failure | Retention |
+| --- | --- | --- | --- | --- |
+| PUT | `/api/v1/courses/{id}` | 200 Course | 400 validation; 404 Course/reference inactive-missing; 409 duplicate code; 401/403 auth | không đổi dependency |
+| DELETE | `/api/v1/courses/{id}` | 204 | 404 inactive/missing; 409 Team/Project/invitation/weight dependency; 401/403 auth | V20 soft-delete, active reads hide tombstone |
+
+## Semester M2A — 2026-08-09
+
+| Method | Path | Success | Failure | Retention |
+| --- | --- | --- | --- | --- |
+| PUT | `/api/v1/semesters/{id}` | 200 Semester | 400 validation/date; 404 inactive/missing; 409 duplicate; 401/403 auth | no cascade |
+| DELETE | `/api/v1/semesters/{id}` | 204 | 404 inactive/missing; 409 Course dependency; 401/403 auth | V19 soft-delete, active reads hide tombstone |
+
+## Admin Read Foundation — 2026-08-09
+
+| Method | Path | Success / empty | Auth | Provider |
+| --- | --- | --- | --- | --- |
+| GET | `/api/admin/users` | `200 Page`; empty `[]` | 401 anon, 403 non-ADMIN | none |
+| GET | `/api/admin/audit-logs` | `200 Page` newest-first; empty `[]` | 401 anon, 403 non-ADMIN | none |
+| GET | `/api/admin/system-stats` | `200`; counts may be zero | 401 anon, 403 non-ADMIN | none |
+| GET | `/api/admin/teams` | `200 Page`; empty `[]` | 401 anon, 403 non-ADMIN | none |
+| GET | `/api/admin/projects` | `200 Page`; empty `[]` | 401 anon, 403 non-ADMIN | none |
+
+Query enum/page/size không hợp lệ trả `400 INVALID_REQUEST`; size là 1..100. DTO sanitize cognitoSub, token, Authorization, provider raw body, IP, raw audit values, repository URL và không có Project DELETE.
+
 Nguồn audit: OpenAPI sinh từ `/v3/api-docs` lúc chạy `GeneratedOpenApiDocumentationIntegrationTest` ngày 2026-08-07, đối chiếu controller/service/handler hiện hành. Có đúng **96 operations**; mỗi operation sinh ra có một dòng bên dưới.
 
 Quy ước: `OAS` là response được khai báo trực tiếp trong OpenAPI; `TBD` là source/OpenAPI hiện không chứng minh contract chi tiết cho cột đó. `OK` nghĩa là endpoint có trong source và không có false-error đã biết; không suy diễn authorization hay business semantics. Provider code (JIRA_*/GITHUB_*/INTEGRATION_*) giữ nguyên qua `IntegrationException`.

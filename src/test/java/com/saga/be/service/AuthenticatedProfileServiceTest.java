@@ -236,7 +236,37 @@ class AuthenticatedProfileServiceTest {
         assertEquals("Updated Name", existing.getFullName());
         assertEquals(profileId, profile.localProfileId());
         assertEquals(ApplicationRole.LECTURER, profile.role());
-        assertNull(profile.accountStatus());
+        assertEquals(AccountStatus.ACTIVE, profile.accountStatus());
+    }
+
+    @Test
+    void reLoginDoesNotReactivateAnInactiveLecturer() {
+        String subject = "inactive-lecturer-subject";
+        String email = "inactive-lecturer@fpt.edu.vn";
+        Lecturer existing = Lecturer.builder()
+                .cognitoSub(subject)
+                .email(email)
+                .fullName("Inactive Lecturer")
+                .accountStatus(AccountStatus.INACTIVE)
+                .build();
+        existing.setId(UUID.randomUUID());
+        when(adminRepository.findByCognitoSub(subject)).thenReturn(Optional.empty());
+        when(lecturerRepository.findByCognitoSub(subject)).thenReturn(Optional.of(existing));
+        when(studentRepository.findByCognitoSub(subject)).thenReturn(Optional.empty());
+        when(adminRepository.findByEmailIgnoreCase(email)).thenReturn(Optional.empty());
+        when(lecturerRepository.findByEmailIgnoreCase(email)).thenReturn(Optional.of(existing));
+        when(studentRepository.findByEmailIgnoreCase(email)).thenReturn(Optional.empty());
+        when(lecturerRepository.saveAndFlush(existing)).thenReturn(existing);
+
+        AuthenticatedProfile profile = profileService.synchronize(new AuthenticatedIdentity(
+                subject,
+                email,
+                "Inactive Lecturer",
+                ApplicationRole.LECTURER
+        ));
+
+        assertEquals(AccountStatus.INACTIVE, existing.getAccountStatus());
+        assertEquals(AccountStatus.INACTIVE, profile.accountStatus());
     }
 
     @Test

@@ -2,6 +2,7 @@ package com.saga.be.controller;
 
 import com.saga.be.dto.response.ApiErrorResponse;
 import com.saga.be.exception.IdentityConflictException;
+import com.saga.be.exception.AccountStatusException;
 import com.saga.be.exception.IdentityServiceException;
 import com.saga.be.exception.IntegrationException;
 import com.saga.be.exception.InvalidIdentityException;
@@ -70,6 +71,14 @@ public class GlobalExceptionHandler {
                 request.getRequestURI()
             )
         );
+    }
+
+    @ExceptionHandler(AccountStatusException.class)
+    public ResponseEntity<ApiErrorResponse> accountStatus(
+            AccountStatusException exception,
+            HttpServletRequest request
+    ) {
+        return response(exception.getStatus(), exception.getCode(), exception.getMessage(), request);
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

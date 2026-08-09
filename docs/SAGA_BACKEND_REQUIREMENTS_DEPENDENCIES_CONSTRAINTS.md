@@ -1,5 +1,33 @@
 # SAGA Backend — Yêu cầu, Dependency, Phân quyền và Ràng buộc
 
+## Account lifecycle M3B constraints — 2026-08-09
+
+V21 thêm `lecturer.account_status` non-null default ACTIVE; Admin không có cột này. `PATCH /api/admin/users/{id}/status` yêu cầu ADMIN session + CSRF, request chỉ có `status` ACTIVE/INACTIVE/SUSPENDED. Target là local profile ID Student/Lecturer; Admin target, PENDING và unknown ID fail controlled. Browser-session business API check current local DB status mỗi request; auth me/csrf/logout exempt và `/me` trả current status. Không provider lookup, role mutation, cascade Course/membership/Project/history.
+
+## AccountStatus M3A audit constraints — 2026-08-09
+
+`AccountStatus` chỉ thuộc Student. Local profile ID từ Admin user union có thể chỉ Admin/Lecturer, nhưng các target đó phải fail controlled nếu endpoint được phê duyệt. Hiện chưa có policy cho Admin set status hay enforce status API, nên không có PATCH/mutation. First-login giữ contract PENDING -> ACTIVE, ACTIVE giữ nguyên, INACTIVE/SUSPENDED không bind/activate. Session status là snapshot; không được suy diễn rằng DB update đã khóa session cũ.
+
+## Course M2B retention constraints — 2026-08-09
+
+`PUT` và `DELETE /api/v1/courses/{id}` yêu cầu ADMIN + browser session + CSRF. PUT reuse `CourseRequest`; không có PATCH. Create/update chỉ chấp nhận Subject, Class, Semester active. DELETE là soft-delete (`deleted_at` V20), chỉ khi không có Team, Project, StudentCourseInvitation hoặc TaskWeightConfig; dependency trả 409. Active detail/list/filter loại tombstone và code tombstone không reuse. Không cascade/hard-delete/detach; không thay đổi Team membership, invitation delivery hay Contribution.
+
+## Semester retention constraints — 2026-08-09
+
+`PUT` và `DELETE /api/v1/semesters/{id}` yêu cầu ADMIN + session + CSRF. PUT reuse `SemesterRequest`; không có PATCH. DELETE là soft-delete (`deleted_at` nullable từ V19), chỉ khi không có Course reference; dependency guard trả 409. GET detail/list/search chỉ thấy active Semester. Tombstoned code không reuse; Course history/business logic không bị sửa hoặc cascade.
+
+## Admin read-only constraints — 2026-08-09
+
+| Route | Access | Store | Safety |
+| --- | --- | --- | --- |
+| `GET /api/admin/users` | ADMIN | MySQL | local safe fields, DB-paged union |
+| `GET /api/admin/audit-logs` | ADMIN | Mongo | no actor/IP/raw old-new payload |
+| `GET /api/admin/system-stats` | ADMIN | MySQL | local counts and generatedAt only |
+| `GET /api/admin/teams` | ADMIN | MySQL | Team/Course/nullable Project summaries |
+| `GET /api/admin/projects` | ADMIN | MySQL | Project/Course/Jira local/GitHub aggregate |
+
+Các GET dùng browser session, không cần CSRF hay Bearer; không route nào gọi provider. `AccountStatus` chỉ có trên Student, nên filter này không suy diễn status Admin/Lecturer.
+
 > **Trạng thái audit:** CONFIRMED = được code hiện tại chứng minh; PARTIAL = mới có một phần code/mô hình; TBD = repository không đủ bằng chứng; RECOMMENDED = đề xuất, không phải hành vi hiện tại. Audit dựa trên branch `main`, HEAD thực tế `0bc30be` ngày 2026-08-04. `200d866`, `a43f05d`, `07ffa38`, `90b1852` và `52a8c71` được giữ là checkpoint lịch sử. Không dùng tài liệu cũ làm bằng chứng chính và không chép giá trị bí mật.
 
 ## 1. Mục đích tài liệu
@@ -552,3 +580,56 @@ Full `./mvnw.cmd test` tại checkpoint hiện tại: **70 suites, 299 tests, 0 
 - Không thêm migration, environment variable hoặc dependency.
 - Verification: full Maven 77 suites / 339 tests pass; targeted analytics 21 tests,
   Team roster security 13 tests và GitHub/Jira/Contribution regression 20 tests pass.
+
+## Cập nhật 2026-08-09 — Flyway rubric upgrade M4-R2
+
+- Flyway dependency/plugin dùng phiên bản `12.4.0`. Source đặt
+  `spring.flyway.enabled=${FLYWAY_ENABLED:false}`,
+  `baseline-on-migrate=${FLYWAY_BASELINE_ON_MIGRATE:false}` và `baseline-version=1`.
+  Không có source setting cho `out-of-order`, `validate-on-migrate`,
+  `ignore-migration-patterns` hoặc locations; locations mặc định là
+  `classpath:db/migration`.
+- V22 chỉ là **EXISTING_BASELINED_DB_UPGRADE**: `ALTER TABLE rubric_template MODIFY
+  COLUMN subject_id CHAR(36) NULL`. Không có DML, không sửa V10/V13, không thêm
+  dependency/config Flyway và không thay JPA `ddl-auto=validate`.
+- `RubricMigrationContractTest` pass; full Maven pass 105 suites / 646 tests /
+  0 failures / 0 errors / 0 skipped. Đây là source/application regression, không
+  chứng minh MySQL runtime execution của V22.
+- **REPLAY_FROM_EXTERNAL_V1_BASELINE:** không implement. Với default Flyway
+  `outOfOrder=false`, một migration mới version `12.1` xuất hiện khi DB đã ở V18/V21
+  sẽ ở trạng thái ignored; validation mặc định không ignore `versioned:ignored`, nên
+  compatibility migration này cần task/config decision riêng. **TRUE_EMPTY_DATABASE_BOOTSTRAP**
+  là `BLOCKED_EXISTING_BASELINE_GAP` vì V1 legacy không có trong repository.
+
+### Runbook MySQL không chứa secret
+
+```sql
+SELECT version, script, checksum, success
+FROM flyway_schema_history
+WHERE version IN ('10', '13');
+
+SELECT COLUMN_NAME, IS_NULLABLE, COLUMN_TYPE
+FROM information_schema.COLUMNS
+WHERE TABLE_SCHEMA = DATABASE()
+  AND TABLE_NAME = 'rubric_template'
+  AND COLUMN_NAME = 'subject_id';
+
+SELECT COUNT(*) FROM rubric_template;
+```
+
+Sau khi V22 thực sự được apply, dùng postflight sau và xác nhận `IS_NULLABLE = YES`,
+row count không đổi, V10/V13 checksum không đổi:
+
+```sql
+SELECT version, script, checksum, success
+FROM flyway_schema_history
+WHERE version IN ('10', '13', '22');
+
+SELECT COLUMN_NAME, IS_NULLABLE, COLUMN_TYPE
+FROM information_schema.COLUMNS
+WHERE TABLE_SCHEMA = DATABASE()
+  AND TABLE_NAME = 'rubric_template'
+  AND COLUMN_NAME = 'subject_id';
+
+SELECT COUNT(*) FROM rubric_template;
+```

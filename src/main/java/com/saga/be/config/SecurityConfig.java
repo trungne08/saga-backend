@@ -22,6 +22,7 @@ import org.springframework.security.web.context.HttpSessionSecurityContextReposi
 import org.springframework.security.web.context.RequestAttributeSecurityContextRepository;
 import org.springframework.security.web.context.SecurityContextRepository;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
+import org.springframework.security.web.csrf.CsrfFilter;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 import org.springframework.security.web.csrf.CsrfTokenRepository;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
@@ -60,6 +61,7 @@ public class SecurityConfig {
             CorsConfigurationSource corsConfigurationSource,
             CsrfTokenRepository csrfTokenRepository,
             SecurityContextRepository securityContextRepository,
+            com.saga.be.security.AccountStatusEnforcementFilter accountStatusEnforcementFilter,
             CognitoOidcAuthoritiesMapper authoritiesMapper,
             NoStoreOAuth2AuthorizedClientRepository authorizedClientRepository,
             CognitoAuthenticationSuccessHandler successHandler,
@@ -86,6 +88,7 @@ public class SecurityConfig {
                                 )
                         )
                 )
+                .addFilterAfter(accountStatusEnforcementFilter, CsrfFilter.class)
                 .securityContext(context -> context
                         .securityContextRepository(securityContextRepository)
                         .requireExplicitSave(true)

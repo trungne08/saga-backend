@@ -38,6 +38,22 @@ public class SemesterController {
         return ResponseEntity.status(HttpStatus.CREATED).body(semesterService.createSemester(request));
     }
 
+    @PutMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Semester> updateSemester(
+            @PathVariable UUID id,
+            @Valid @RequestBody SemesterRequest request
+    ) {
+        return ResponseEntity.ok(semesterService.updateSemester(id, request));
+    }
+
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Void> deleteSemester(@PathVariable UUID id) {
+        semesterService.softDeleteSemester(id);
+        return ResponseEntity.noContent().build();
+    }
+
     @GetMapping
     public ResponseEntity<Page<Semester>> getSemesters(
             @RequestParam(required = false) String keyword,
