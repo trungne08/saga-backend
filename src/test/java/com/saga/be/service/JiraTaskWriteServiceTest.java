@@ -8,6 +8,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -16,12 +17,14 @@ import static org.mockito.Mockito.when;
 
 import com.saga.be.dto.request.JiraTaskCreateRequest;
 import com.saga.be.dto.request.JiraTaskSprintRequest;
+import com.saga.be.dto.request.JiraTaskUpdateRequest;
 import com.saga.be.entity.JiraBoard;
 import com.saga.be.entity.JiraWriteOperation;
 import com.saga.be.entity.IdentityMap;
 import com.saga.be.entity.Project;
 import com.saga.be.entity.Sprint;
 import com.saga.be.entity.Task;
+import com.saga.be.entity.value.TaskComponentSnapshot;
 import com.saga.be.entity.enums.AccountStatus;
 import com.saga.be.entity.enums.IntegrationStatus;
 import com.saga.be.entity.enums.IdentityMappingStatus;
@@ -693,6 +696,114 @@ class JiraTaskWriteServiceTest {
         assertTrue(logged.contains("resourceType=PROJECT"));
     }
 
+    @Test
+    void updateSendsOnlyChangedTitle() {
+        assertUpdateSendsOnly("summary", new JiraTaskUpdateRequest("Changed", null, null, null, null, null));
+    }
+
+    @Test
+    void updateSendsDescriptionWhenRequestedBecauseCanonicalAdfTextIsNotFormattingEquivalent() {
+        assertUpdateSendsOnly("description", new JiraTaskUpdateRequest(null, "Changed", null, null, null, null));
+    }
+
+    @Test
+    void updateSendsOnlyChangedPriority() {
+        assertUpdateSendsOnly("priority", new JiraTaskUpdateRequest(null, null, "2", null, null, null));
+    }
+
+    @Test
+    void updateSendsOnlyChangedDueDate() {
+        assertUpdateSendsOnly("duedate", new JiraTaskUpdateRequest(null, null, null,
+                java.time.LocalDate.of(2026, 8, 24), null, null));
+    }
+
+    @Test
+    void updateSendsOnlyChangedLabels() {
+        assertUpdateSendsOnly("labels", new JiraTaskUpdateRequest(null, null, null, null, List.of("BE"), null));
+    }
+
+    @Test
+    void updateSendsOnlyChangedComponents() {
+        assertUpdateSendsOnly("components", new JiraTaskUpdateRequest(null, null, null, null, null, List.of("2")));
+    }
+
+    @Test
+    void updateDoesNotRequireEditabilityForCanonicalFieldsThatWereNotChanged() {
+        UpdateFixture fixture = updateFixture();
+        when(fixture.provider.getEditMetadata("token", "cloud", "101")).thenReturn(List.of(
+                new JiraCreateField("description", "Description", false, "string", null, List.of())
+        ));
+
+        fixture.service.update(fixture.principal, fixture.projectId, fixture.task.getId(), "key",
+                new JiraTaskUpdateRequest("Original", "Changed", null, java.time.LocalDate.of(2026, 8, 23),
+                        List.of("FE"), List.of("1")));
+
+        verify(fixture.provider).updateIssue(eq("token"), eq("cloud"), eq("101"), argThat(fields ->
+                fields.size() == 1 && fields.containsKey("description")));
+    }
+
+    @Test
+    void updateLogsSafeMetadataDiagnosticForRequestedUnavailableField() {
+        UpdateFixture fixture = updateFixture();
+        when(fixture.provider.getEditMetadata("token", "cloud", "101")).thenReturn(List.of());
+
+        String logged = captureUpdateFailure(() -> assertEquals("JIRA_EDIT_FIELD_NOT_ALLOWED", assertThrows(
+                IntegrationException.class, () -> fixture.service.update(fixture.principal, fixture.projectId,
+                        fixture.task.getId(), "key",
+                        new JiraTaskUpdateRequest(null, "Changed", null, null, null, null))).getCode()));
+
+        verify(fixture.provider, never()).updateIssue(any(), any(), any(), any());
+        assertTrue(logged.contains("operation=TASK_UPDATE"));
+        assertTrue(logged.contains("stage=EDIT_METADATA_VALIDATION"));
+        assertTrue(logged.contains("fieldKey=description"));
+        assertTrue(logged.contains("businessField=description"));
+        assertTrue(logged.contains("upstreamHttpStatus=200"));
+        assertTrue(logged.contains("errorCategory=JIRA_EDIT_FIELD_NOT_ALLOWED"));
+        assertTrue(logged.contains("writeOperationStatus=PENDING"));
+        assertTrue(!logged.contains("Changed"));
+    }
+
+    @Test
+    void updateProviderRejectionIsFailedAndDoesNotClaimRemoteSuccess() {
+        UpdateFixture fixture = updateFixture();
+        doThrow(IntegrationException.invalid("JIRA_REQUEST_REJECTED", "Jira rejected fields"))
+                .when(fixture.provider).updateIssue(eq("token"), eq("cloud"), eq("101"), any());
+
+        assertEquals("JIRA_REQUEST_REJECTED", assertThrows(IntegrationException.class,
+                () -> fixture.service.update(fixture.principal, fixture.projectId, fixture.task.getId(), "key",
+                        new JiraTaskUpdateRequest("Changed", null, null, null, null, null))).getCode());
+
+        verify(fixture.operations).failed(fixture.operation.getId(), "JIRA_REQUEST_REJECTED");
+        verify(fixture.operations, never()).markRemoteSucceeded(any(), any(), any());
+    }
+
+    @Test
+    void remoteSucceededUpdateReplaysCanonicalRecoveryWithoutAnotherProviderUpdate() {
+        UpdateFixture fixture = updateFixture();
+        fixture.operation.setStatus(JiraWriteOperationStatus.REMOTE_SUCCEEDED);
+        fixture.operation.setRemoteResourceId("101");
+        fixture.operation.setRemoteResourceKey("P-1");
+
+        assertEquals(fixture.response.id(), fixture.service.update(fixture.principal, fixture.projectId,
+                fixture.task.getId(), "key", new JiraTaskUpdateRequest("Changed", null, null, null, null, null)).id());
+
+        verify(fixture.provider, never()).getEditMetadata(any(), any(), any());
+        verify(fixture.provider, never()).updateIssue(any(), any(), any(), any());
+        verify(fixture.provider).getIssue("token", "cloud", "101");
+        verify(fixture.operations).complete(fixture.operation.getId());
+    }
+
+    private void assertUpdateSendsOnly(String expectedField, JiraTaskUpdateRequest request) {
+        UpdateFixture fixture = updateFixture();
+
+        fixture.service.update(fixture.principal, fixture.projectId, fixture.task.getId(), "key", request);
+
+        verify(fixture.provider).updateIssue(eq("token"), eq("cloud"), eq("101"), argThat(fields ->
+                fields.size() == 1 && fields.containsKey(expectedField)));
+        verify(fixture.operations).markRemoteSucceeded(fixture.operation.getId(), "101", "P-1");
+        verify(fixture.operations).complete(fixture.operation.getId());
+    }
+
     private String captureCreateFailure(Runnable invocation) {
         Logger logger = (Logger) LoggerFactory.getLogger(JiraTaskWriteService.class);
         ListAppender<ILoggingEvent> appender = new ListAppender<>();
@@ -704,6 +815,10 @@ class JiraTaskWriteServiceTest {
         } finally {
             logger.detachAppender(appender);
         }
+    }
+
+    private String captureUpdateFailure(Runnable invocation) {
+        return captureCreateFailure(invocation);
     }
 
     private void remoteCreateThenCanonicalFetch(CreateFixture fixture) {
@@ -818,6 +933,55 @@ class JiraTaskWriteServiceTest {
                 board, target, task, operation, principal, snapshot, response);
     }
 
+    private UpdateFixture updateFixture() {
+        ProjectIntegrationAuthorizationService authorization = mock(ProjectIntegrationAuthorizationService.class);
+        JiraBoardRepository boards = mock(JiraBoardRepository.class);
+        JiraCredentialService credentials = mock(JiraCredentialService.class);
+        JiraProviderClient provider = mock(JiraProviderClient.class);
+        JiraIssueUpsertService upserts = mock(JiraIssueUpsertService.class);
+        JiraWriteOperationService operations = mock(JiraWriteOperationService.class);
+        JiraCanonicalTaskReadService canonicalReads = mock(JiraCanonicalTaskReadService.class);
+        TaskRepository tasks = mock(TaskRepository.class);
+        UUID projectId = UUID.randomUUID();
+        Project project = Project.builder().name("Project").build(); project.setId(projectId);
+        JiraBoard board = JiraBoard.builder().project(project).cloudId("cloud").jiraProjectId("10000")
+                .connectionStatus(IntegrationStatus.ACTIVE).grantedScopes("write:jira-work").build();
+        board.setId(UUID.randomUUID());
+        Task task = Task.builder().project(project).externalId("101").externalKey("P-1").title("Original")
+                .priority(Priority.HIGH).dueDate(LocalDateTime.of(2026, 8, 23, 0, 0))
+                .labels(List.of("FE")).components(List.of(new TaskComponentSnapshot("1", "Frontend"))).build();
+        task.setId(UUID.randomUUID());
+        JiraWriteOperation operation = JiraWriteOperation.builder().project(project)
+                .operationType(JiraWriteOperationType.TASK_UPDATE).status(JiraWriteOperationStatus.PENDING).build();
+        operation.setId(UUID.randomUUID());
+        SagaPrincipal principal = new SagaPrincipal("sub", "a@b.test", "User", ApplicationRole.ADMIN,
+                UUID.randomUUID(), AccountStatus.ACTIVE);
+        TaskReadResponse response = TaskReadResponse.from(task);
+        when(authorization.requireProjectManager(principal, projectId)).thenReturn(project);
+        when(tasks.findByIdAndProjectId(task.getId(), projectId)).thenReturn(Optional.of(task));
+        when(operations.fingerprint(any())).thenReturn("fingerprint");
+        when(operations.claim(project, principal, JiraWriteOperationType.TASK_UPDATE, "key", "fingerprint"))
+                .thenReturn(operation);
+        when(boards.findByProjectId(projectId)).thenReturn(Optional.of(board));
+        when(credentials.validAccessToken(board)).thenReturn("token");
+        when(provider.getEditMetadata("token", "cloud", "101")).thenReturn(List.of(
+                new JiraCreateField("summary", "Summary", false, "string", null, List.of()),
+                new JiraCreateField("description", "Description", false, "string", null, List.of()),
+                new JiraCreateField("priority", "Priority", false, "priority", null,
+                        List.of(new JiraCreateFieldAllowedValue("1", null, "High"),
+                                new JiraCreateFieldAllowedValue("2", null, "Low"))),
+                new JiraCreateField("duedate", "Due date", false, "date", null, List.of()),
+                new JiraCreateField("labels", "Labels", false, "array", "string", List.of()),
+                new JiraCreateField("components", "Components", false, "array", "component", List.of())
+        ));
+        when(provider.getIssue("token", "cloud", "101")).thenReturn(snapshot());
+        when(canonicalReads.findResponse(projectId, "101")).thenReturn(Optional.of(response));
+        JiraTaskWriteService service = new JiraTaskWriteService(authorization, boards, credentials, provider, upserts,
+                operations, canonicalReads, mock(JiraTaskSprintFinalizationService.class), tasks,
+                mock(IdentityMapRepository.class), mock(SprintRepository.class), mock(JiraSprintUpsertService.class));
+        return new UpdateFixture(service, provider, operations, projectId, task, operation, principal, response);
+    }
+
     private record CreateFixture(
             ProjectIntegrationAuthorizationService authorization,
             JiraBoardRepository boards,
@@ -856,6 +1020,18 @@ class JiraTaskWriteServiceTest {
             JiraWriteOperation operation,
             SagaPrincipal principal,
             JiraIssueSnapshot snapshot,
+            TaskReadResponse response
+    ) {
+    }
+
+    private record UpdateFixture(
+            JiraTaskWriteService service,
+            JiraProviderClient provider,
+            JiraWriteOperationService operations,
+            UUID projectId,
+            Task task,
+            JiraWriteOperation operation,
+            SagaPrincipal principal,
             TaskReadResponse response
     ) {
     }

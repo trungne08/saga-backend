@@ -13,6 +13,7 @@ import com.saga.be.entity.JiraWriteOperation;
 import com.saga.be.entity.Project;
 import com.saga.be.entity.Task;
 import com.saga.be.entity.Sprint;
+import com.saga.be.entity.value.TaskComponentSnapshot;
 import com.saga.be.entity.enums.IdentityMappingStatus;
 import com.saga.be.entity.enums.IntegrationProvider;
 import com.saga.be.entity.enums.IntegrationStatus;
@@ -111,9 +112,11 @@ public class JiraTaskWriteService {
             String key, JiraTaskUpdateRequest request) {
         return mutate(principal, projectId, taskId, key, JiraWriteOperationType.TASK_UPDATE,
                 fingerprint(request), JiraWriteScope.CLASSIC_WRITE_SCOPE, (token, board, task) -> {
-                    Set<String> allowed = jiraClient.getEditMetadata(token, board.getCloudId(), external(task))
-                            .stream().map(JiraCreateField::key).collect(java.util.stream.Collectors.toSet());
-                    Map<String, Object> fields = updateFields(request, allowed);
+                    List<JiraCreateField> editMetadata = jiraClient.getEditMetadata(
+                            token, board.getCloudId(), external(task));
+                    Set<String> allowed = editMetadata.stream().map(JiraCreateField::key)
+                            .collect(java.util.stream.Collectors.toSet());
+                    Map<String, Object> fields = updateFields(task, request, editMetadata, allowed);
                     if (fields.isEmpty()) throw IntegrationException.invalid("JIRA_TASK_UPDATE_EMPTY", "No editable task fields were supplied");
                     jiraClient.updateIssue(token, board.getCloudId(), external(task), fields);
                 });
@@ -283,18 +286,59 @@ public class JiraTaskWriteService {
 
     private String external(Task task) { if (task.getExternalId() == null || task.getExternalId().isBlank()) throw IntegrationException.conflict("JIRA_TASK_NOT_LINKED", "The task is not linked to Jira"); return task.getExternalId(); }
 
-    private Map<String, Object> updateFields(JiraTaskUpdateRequest request, Set<String> allowed) {
+    private Map<String, Object> updateFields(
+            Task task,
+            JiraTaskUpdateRequest request,
+            List<JiraCreateField> editMetadata,
+            Set<String> allowed
+    ) {
         Map<String, Object> fields = new LinkedHashMap<>();
-        if (request.title() != null) fields.put("summary", requireEditable(allowed, "summary", request.title().trim()));
-        if (request.description() != null) fields.put("description", requireEditable(allowed, "description", adf(request.description())));
-        if (request.priorityId() != null) fields.put("priority", requireEditable(allowed, "priority", Map.of("id", request.priorityId())));
-        if (request.dueDate() != null) fields.put("duedate", requireEditable(allowed, "duedate", request.dueDate().toString()));
-        if (request.labels() != null) fields.put("labels", requireEditable(allowed, "labels", List.copyOf(request.labels())));
-        if (request.componentIds() != null) fields.put("components", requireEditable(allowed, "components", request.componentIds().stream().map(id -> Map.of("id", id)).toList()));
+        if (request.title() != null && !Objects.equals(request.title().trim(), task.getTitle())) {
+            fields.put("summary", requireEditable(allowed, "summary", "title", request.title().trim()));
+        }
+        // Jira canonicalization intentionally flattens ADF; it cannot prove formatting-equivalence.
+        if (request.description() != null) {
+            fields.put("description", requireEditable(allowed, "description", "description", adf(request.description())));
+        }
+        if (request.priorityId() != null && !samePriority(task, request.priorityId(), editMetadata)) {
+            fields.put("priority", requireEditable(allowed, "priority", "priorityId", Map.of("id", request.priorityId())));
+        }
+        if (request.dueDate() != null && (task.getDueDate() == null
+                || !request.dueDate().equals(task.getDueDate().toLocalDate()))) {
+            fields.put("duedate", requireEditable(allowed, "duedate", "dueDate", request.dueDate().toString()));
+        }
+        if (request.labels() != null && !request.labels().equals(task.getLabels())) {
+            fields.put("labels", requireEditable(allowed, "labels", "labels", List.copyOf(request.labels())));
+        }
+        if (request.componentIds() != null && !request.componentIds().equals(task.getComponents().stream()
+                .map(TaskComponentSnapshot::id).toList())) {
+            fields.put("components", requireEditable(allowed, "components", "componentIds",
+                    request.componentIds().stream().map(id -> Map.of("id", id)).toList()));
+        }
         return fields;
     }
 
-    private Object requireEditable(Set<String> allowed, String field, Object value) { if (!allowed.contains(field)) throw IntegrationException.invalid("JIRA_EDIT_FIELD_NOT_ALLOWED", "The Jira edit metadata does not allow the requested field"); return value; }
+    private boolean samePriority(Task task, String requestedPriorityId, List<JiraCreateField> editMetadata) {
+        return editMetadata.stream()
+                .filter(field -> "priority".equals(field.key()))
+                .flatMap(field -> field.allowedValues().stream())
+                .filter(value -> requestedPriorityId.equals(value.id()) && value.name() != null)
+                .map(JiraCreateFieldAllowedValue::name)
+                .map(this::priority)
+                .anyMatch(resolved -> resolved == task.getPriority());
+    }
+
+    private Object requireEditable(Set<String> allowed, String field, String businessField, Object value) {
+        if (!allowed.contains(field)) {
+            log.warn("jira_task_update_edit_metadata operation=TASK_UPDATE stage=EDIT_METADATA_VALIDATION "
+                            + "fieldKey={} businessField={} upstreamHttpStatus=200 "
+                            + "errorCategory=JIRA_EDIT_FIELD_NOT_ALLOWED writeOperationStatus=PENDING",
+                    field, businessField);
+            throw IntegrationException.invalid("JIRA_EDIT_FIELD_NOT_ALLOWED",
+                    "The Jira edit metadata does not allow the requested field");
+        }
+        return value;
+    }
 
     @FunctionalInterface private interface TaskMutation { void apply(String token, JiraBoard board, Task task); }
 

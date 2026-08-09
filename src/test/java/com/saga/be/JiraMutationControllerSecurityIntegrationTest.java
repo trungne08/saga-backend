@@ -13,6 +13,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.saga.be.entity.enums.AccountStatus;
 import com.saga.be.dto.request.JiraTaskSprintRequest;
+import com.saga.be.dto.request.JiraTaskAssigneeRequest;
 import com.saga.be.security.ApplicationRole;
 import com.saga.be.security.SagaPrincipal;
 import com.saga.be.service.JiraSprintWriteService;
@@ -165,6 +166,35 @@ class JiraMutationControllerSecurityIntegrationTest {
     }
 
     @Test
+    void assigneeIdOnlyJsonDeserializesWithUnassignDefaultingToFalse() throws Exception {
+        JiraTaskAssigneeRequest request = objectMapper.readValue(
+                "{\"assigneeId\":\"" + RESOURCE_ID + "\"}", JiraTaskAssigneeRequest.class);
+
+        assertEquals(RESOURCE_ID, request.assigneeId());
+        assertFalse(request.unassign());
+    }
+
+    @Test
+    void assigneeIdOnlyRequestReachesWriteService() throws Exception {
+        ArgumentCaptor<JiraTaskAssigneeRequest> requestCaptor = ArgumentCaptor.forClass(JiraTaskAssigneeRequest.class);
+
+        mockMvc.perform(request(HttpMethod.PUT,
+                        "/api/v1/projects/" + RUNTIME_PROJECT_ID + "/tasks/" + RUNTIME_TASK_ID + "/assignee")
+                        .header("Idempotency-Key", "integration-test-key")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"assigneeId\":\"" + RESOURCE_ID + "\"}")
+                        .with(authentication(authenticationFor(ApplicationRole.ADMIN)))
+                        .with(csrf()))
+                .andExpect(status().isOk());
+
+        verify(taskWrites).assign(any(), eq(RUNTIME_PROJECT_ID), eq(RUNTIME_TASK_ID),
+                eq("integration-test-key"), requestCaptor.capture());
+        assertEquals(RESOURCE_ID, requestCaptor.getValue().assigneeId());
+        assertFalse(requestCaptor.getValue().unassign());
+        verifyNoInteractions(jiraProvider);
+    }
+
+    @Test
     void backlogOnlyRequestReachesWriteService() throws Exception {
         ArgumentCaptor<JiraTaskSprintRequest> requestCaptor = ArgumentCaptor.forClass(JiraTaskSprintRequest.class);
 
@@ -203,15 +233,15 @@ class JiraMutationControllerSecurityIntegrationTest {
     }
 
     @Test
-    void missingIdempotencyKeyKeepsExistingInternalErrorBehavior() throws Exception {
+    void missingIdempotencyKeyIsMappedToGenericBadRequestBeforeService() throws Exception {
         mockMvc.perform(request(HttpMethod.PUT,
                         "/api/v1/projects/" + RUNTIME_PROJECT_ID + "/tasks/" + RUNTIME_TASK_ID + "/sprint")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"sprintId\":\"" + RUNTIME_SPRINT_ID + "\"}")
                         .with(authentication(authenticationFor(ApplicationRole.ADMIN)))
                         .with(csrf()))
-                .andExpect(status().isInternalServerError())
-                .andExpect(jsonPath("$.error").value("INTERNAL_SERVER_ERROR"));
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("INVALID_REQUEST"));
 
         verifyNoInteractions(taskWrites, jiraProvider);
     }

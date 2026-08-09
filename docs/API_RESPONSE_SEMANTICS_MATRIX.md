@@ -1,3 +1,9 @@
+## J1G — Jira Task Update edit metadata (2026-08-10)
+
+| Method | Path | Success | Client error | Provider failure | Idempotency / safety |
+| --- | --- | --- | --- | --- | --- |
+| PUT | `/api/v1/projects/{projectId}/tasks/{taskId}` | 200 canonical Task sau Jira PUT, GET/upsert/fresh confirmation | 400 `INVALID_REQUEST` thiếu `Idempotency-Key`; 400 `JIRA_TASK_UPDATE_EMPTY`; 400 `JIRA_EDIT_FIELD_NOT_ALLOWED` | Jira PUT: 400 `JIRA_REQUEST_REJECTED`; 401→409 `JIRA_ACCESS_REVOKED`; 403 `JIRA_ACCESS_FORBIDDEN`; 404→409 `JIRA_RESOURCE_NOT_FOUND`; 429 `JIRA_RATE_LIMITED`; khác 503 | same-key `REMOTE_SUCCEEDED` chỉ canonical recovery, không PUT lại; diagnostic không value/secret |
+
 # Ma trận semantics response API
 
 ## A12 — Admin closure response boundary

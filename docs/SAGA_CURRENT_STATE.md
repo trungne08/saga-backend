@@ -1,3 +1,9 @@
+## J1G Jira Task update edit-metadata — 2026-08-10
+
+- **CONFIRMED:** `JIRA_EDIT_FIELD_NOT_ALLOWED` phát sinh local sau editmeta thành công nếu field cần mutate không hiện diện; trước J1G full-form update gửi mọi field non-null.
+- **Đã hoàn thành:** suppress title/priority có thể resolve/dueDate/labels/components nếu canonical bằng nhau; description vẫn gửi khi có mặt. Có safe diagnostic field bị chặn, không payload/secret.
+- **Đã hoàn thành:** `unassign` có thể omit khi chỉ gửi `assigneeId`; thiếu `Idempotency-Key` trả `400 INVALID_REQUEST`, không 500.
+
 # SAGA — Trạng thái hiện tại
 
 ## A12 — Admin closure, 2026-08-09

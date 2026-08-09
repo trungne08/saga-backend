@@ -1,3 +1,17 @@
+## J1G Jira Task Update contract — 2026-08-10
+
+`PUT /api/v1/projects/{projectId}/tasks/{taskId}` chỉ dùng field optional `title`, `description`, `priorityId`, `dueDate` (`YYYY-MM-DD`), `labels`, `componentIds`. Omit/null là không đổi; `labels: []`/`componentIds: []` replace-all rỗng. Không gửi type, assignee, sprintId, estimation hay status vào body này.
+
+| Ý định | Endpoint | Body tối thiểu |
+| --- | --- | --- |
+| Sửa title/description/priority/due date/labels/components | `PUT /tasks/{taskId}` | chỉ field thực sự muốn đổi |
+| Assign/unassign | `PUT /tasks/{taskId}/assignee` | `assigneeId` hoặc `unassign: true` |
+| Move Sprint/backlog | `PUT /tasks/{taskId}/sprint` | `sprintId` hoặc `backlog: true` |
+| Estimation | `PUT /tasks/{taskId}/estimation` | `value` |
+| Status | `POST /tasks/{taskId}/transitions` | `transitionId` |
+
+FE gửi sparse body. `description` non-null luôn requested vì ADF canonicalization không giữ formatting. `400 JIRA_EDIT_FIELD_NOT_ALLOWED` giữ input và hiển thị lỗi. CSRF + `Idempotency-Key` vẫn bắt buộc; thiếu header là `400 INVALID_REQUEST`.
+
 # SAGA Frontend API Integration Guide
 
 ## A12 — Bàn giao Admin cho FE, 2026-08-09

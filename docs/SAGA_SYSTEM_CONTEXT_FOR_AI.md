@@ -1,3 +1,9 @@
+## J1G Jira Task update edit-metadata correctness — 2026-08-10
+
+- `PUT /api/v1/projects/{projectId}/tasks/{taskId}` chỉ nhận `title`, `description`, `priorityId`, `dueDate`, `labels`, `componentIds`; type/assignee/Sprint/estimation/status dùng endpoint riêng.
+- Backend dùng `GET /rest/api/3/issue/{issueIdOrKey}/editmeta`; chỉ suppress field bằng canonical local khi an toàn (title, priority có metadata name, dueDate theo ngày, labels, component IDs). Description non-null vẫn requested vì ADF bị flatten.
+- Metadata không cho field còn phải gửi: `400 JIRA_EDIT_FIELD_NOT_ALLOWED` và WARN an toàn không có value/secret. Provider PUT 400 vẫn là `JIRA_REQUEST_REJECTED`.
+
 # SAGA — Context kỹ thuật hệ thống hiện tại
 
 ## A12 — Admin backend closure, 2026-08-09

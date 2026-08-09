@@ -1,3 +1,11 @@
+## DEC-062 — Jira Task update chỉ gửi diff canonical có thể chứng minh (2026-08-10)
+
+**Status: ACCEPTED.**
+
+- `JIRA_EDIT_FIELD_NOT_ALLOWED` là local policy sau editmeta, không phải provider PUT 400; không retry provider mù.
+- Chỉ suppress summary, priority có metadata name, dueDate, labels, component IDs khi canonical bằng nhau. Description ADF flatten không đủ để chứng minh equality.
+- Main update không mở rộng type/assignee/Sprint/estimation/status; giữ endpoint riêng để không tạo partial-result contract mới.
+
 # SAGA — Nhật ký quyết định kỹ thuật
 
 ## DEC-059 — A12 Admin closure boundary (2026-08-09)

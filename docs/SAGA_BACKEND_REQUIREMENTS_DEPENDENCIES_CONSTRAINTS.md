@@ -1,3 +1,10 @@
+## Ràng buộc J1G Jira Task update metadata — 2026-08-10
+
+- `PUT /tasks/{taskId}` không nhận type/assignee/Sprint/estimation/status; giữ route/scope/idempotency/recovery riêng.
+- `GET /rest/api/3/issue/{issueIdOrKey}/editmeta` là authority writable. Field cần mutate không có metadata trả `400 JIRA_EDIT_FIELD_NOT_ALLOWED`, không provider update/retry mù.
+- Diagnostic chỉ có operation, stage, field key/business field, upstream status, category, write status; cấm request value, token, Authorization, Idempotency-Key, cookie/CSRF, Cognito sub, raw provider response.
+- Thiếu `Idempotency-Key` là binding `400 INVALID_REQUEST`; header vẫn required, không đổi session/CSRF/CORS/state machine.
+
 # SAGA Backend — Yêu cầu, Dependency, Phân quyền và Ràng buộc
 
 ## A12 Admin closure constraints — 2026-08-09
