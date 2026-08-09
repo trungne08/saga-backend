@@ -67,6 +67,8 @@ password reset và manual Course add/remove cũng chưa có contract/session/gov
 - **CONFIRMED:** `issueTypeId` và `priorityId` vẫn là optional advanced override tương thích ngược. Backend lấy issue-type metadata trước, validate explicit issue type thuộc Project rồi mới gọi create-fields; explicit priority phải thuộc `priority.allowedValues`.
 - **CONFIRMED:** auto-resolution dùng đúng normalization đã có ở canonical Jira upsert. Zero hoặc nhiều candidate fail closed; không hardcode Jira ID, không cache metadata cross-project, không đổi write-operation/session/CSRF/authorization.
 - **CONFIRMED:** task-create diagnostics chỉ ghi projectId, operation/stage/resource type, resolution mode/result, upstream status, error category và write-operation status; không ghi credential, raw response hay Idempotency-Key.
+- **CONFIRMED runtime/source 2026-08-09:** DEMO-8 (`10009`) và DEMO-9 (`10010`) kết thúc với `JiraWriteOperation=COMPLETED`, `completed_at`, canonical Task local và `safe_error_code=NULL`. WARN cũ `JIRA_WRITE_RECOVERY_REQUIRED` được ghi sau `completed_at` vì flow cũ complete operation trước local confirmation; object dùng log có thể giữ status cũ `REMOTE_SUCCEEDED`.
+- **CONFIRMED:** Task Create nay xác nhận canonical local Task trước `complete`. Canonical fetch/upsert/xác nhận thất bại giữ `REMOTE_SUCCEEDED` và trả recovery-required; retry cùng Idempotency-Key chỉ canonical recovery, không POST Jira lần hai. Không đổi metadata policy, scope, session/CSRF, authorization, entity, migration hay reconciliation.
 
 ## Update 2026-08-08 — Jira Sprint state trong list response
 

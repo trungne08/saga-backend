@@ -9,6 +9,7 @@ import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -343,6 +344,95 @@ class JiraTaskWriteServiceTest {
     }
 
     @Test
+    void confirmsCanonicalTaskBeforeCompletingRemoteSuccess() {
+        CreateFixture fixture = fixture();
+        remoteCreateThenCanonicalFetch(fixture);
+
+        fixture.service().create(fixture.principal, fixture.projectId, "key",
+                new JiraTaskCreateRequest("Task", "3", null, null, null, null, null, null));
+
+        InOrder ordered = inOrder(fixture.upserts, fixture.tasks, fixture.operations);
+        ordered.verify(fixture.upserts).upsert(eq(fixture.boardId), any(JiraIssueSnapshot.class));
+        ordered.verify(fixture.tasks).findByProjectIdAndExternalId(fixture.projectId, "101");
+        ordered.verify(fixture.operations).complete(fixture.operation.getId());
+        assertEquals(JiraWriteOperationStatus.COMPLETED, fixture.operation.getStatus());
+    }
+
+    @Test
+    void keepsRemoteSucceededWhenCanonicalTaskConfirmationFails() {
+        CreateFixture fixture = fixture();
+        when(fixture.provider.createIssue(eq("token"), eq("cloud"), any()))
+                .thenReturn(new JiraIssueReference("101", "P-1"));
+        when(fixture.provider.getIssue("token", "cloud", "101")).thenReturn(snapshot());
+        when(fixture.tasks.findByProjectIdAndExternalId(fixture.projectId, "101")).thenReturn(Optional.empty());
+
+        assertEquals("JIRA_WRITE_RECOVERY_REQUIRED", assertThrows(IntegrationException.class,
+                () -> fixture.service().create(fixture.principal, fixture.projectId, "key",
+                        new JiraTaskCreateRequest("Task", "3", null, null, null, null, null, null))).getCode());
+
+        assertEquals(JiraWriteOperationStatus.REMOTE_SUCCEEDED, fixture.operation.getStatus());
+        verify(fixture.operations, never()).complete(fixture.operation.getId());
+        verify(fixture.provider, times(1)).createIssue(eq("token"), eq("cloud"), any());
+    }
+
+    @Test
+    void retriesSameKeyAfterConfirmationFailureWithoutAnotherRemoteCreate() {
+        CreateFixture fixture = fixture();
+        when(fixture.provider.createIssue(eq("token"), eq("cloud"), any()))
+                .thenReturn(new JiraIssueReference("101", "P-1"));
+        when(fixture.provider.getIssue("token", "cloud", "101")).thenReturn(snapshot());
+        Task task = Task.builder().project(fixture.project).externalId("101").externalKey("P-1").title("Task").build();
+        task.setId(UUID.randomUUID());
+        when(fixture.tasks.findByProjectIdAndExternalId(fixture.projectId, "101"))
+                .thenReturn(Optional.empty(), Optional.of(task));
+
+        assertEquals("JIRA_WRITE_RECOVERY_REQUIRED", assertThrows(IntegrationException.class,
+                () -> fixture.service().create(fixture.principal, fixture.projectId, "key",
+                        new JiraTaskCreateRequest("Task", "3", null, null, null, null, null, null))).getCode());
+        assertEquals(JiraWriteOperationStatus.REMOTE_SUCCEEDED, fixture.operation.getStatus());
+
+        assertEquals(task.getId(), fixture.service().create(fixture.principal, fixture.projectId, "key",
+                new JiraTaskCreateRequest("Task", "3", null, null, null, null, null, null)).id());
+
+        verify(fixture.provider, times(1)).createIssue(eq("token"), eq("cloud"), any());
+        verify(fixture.operations).complete(fixture.operation.getId());
+        assertEquals(JiraWriteOperationStatus.COMPLETED, fixture.operation.getStatus());
+    }
+
+    @Test
+    void retriesRemoteSucceededWithCanonicalRecoveryWithoutAnotherCreate() {
+        CreateFixture fixture = fixture();
+        fixture.operation.setStatus(JiraWriteOperationStatus.REMOTE_SUCCEEDED);
+        fixture.operation.setRemoteResourceId("101");
+        fixture.operation.setRemoteResourceKey("P-1");
+        when(fixture.provider.getIssue("token", "cloud", "101")).thenReturn(snapshot());
+        Task task = Task.builder().project(fixture.project).externalId("101").externalKey("P-1").title("Task").build();
+        task.setId(UUID.randomUUID());
+        when(fixture.tasks.findByProjectIdAndExternalId(fixture.projectId, "101")).thenReturn(Optional.of(task));
+
+        assertEquals(task.getId(), fixture.service().create(fixture.principal, fixture.projectId, "key",
+                new JiraTaskCreateRequest("Task", "3", null, null, null, null, null, null)).id());
+
+        verify(fixture.provider, never()).createIssue(any(), any(), any());
+        verify(fixture.operations).complete(fixture.operation.getId());
+        assertEquals(JiraWriteOperationStatus.COMPLETED, fixture.operation.getStatus());
+    }
+
+    @Test
+    void failsSafeWhenCompletedReplayHasNoLocalTask() {
+        CreateFixture fixture = fixture();
+        fixture.operation.setStatus(JiraWriteOperationStatus.COMPLETED);
+        fixture.operation.setRemoteResourceId("101");
+        when(fixture.tasks.findByProjectIdAndExternalId(fixture.projectId, "101")).thenReturn(Optional.empty());
+
+        assertEquals("JIRA_WRITE_RECOVERY_REQUIRED", assertThrows(IntegrationException.class,
+                () -> fixture.service().create(fixture.principal, fixture.projectId, "key",
+                        new JiraTaskCreateRequest("Task", "3", null, null, null, null, null, null))).getCode());
+
+        verify(fixture.provider, never()).createIssue(any(), any(), any());
+    }
+
+    @Test
     void forwardsActiveButStaleAssigneeIdentityToProviderCreate() {
         CreateFixture fixture = fixture();
         UUID assigneeId = UUID.randomUUID();
@@ -403,6 +493,8 @@ class JiraTaskWriteServiceTest {
         Project project = Project.builder().name("Project").build(); project.setId(projectId);
         JiraBoard board = JiraBoard.builder().project(project).cloudId("cloud").jiraProjectId("10000")
                 .connectionStatus(IntegrationStatus.ACTIVE).grantedScopes("write:jira-work").build();
+        UUID boardId = UUID.randomUUID();
+        board.setId(boardId);
         JiraWriteOperation operation = JiraWriteOperation.builder().project(project)
                 .status(JiraWriteOperationStatus.PENDING).build(); operation.setId(UUID.randomUUID());
         SagaPrincipal principal = new SagaPrincipal("sub", "a@b.test", "User", ApplicationRole.ADMIN,
@@ -421,7 +513,7 @@ class JiraTaskWriteServiceTest {
                 new JiraCreateField("assignee", "Assignee", false, "string", null, List.of())
         ));
         return new CreateFixture(authorization, boards, credentials, provider, upserts, operations, tasks,
-                identities, projectId, project, operation, principal);
+                identities, boardId, projectId, project, operation, principal);
     }
 
     private record CreateFixture(
@@ -433,6 +525,7 @@ class JiraTaskWriteServiceTest {
             JiraWriteOperationService operations,
             TaskRepository tasks,
             IdentityMapRepository identities,
+            UUID boardId,
             UUID projectId,
             Project project,
             JiraWriteOperation operation,

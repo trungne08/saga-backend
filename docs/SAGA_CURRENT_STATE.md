@@ -37,6 +37,12 @@
 - **CONFIRMED:** `issueTypeId`/`priorityId` là advanced explicit override optional và chỉ được dùng sau validation local metadata. Issue type invalid trả `400 JIRA_ISSUE_TYPE_INVALID`; priority override invalid trả `400 JIRA_PRIORITY_INVALID`; không forward ID invalid tới Jira.
 - **CONFIRMED:** normal auto-resolution zero/multiple candidate fail closed bằng code resolution cụ thể. Assignee vẫn chỉ resolve `IdentityMap ACTIVE -> externalAccountId`; không thêm Jira-side validation hay scope.
 
+## Cập nhật 2026-08-09 — Task Create canonical confirmation trước COMPLETE
+
+- **CONFIRMED runtime:** DEMO-8 (`remote_resource_id=10009`) và DEMO-9 (`10010`) có operation DB cuối cùng `COMPLETED`, `completed_at` khác null, canonical Task local tồn tại và `safe_error_code=NULL`. WARN `JIRA_WRITE_RECOVERY_REQUIRED` được ghi sau `completed_at`, không chứng minh DB bị stuck `REMOTE_SUCCEEDED`.
+- **CONFIRMED source/fix:** Task Create xác nhận `Task(projectId, externalId)` sau canonical GET/upsert rồi mới chuyển operation `COMPLETED`. Khi confirmation không có Task, response là `JIRA_WRITE_RECOVERY_REQUIRED`, operation giữ `REMOTE_SUCCEEDED` và không Jira POST lặp; same Idempotency-Key chỉ canonical recovery. `COMPLETED` thiếu Task local fail-safe, không mutation remote.
+- **Không đổi:** reconciliation không finalize write operation; metadata resolution, auth/session/CSRF, Jira scope, webhook, Sprint, entity/schema/migration không đổi.
+
 ## Update 2026-08-08 — Jira Sprint state trong list response
 
 - **CONFIRMED:** hai list route Project/Team cùng dùng `SprintSummaryResponse`; mỗi item nay có `state` (`String` nullable) lấy trực tiếp từ canonical local `Sprint.state`. Các giá trị Jira được giữ nguyên, gồm `future`, `active`, `closed`; không tạo business state mới, không suy diễn theo ngày và không gọi Jira provider khi GET.

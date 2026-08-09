@@ -155,6 +155,11 @@ Tài liệu ghi lại quyết định đã được code/runtime fact chứng mi
 - Hệ quả: key dùng lại khác request trả conflict. `PENDING`/`UNKNOWN` không bị replay;
   recovery chỉ reconcile operation `REMOTE_SUCCEEDED`, không blind retry Create,
   Delete hoặc Transition có remote outcome chưa rõ.
+- Làm rõ 2026-08-09: Task Create chỉ chuyển `COMPLETED` sau canonical local Task
+  được xác nhận có thể trả response. Canonical fetch/upsert/xác nhận thất bại giữ
+  `REMOTE_SUCCEEDED` và trả recovery-required; cùng key chỉ canonical recovery,
+  không POST Jira lại. DEMO-8/DEMO-9 xác nhận WARN cũ sau completed_at không chứng
+  minh DB còn `REMOTE_SUCCEEDED`; object log trước đây có thể giữ status cũ.
 - Evidence: `JiraWriteOperationService`, `JiraWriteRecoveryService`,
   `JiraWriteOperation`, `JiraWriteOperationStatus`,
   `JiraWriteOperationServiceTest`, `JiraWriteOperationPersistenceTest`, V17.

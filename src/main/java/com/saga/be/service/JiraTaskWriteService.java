@@ -418,8 +418,10 @@ public class JiraTaskWriteService {
         issueUpsertService.upsert(board.getId(), estimationFieldId == null
                 ? jiraClient.getIssue(token, board.getCloudId(), operation.getRemoteResourceId())
                 : jiraClient.getIssue(token, board.getCloudId(), operation.getRemoteResourceId(), estimationFieldId));
+        TaskReadResponse result = completed(operation, projectId);
         operationService.complete(operation.getId());
-        return completed(operation, projectId);
+        operation.setStatus(JiraWriteOperationStatus.COMPLETED);
+        return result;
     }
 
     private TaskReadResponse completed(JiraWriteOperation operation, UUID projectId) {
