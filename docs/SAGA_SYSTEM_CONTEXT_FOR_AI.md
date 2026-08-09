@@ -803,6 +803,12 @@ và reliability regression 20 tests đều pass.
 - **CONFIRMED:** `GET /api/admin/system-stats` là chỉ số profile toàn cục riêng, vẫn đếm Admin + Lecturer + Student.
 - **CONFIRMED:** `SystemAuditLog.timestamp` là `Instant`, được ghi bằng `Instant.now()`, lưu Mongo BSON Date theo epoch-milliseconds và `GET /api/admin/audit-logs` trả ISO-8601 UTC có `Z`. BSON Date lịch sử đọc lại cùng instant; không backfill Mongo hay diễn giải lại timezone.
 
+## J1F TASK_SPRINT remote-success finalization — 2026-08-10
+
+- **CONFIRMED_RUNTIME:** Project `38fdf06e-2e31-4c77-894f-369e0c3b210c`, Task `DEMO-24` (`remote_resource_id=10026`) có `TASK_CREATE=COMPLETED`; `TASK_SPRINT=REMOTE_SUCCEEDED`, remote id/key `10026`/`DEMO-24`, `safe_error_code=NULL`, chưa có `completed_at`. Điều này chứng minh Jira move đã thành công; recovery không được POST move-to-sprint lại.
+- **CONFIRMED_SOURCE/FIX:** sau `markRemoteSucceeded` transaction riêng, Sprint flow đồng bộ remote id/key/status vào operation object đang dùng trước canonical recovery. Flow sau đó GET canonical Jira issue, upsert, áp target Sprint/backlog trong transaction mới, fresh-read xác nhận association rồi mới complete.
+- **CONFIRMED:** `JiraWriteOperation` chỉ persist fingerprint hash, không persist target Sprint/backlog. Vì vậy recovery nền không được finalize `TASK_SPRINT` đoán mò; nó giữ `REMOTE_SUCCEEDED`. Retry cùng request/key có target đã bind và fingerprint khớp thì chỉ canonical recover, không replay provider mutation.
+
 ## J1D canonical Task confirmation trong MySQL REPEATABLE_READ — 2026-08-10
 
 - **CONFIRMED_RUNTIME:** production MySQL chạy `REPEATABLE_READ`. Sau Jira POST và canonical GET/upsert, outer `JiraTaskWriteService#create` có thể giữ snapshot cũ nên không thấy Task vừa commit ở child `REQUIRES_NEW`, dù reconciliation transaction mới thấy Task.

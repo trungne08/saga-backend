@@ -33,6 +33,7 @@ import com.saga.be.integration.sync.JiraIssueUpsertService;
 import com.saga.be.integration.sync.JiraSprintUpsertService;
 import com.saga.be.integration.write.JiraWriteOperationService;
 import com.saga.be.integration.write.JiraCanonicalTaskReadService;
+import com.saga.be.integration.write.JiraTaskSprintFinalizationService;
 import com.saga.be.repository.IdentityMapRepository;
 import com.saga.be.repository.JiraBoardRepository;
 import com.saga.be.repository.TaskRepository;
@@ -44,6 +45,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
@@ -65,6 +67,7 @@ public class JiraTaskWriteService {
     private final JiraIssueUpsertService issueUpsertService;
     private final JiraWriteOperationService operationService;
     private final JiraCanonicalTaskReadService canonicalTaskReadService;
+    private final JiraTaskSprintFinalizationService sprintFinalizationService;
     private final TaskRepository taskRepository;
     private final IdentityMapRepository identityMapRepository;
     private final SprintRepository sprintRepository;
@@ -73,7 +76,8 @@ public class JiraTaskWriteService {
     public JiraTaskWriteService(ProjectIntegrationAuthorizationService authorization, JiraBoardRepository boardRepository,
             JiraCredentialService credentialService, JiraProviderClient jiraClient,
             JiraIssueUpsertService issueUpsertService, JiraWriteOperationService operationService,
-            JiraCanonicalTaskReadService canonicalTaskReadService, TaskRepository taskRepository, IdentityMapRepository identityMapRepository,
+            JiraCanonicalTaskReadService canonicalTaskReadService, JiraTaskSprintFinalizationService sprintFinalizationService,
+            TaskRepository taskRepository, IdentityMapRepository identityMapRepository,
             SprintRepository sprintRepository, JiraSprintUpsertService sprintUpsertService) {
         this.authorization = authorization;
         this.boardRepository = boardRepository;
@@ -82,6 +86,7 @@ public class JiraTaskWriteService {
         this.issueUpsertService = issueUpsertService;
         this.operationService = operationService;
         this.canonicalTaskReadService = canonicalTaskReadService;
+        this.sprintFinalizationService = sprintFinalizationService;
         this.taskRepository = taskRepository;
         this.identityMapRepository = identityMapRepository;
         this.sprintRepository = sprintRepository;
@@ -168,6 +173,9 @@ public class JiraTaskWriteService {
                     jiraClient.moveIssuesToSprint(token, board.getCloudId(), target.getExternalSprintId(), List.of(external(task)));
                 }
                 operationService.markRemoteSucceeded(operation.getId(), task.getExternalId(), task.getExternalKey());
+                operation.setRemoteResourceId(task.getExternalId());
+                operation.setRemoteResourceKey(task.getExternalKey());
+                operation.setStatus(JiraWriteOperationStatus.REMOTE_SUCCEEDED);
             } catch (IntegrationException exception) {
                 operationService.failed(operation.getId(), exception.getCode());
                 throw exception;
@@ -176,18 +184,7 @@ public class JiraTaskWriteService {
                 throw exception;
             }
         }
-        reconcile(operation, board, projectId);
-        Task reconciled = taskRepository.findByProjectIdAndExternalId(projectId, task.getExternalId())
-                .orElseThrow(() -> IntegrationException.conflict("JIRA_WRITE_RECOVERY_REQUIRED", "The Jira write is awaiting local recovery"));
-        if (target == null) {
-            reconciled.setSprint(null);
-        } else {
-            Sprint canonical = sprintUpsertService.upsert(board.getId(), jiraClient.getSprint(
-                    token, board.getCloudId(), target.getExternalSprintId()));
-            reconciled.setSprint(canonical);
-        }
-        taskRepository.saveAndFlush(reconciled);
-        return TaskReadResponse.from(reconciled);
+        return reconcileSprint(operation, board, projectId, target == null ? null : target.getId());
     }
 
     @Transactional
@@ -408,6 +405,29 @@ public class JiraTaskWriteService {
 
     private TaskReadResponse reconcile(JiraWriteOperation operation, JiraBoard board, UUID projectId) {
         return reconcile(operation, board, projectId, null);
+    }
+
+    private TaskReadResponse reconcileSprint(
+            JiraWriteOperation operation,
+            JiraBoard board,
+            UUID projectId,
+            UUID targetSprintId
+    ) {
+        if (operation.getRemoteResourceId() == null) throw IntegrationException.conflict(
+                "JIRA_WRITE_OPERATION_IN_PROGRESS", "The Jira write outcome is still being recovered");
+        String token = credentialService.validAccessToken(board);
+        issueUpsertService.upsert(board.getId(), jiraClient.getIssue(token, board.getCloudId(), operation.getRemoteResourceId()));
+        sprintFinalizationService.applyTarget(projectId, operation.getRemoteResourceId(), targetSprintId);
+        TaskReadResponse result = canonicalTaskReadService.findResponse(projectId, operation.getRemoteResourceId())
+                .orElseThrow(() -> IntegrationException.conflict(
+                        "JIRA_WRITE_RECOVERY_REQUIRED", "The Jira write is awaiting local recovery"));
+        UUID confirmedSprintId = result.sprint() == null ? null : result.sprint().id();
+        if (!Objects.equals(targetSprintId, confirmedSprintId)) {
+            throw IntegrationException.conflict("JIRA_WRITE_RECOVERY_REQUIRED", "The Jira write is awaiting local recovery");
+        }
+        operationService.complete(operation.getId());
+        operation.setStatus(JiraWriteOperationStatus.COMPLETED);
+        return result;
     }
 
     private TaskReadResponse reconcile(

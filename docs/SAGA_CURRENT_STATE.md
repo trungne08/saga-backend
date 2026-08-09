@@ -550,6 +550,12 @@ BASE HEAD của snapshot cũ: `0bc30be`. HEAD audit hiện hành là `4f3dee9`; 
 - **CONFIRMED:** Audit mới dùng `Instant` → BSON Date → JSON UTC `Z`; tài liệu BSON Date cũ đọc đúng same instant, không migration/backfill. FE phải parse timestamp ISO bằng `Date`/`Intl` và format `Asia/Ho_Chi_Minh`, không cộng cứng +7.
 - **CONFIRMED:** System stats không đổi, vẫn là count profile toàn cục Admin + Lecturer + Student.
 
+## J1F TASK_SPRINT remote-success finalization — 2026-08-10
+
+- **CONFIRMED:** production DEMO-24 cho thấy `TASK_CREATE=COMPLETED`; `TASK_SPRINT=REMOTE_SUCCEEDED`, `remote_resource_id=10026`, `remote_resource_key=DEMO-24`, `safe_error_code=NULL` và `completed_at=NULL`. Remote mutation đã xảy ra, nhưng normal request dùng operation object cũ chưa có remote id nên trả `JIRA_WRITE_OPERATION_IN_PROGRESS` trước canonical recovery.
+- **Đã hoàn thành:** Sprint flow nay canonical GET/upsert, áp target local trong `REQUIRES_NEW`, fresh-read xác nhận Sprint/backlog rồi complete. Failure sau remote success giữ `REMOTE_SUCCEEDED`; replay cùng key không gọi provider move thêm.
+- **Đã hoàn thành:** recovery nền không finalize `TASK_SPRINT` vì operation không lưu target intent ngoài fingerprint; same-key endpoint recovery mới có request target để xác nhận an toàn.
+
 ## J1D Jira Task canonical confirmation — 2026-08-10
 
 - **CONFIRMED_RUNTIME/SOURCE:** incident `CANONICAL_ISSUE_FETCH` với `REMOTE_SUCCEEDED` phù hợp stale outer snapshot MySQL `REPEATABLE_READ`: outer create đã đọc Project/board/local state trước child canonical upsert `REQUIRES_NEW` commit.

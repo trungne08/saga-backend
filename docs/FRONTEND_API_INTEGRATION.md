@@ -1347,6 +1347,12 @@ Backend chỉ cho origin explicit từ `FRONTEND_ORIGINS`; credentials=true, COR
 
 `GET /api/admin/audit-logs` trả `timestamp` theo ISO-8601 UTC, ví dụ `2026-08-09T16:30:00Z`. FE phải parse bằng `new Date(timestamp)` rồi format bằng `Intl.DateTimeFormat`; khuyến nghị `timeZone: "Asia/Ho_Chi_Minh"`. Không cắt chuỗi timestamp hoặc cộng `+7` thủ công.
 
+## J1F Task Sprint recovery — 2026-08-10
+
+Với `PUT /api/v1/projects/{projectId}/tasks/{taskId}/sprint`, FE gửi đúng một trong `sprintId` hoặc `backlog=true` và giữ nguyên `Idempotency-Key` khi retry cùng intent. Sau remote success, backend chỉ canonical recover và xác nhận Task local phản ánh Sprint/backlog trước khi trả success; FE không tạo key mới hay gửi mutation khác để “sửa” trạng thái.
+
+Runtime DEMO-24 xác nhận `TASK_SPRINT=REMOTE_SUCCEEDED` với remote `10026`/`DEMO-24` nghĩa là Jira move đã xảy ra. FE không suy diễn cần gửi move lần hai từ 409 cũ; sau deploy J1F, retry cùng request/key là target-aware recovery an toàn.
+
 ## J1D Task Create recovery — 2026-08-10
 
 Khi `POST` Task trả `409 JIRA_WRITE_RECOVERY_REQUIRED`, FE không tự động retry, polling hay tạo `Idempotency-Key` mới. Nếu có luồng gửi lại đã được product chấp thuận, phải giữ nguyên key và request để backend chỉ canonical recovery, không Jira POST mới. Backend chỉ trả success sau fresh local canonical confirmation; failure sau remote success vẫn là recovery state, không phải tín hiệu tạo issue mới.

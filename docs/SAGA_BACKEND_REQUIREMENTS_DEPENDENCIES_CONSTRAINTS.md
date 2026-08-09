@@ -774,6 +774,12 @@ chặn nullable repair.
 - `GET /api/admin/system-stats` không bị đổi theo user-list contract; vẫn là tổng profile toàn cục.
 - `SystemAuditLog.timestamp` là absolute `Instant`; Mongo BSON Date là epoch-millis và Admin audit JSON phải là ISO UTC có `Z`. Không đổi JVM timezone, không cộng +7, không migration/backfill hay reinterpret historical document.
 
+## Ràng buộc J1F TASK_SPRINT finalization — 2026-08-10
+
+- `TASK_SPRINT` chỉ complete sau provider move đã `REMOTE_SUCCEEDED`, canonical Jira issue GET/upsert, apply target Sprint/backlog ở transaction mới và fresh local confirmation đúng target. Không dùng outer `REPEATABLE_READ` snapshot để ghi/đọc confirmation.
+- Failure ở canonical GET/upsert/finalization/confirmation sau remote success phải giữ `REMOTE_SUCCEEDED`, remote id/key và không `FAILED`, không success giả, không POST move Jira lần hai. Same key/request chỉ canonical recovery; `COMPLETED` trả Task local deterministic.
+- `request_fingerprint` không phải target intent có thể giải mã. Không migration/schema mới trong J1F; recovery nền không complete `TASK_SPRINT` thiếu target, không dùng reconciliation/scheduler làm normal completion.
+
 ## Ràng buộc J1D fresh canonical read — 2026-08-10
 
 - Với MySQL production `REPEATABLE_READ`, không được dùng outer orchestration transaction để confirm Task vừa được child canonical upsert `REQUIRES_NEW` commit. Confirmation phải qua bean/proxy transaction mới `REQUIRES_NEW`, `readOnly`.

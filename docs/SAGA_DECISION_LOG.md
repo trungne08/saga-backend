@@ -710,6 +710,13 @@ Không có secret hoặc thông tin đăng nhập thật trong decision log này
 - Quyết định: `SystemAuditLog.timestamp` dùng `Instant.now()`. Spring Data Mongo lưu `Instant` thành BSON Date epoch-milliseconds; DTO Admin trả UTC ISO-8601 có `Z`. BSON Date lịch sử được đọc theo epoch-millis, không rewrite/backfill hoặc cộng offset backend.
 - Hệ quả FE: parse ISO timestamp rồi dùng `Intl.DateTimeFormat` với `Asia/Ho_Chi_Minh` (hoặc timezone người dùng đã chốt); không substring timestamp hay cộng +7 thủ công.
 
+## DEC-061 — J1F finalization TASK_SPRINT theo target-aware canonical recovery
+
+- Ngày: 2026-08-10; trạng thái: ACCEPTED.
+- Evidence: DEMO-24 có `TASK_SPRINT=REMOTE_SUCCEEDED`, remote `10026`/`DEMO-24`, nhưng response `JIRA_WRITE_OPERATION_IN_PROGRESS`. `markRemoteSucceeded` commit operation trong transaction riêng; object operation của normal Sprint request vẫn thiếu remote id khi gọi canonical reconcile.
+- Quyết định: sau remote success, đồng bộ remote identity vào object orchestration rồi chỉ GET canonical Jira issue/upsert. Target Sprint/backlog được áp trong transaction `REQUIRES_NEW`; fresh canonical read phải xác nhận association trước `complete`.
+- Hệ quả: không replay POST Jira Agile move, không đổi provider endpoint/scope/idempotency state machine/global isolation. Operation chỉ lưu fingerprint, không lưu target intent; recovery nền phải giữ `TASK_SPRINT` ở `REMOTE_SUCCEEDED`, còn retry cùng key/request làm target-aware canonical recovery.
+
 ## DEC-060 — J1D confirmation Task canonical bằng transaction mới
 
 - Ngày: 2026-08-10; trạng thái: ACCEPTED.
