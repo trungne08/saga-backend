@@ -1,6 +1,7 @@
 package com.saga.be.controller;
 
 import com.saga.be.dto.response.AdminAuditLogResponse;
+import com.saga.be.dto.response.AdminCourseProgressOverviewResponse;
 import com.saga.be.dto.response.AdminProjectReadResponse;
 import com.saga.be.dto.response.AdminSystemStatsResponse;
 import com.saga.be.dto.response.AdminTeamReadResponse;
@@ -83,5 +84,17 @@ public class AdminReadController {
     public ResponseEntity<Page<AdminProjectReadResponse>> projects(@RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         return ResponseEntity.ok(adminReadService.projects(page, size));
+    }
+
+    @GetMapping("/course-progress-overview")
+    @Operation(summary = "Tổng quan tiến độ Course", description = "Đọc phân trang các count local hiện tại theo Course; không suy ra điểm cuối kỳ hoặc trạng thái hoàn tất.")
+    public ResponseEntity<Page<AdminCourseProgressOverviewResponse>> courseProgressOverview(
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) UUID semesterId,
+            @RequestParam(required = false) UUID lecturerId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size
+    ) {
+        return ResponseEntity.ok(adminReadService.courseProgressOverview(keyword, semesterId, lecturerId, page, size));
     }
 }

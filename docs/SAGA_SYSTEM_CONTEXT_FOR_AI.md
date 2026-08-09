@@ -667,7 +667,7 @@ và reliability regression 20 tests đều pass.
 
 - **CONFIRMED:** `RubricTemplate` có `deletedAt`; V23 chỉ bổ sung
   `rubric_template.deleted_at DATETIME(6) NULL`. Không sửa V10/V13/V22, không
-  seed, không drop duplicate FK. Runtime production của V23 là **TBD**.
+  seed, không drop duplicate FK. Runtime production V23 đã **CONFIRMED** thành công.
 - **CONFIRMED:** ADMIN qua browser session + CSRF có `POST`, `PUT`, `DELETE`
   `/api/admin/peer-review-rubrics`; chỉ quản lý rubric global active
   (`subject_id = NULL`). Không có bearer, batch API hay CRUD subject-specific.
@@ -678,3 +678,15 @@ và reliability regression 20 tests đều pass.
   cấu hình hiện tại chỉ lấy active global rồi fallback active Subject; reference history
   vẫn dereference được tombstone. `PeerReviewRequest` `@Size(max = 4)`, scoring
   và Contribution không đổi.
+
+## Cập nhật 2026-08-09 — Admin Course progress overview M5
+
+- **CONFIRMED:** `GET /api/admin/course-progress-overview` là ADMIN-only, GET session
+  browser, không cần CSRF và chỉ đọc DB local. Response phân trang Course active theo
+  `courseCode`, rồi `id`; filter tùy chọn `keyword`, `semesterId`, `lecturerId` chạy tại DB.
+- **CONFIRMED:** mỗi Course chỉ trả count hiện tại: Team, Student distinct, Project,
+  Sprint active/non-deleted, Sprint state `active`/`closed` và PeerReview. Đây không
+  phải final grade, completion percentage, finalization hay contribution snapshot.
+- **TBD:** Assessment không có HTTP/lifecycle ứng dụng chứng minh; PeerReview không có
+  denominator obligation để suy diễn phần trăm completion. Contribution là aggregate
+  hiện tại nhưng không được chạy theo toàn bộ Team trong endpoint này.

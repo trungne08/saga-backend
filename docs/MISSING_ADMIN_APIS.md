@@ -47,5 +47,13 @@ rubric global active (`subject_id NULL`, `deleted_at NULL`) nằm trong scope; k
 có API batch hay CRUD rubric theo Subject.
 
 DELETE là soft-delete và giữ history; active global tối đa 4, có thể là 0.
-Không suy diễn ràng buộc 100% hay uniqueness. V23 còn cần production deploy/runtime
-verification.
+Không suy diễn ràng buộc 100% hay uniqueness. V23 production migration đã được
+CONFIRMED runtime thành công.
+
+## Admin Course progress overview M5 — hoàn thành 2026-08-09
+
+`GET /api/admin/course-progress-overview` đã cung cấp overview read-only phân trang
+theo Course active; nhận `keyword`, `semesterId`, `lecturerId`. Contract chỉ công bố
+local current counts Team, Student distinct, Project, Sprint active/non-deleted theo
+state và PeerReview. Không có Assessment status/finalization, grade, completion
+percentage hay Contribution calculation toàn hệ thống.

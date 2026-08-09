@@ -1141,6 +1141,16 @@ weight là required. Tối đa bốn global rubric active; không có rule total
 hoặc uniqueness. Missing/tombstone là 404; rubric Subject không nằm trong scope
 admin global. Default/Team form chỉ nhận rubric active; FE phải tiếp tục xử lý
 `criteria: []` khi không có global active và không có fallback Subject.
+
+## Admin Course progress overview M5
+
+| Method | Route | Quyền | Query | Kết quả |
+|---|---|---|---|---|
+| GET | `/api/admin/course-progress-overview` | ADMIN session, không CSRF | `keyword`, `semesterId`, `lecturerId`, `page`, `size` | `200 Page<AdminCourseProgressOverviewResponse>` |
+
+Mỗi row gồm Course, lecturer summary và các count local: `teamCount`, `studentCount`,
+`projectCount`, `sprintCount`, `activeSprintCount`, `closedSprintCount`, `peerReviewCount`.
+Đây không phải grade, completion percentage, assessment finalized hay contribution snapshot.
 | GET | `/api/v1/teams/{teamId}/sprints/{sprintId}/peer-reviews/candidates` | ADMIN, STUDENT | Service thực tế chỉ chấp nhận STUDENT thuộc Team; ADMIN bị `403` | `200 PeerReviewCandidatesResponse` |
 | POST | `/api/v1/teams/{teamId}/sprints/{sprintId}/peer-reviews` | ADMIN, STUDENT | Service thực tế chỉ chấp nhận STUDENT thuộc Team; ADMIN bị `403` | `200 PeerReviewResponse` |
 | GET | `/api/v1/teams/{teamId}/sprints/{sprintId}/peer-reviews` | ADMIN, LECTURER, STUDENT | ADMIN; LECTURER là Course instructor; STUDENT thuộc Team | `200 SprintPeerReviewResponse` |

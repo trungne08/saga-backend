@@ -644,7 +644,7 @@ chặn nullable repair.
 ## Cập nhật 2026-08-09 — ràng buộc Admin global rubric M4B
 
 - `rubric_template.deleted_at` do V23 bổ sung nullable; row cũ mặc định active.
-  Migration additive, không seed, cleanup FK hay thay migration cũ; production V23 **TBD**.
+  Migration additive, không seed, cleanup FK hay thay migration cũ; production V23 **CONFIRMED**.
 - Mutation admin chỉ cho global active rubric. Missing/tombstone trả 404;
   subject-specific bị từ chối có kiểm soát và không mutate; fifth active global
   bị conflict. Security là `ROLE_ADMIN` + session/CSRF, không bearer.
@@ -653,3 +653,12 @@ chặn nullable repair.
   `PeerReviewDetail`/`Assessment` vẫn giữ reference rubric tombstone.
 - Không thay đổi `PeerReviewRequest @Size(max=4)`, scoring, Contribution, AccountStatus,
   Course, Import, Jira/GitHub hay authorization Peer Review.
+
+## Cập nhật 2026-08-09 — giới hạn Admin Course progress overview M5
+
+- Contract chỉ đọc Course active paged/filter DB và aggregate local current counts. Query dùng
+  `COUNT(DISTINCT ...)` một page query, không materialize tất cả Course hoặc gọi provider.
+- Sprint tombstone bị loại; rubric tombstone không được join nên không làm thay đổi raw
+  PeerReview count. Course tombstone không xuất hiện. Không có field score/grade/completion.
+- Assessment có `student`, `lecturer`, `rubric`, `score`, `note` nhưng không status,
+  finalized/submitted field hay service/controller application flow; không dùng overview.

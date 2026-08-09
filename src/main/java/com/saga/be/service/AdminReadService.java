@@ -1,6 +1,8 @@
 package com.saga.be.service;
 
 import com.saga.be.dto.response.AdminAuditLogResponse;
+import com.saga.be.dto.response.AdminCourseProgressOverviewResponse;
+import com.saga.be.dto.response.AdminCourseProgressOverviewRow;
 import com.saga.be.dto.response.AdminProjectReadResponse;
 import com.saga.be.dto.response.AdminSystemStatsResponse;
 import com.saga.be.dto.response.AdminTeamReadResponse;
@@ -96,6 +98,20 @@ public class AdminReadService {
                 reposByProject.getOrDefault(project.getId(), List.of())));
     }
 
+    @Transactional(readOnly = true)
+    public Page<AdminCourseProgressOverviewResponse> courseProgressOverview(
+            String keyword,
+            UUID semesterId,
+            UUID lecturerId,
+            int page,
+            int size
+    ) {
+        String normalizedKeyword = keyword == null || keyword.isBlank() ? null : keyword.trim();
+        return courseRepository.findAdminCourseProgressOverview(
+                        normalizedKeyword, semesterId, lecturerId, pageRequest(page, size))
+                .map(this::courseProgressResponse);
+    }
+
     private PageRequest pageRequest(int page, int size) {
         validatePage(page, size);
         return PageRequest.of(page, size, Sort.by(Sort.Order.asc("name"), Sort.Order.asc("id")));
@@ -122,6 +138,17 @@ public class AdminReadService {
                 projectCourseSummary(project.getCourse()),
                 jiraBoard == null ? null : new AdminProjectReadResponse.JiraSummary(jiraBoard.getConnectionStatus()),
                 new AdminProjectReadResponse.GitHubSummary(repositories.size(), activeRepositories));
+    }
+
+    private AdminCourseProgressOverviewResponse courseProgressResponse(AdminCourseProgressOverviewRow row) {
+        AdminCourseProgressOverviewResponse.LecturerSummary lecturer = row.getLecturerId() == null
+                ? null
+                : new AdminCourseProgressOverviewResponse.LecturerSummary(
+                        row.getLecturerId(), row.getLecturerFullName());
+        return new AdminCourseProgressOverviewResponse(
+                row.getCourseId(), row.getCourseCode(), row.getCourseName(), lecturer,
+                row.getTeamCount(), row.getStudentCount(), row.getProjectCount(), row.getSprintCount(),
+                row.getActiveSprintCount(), row.getClosedSprintCount(), row.getPeerReviewCount());
     }
 
     private AdminTeamReadResponse.CourseSummary courseSummary(Course course) {

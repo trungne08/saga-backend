@@ -161,3 +161,9 @@ Quy ước: `OAS` là response được khai báo trực tiếp trong OpenAPI; `
 | POST | `/api/admin/peer-review-rubrics` | 201 | 400 DTO, 401 anonymous, 403 role/CSRF, 409 khi đã có 4 active | ADMIN; chỉ tạo global |
 | PUT | `/api/admin/peer-review-rubrics/{id}` | 200 | 400 DTO/subject-specific, 401/403, 404 missing/tombstone | không đổi subject/deletedAt |
 | DELETE | `/api/admin/peer-review-rubrics/{id}` | 204 | 401/403, 404 missing/tombstone/repeated | soft-delete, không cascade |
+
+## Admin Course progress overview M5
+
+| Method | Route | Success | Failure controlled | Ghi chú |
+|---|---|---|---|---|
+| GET | `/api/admin/course-progress-overview` | 200 Page | 400 pagination sai, 401 anonymous, 403 Lecturer/Student | DB local-only; Course tombstone bị loại |

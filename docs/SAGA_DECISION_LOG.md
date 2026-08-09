@@ -596,4 +596,15 @@ Không có secret hoặc thông tin đăng nhập thật trong decision log này
   cascade hoặc rewrite `PeerReviewDetail`/`Assessment`. Lookup cấu hình mới active-only,
   lookup reference history vẫn cho phép tombstone.
 - Evidence: `AdminPeerReviewRubricIntegrationTest`, `PeerReviewServiceTest`,
-  `RubricMigrationContractTest` và OpenAPI test pass. Runtime production V23: **TBD**.
+  `RubricMigrationContractTest` và OpenAPI test pass. Runtime production V23: **CONFIRMED**.
+
+## DEC-052 — Tổng quan tiến độ Admin chỉ công bố local current counts theo Course
+
+- Quyết định: `GET /api/admin/course-progress-overview` là endpoint GET ADMIN-only,
+  phân trang/filter ngay tại DB local. Không dùng provider hay chạy contribution calculation
+  theo toàn hệ thống.
+- Response chỉ gồm identity/snapshot Course, lecturer summary và count Team, Student distinct,
+  Project, Sprint active/non-deleted theo state Jira local, PeerReview. Không thêm grade,
+  assessment finalization, completion percentage hay contribution finalized.
+- Lý do: Assessment không có application lifecycle/HTTP; candidate PeerReview cho phép
+  reviewer thấy các member khác nhưng không chứng minh obligation denominator hoặc completion.

@@ -572,4 +572,4 @@ Các điểm dưới đây là behavior/risk hiện tại, chưa được mô t�
 - Tối đa 4 global active do `criteriaRatings @Size(max=4)`; không yêu cầu bốn
   rubric, total weight 100 hoặc criteriaName unique. Scoring và Contribution không đổi.
 - V23 chỉ thêm `rubric_template.deleted_at DATETIME(6) NULL`; runtime production V23
-  vẫn **TBD**.
+  đã **CONFIRMED** thành công.

@@ -415,8 +415,8 @@ BASE HEAD của snapshot cũ: `0bc30be`. HEAD audit hiện hành là `4f3dee9`; 
 
 ## Cập nhật 2026-08-09 — Admin global rubric M4B
 
-- **CONFIRMED:** V23 additive thêm `rubric_template.deleted_at DATETIME(6) NULL`; V23
-  chưa có runtime production evidence. V10/V13/V22 và duplicate FK không bị sửa.
+- **CONFIRMED:** V23 additive thêm `rubric_template.deleted_at DATETIME(6) NULL`; runtime
+  production V23 đã thành công. V10/V13/V22 và duplicate FK không bị sửa.
 - **CONFIRMED:** ba mutation admin `/api/admin/peer-review-rubrics` chỉ thao tác
   global active rubric. POST luôn tạo `subject=null`, `deletedAt=null`; PUT giữ
   id/subject/deletedAt; DELETE soft-delete, delete lần hai/missing/tombstone là 404.
@@ -426,3 +426,14 @@ BASE HEAD của snapshot cũ: `0bc30be`. HEAD audit hiện hành là `4f3dee9`; 
 - **Verification:** targeted 43 tests pass, bao gồm V23, CRUD/security/CSRF,
   resolver active-only, retention PeerReviewDetail/Assessment, OpenAPI và regression
   AccountStatus/Admin read/Contribution.
+
+## Cập nhật 2026-08-09 — Admin Course progress overview M5
+
+- **CONFIRMED:** endpoint GET `/api/admin/course-progress-overview` trả `Page` Course
+  active với filter `keyword`, `semesterId`, `lecturerId`; ADMIN session nhận 200,
+  anonymous 401, Lecturer/Student 403, GET không cần CSRF.
+- **CONFIRMED:** aggregate SQL một trang, local-only, đếm distinct Team/Student/Project,
+  Sprint active/non-deleted theo state và PeerReview. Không gọi Jira/GitHub và không
+  loop gọi `ContributionCalculationService` theo Team.
+- **PARTIAL/TBD:** Assessment chỉ là entity/repository không có lifecycle/API; raw
+  PeerReview count không được diễn giải thành completion percentage hay completion status.
