@@ -11,6 +11,7 @@ import com.saga.be.exception.UnauthenticatedRequestException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import java.util.Map;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
@@ -25,6 +26,7 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 @RestControllerAdvice
+@Slf4j
 public class GlobalExceptionHandler {
 
     @ExceptionHandler(UnauthenticatedRequestException.class)
@@ -113,6 +115,12 @@ public class GlobalExceptionHandler {
             HttpMediaTypeNotSupportedException.class
     })
     public ResponseEntity<ApiErrorResponse> invalidRequest(Exception exception, HttpServletRequest request) {
+        log.warn(
+                "request_binding operation=REQUEST_BINDING method={} uri={} exceptionClass={}",
+                request.getMethod(),
+                request.getRequestURI(),
+                exception.getClass().getSimpleName()
+        );
         return response(HttpStatus.BAD_REQUEST, "INVALID_REQUEST", "Request is invalid", request);
     }
 

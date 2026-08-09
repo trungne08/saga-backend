@@ -1,6 +1,7 @@
 package com.saga.be;
 
 import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.mockito.ArgumentMatchers.any;
@@ -11,6 +12,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.saga.be.entity.enums.AccountStatus;
+import com.saga.be.dto.request.JiraTaskSprintRequest;
 import com.saga.be.security.ApplicationRole;
 import com.saga.be.security.SagaPrincipal;
 import com.saga.be.service.JiraSprintWriteService;
@@ -21,6 +23,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -38,6 +41,13 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
+import org.mockito.ArgumentCaptor;
+import tools.jackson.databind.ObjectMapper;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -46,8 +56,12 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 class JiraMutationControllerSecurityIntegrationTest {
     private static final UUID PROJECT_ID = UUID.fromString("10000000-0000-0000-0000-000000000001");
     private static final UUID RESOURCE_ID = UUID.fromString("20000000-0000-0000-0000-000000000002");
+    private static final UUID RUNTIME_PROJECT_ID = UUID.fromString("38fdf06e-2e31-4c77-894f-369e0c3b210c");
+    private static final UUID RUNTIME_TASK_ID = UUID.fromString("d004d4ba-e951-4b1a-bf37-61d3014d85e9");
+    private static final UUID RUNTIME_SPRINT_ID = UUID.fromString("daa40782-68dd-4cd0-a173-1458422b4bf6");
 
     @Autowired private MockMvc mockMvc;
+    @Autowired private ObjectMapper objectMapper;
     @MockitoBean private JiraTaskWriteService taskWrites;
     @MockitoBean private JiraSprintWriteService sprintWrites;
     @MockitoBean private JiraProviderClient jiraProvider;
@@ -123,6 +137,106 @@ class JiraMutationControllerSecurityIntegrationTest {
                         .with(authentication(authenticationFor(ApplicationRole.ADMIN))))
                 .andExpect(status().isNotFound());
         verifyNoInteractions(jiraProvider);
+    }
+
+    @Test
+    void sprintIdOnlyJsonDeserializesWithBacklogDefaultingToFalse() throws Exception {
+        JiraTaskSprintRequest request = objectMapper.readValue(
+                "{\"sprintId\":\"" + RUNTIME_SPRINT_ID + "\"}",
+                JiraTaskSprintRequest.class
+        );
+
+        assertEquals(RUNTIME_SPRINT_ID, request.sprintId());
+        assertFalse(request.backlog());
+    }
+
+    @Test
+    void sprintIdOnlyRequestReachesWriteService() throws Exception {
+        ArgumentCaptor<JiraTaskSprintRequest> requestCaptor = ArgumentCaptor.forClass(JiraTaskSprintRequest.class);
+
+        mockMvc.perform(sprintRequest("{\"sprintId\":\"" + RUNTIME_SPRINT_ID + "\"}"))
+                .andExpect(status().isOk());
+
+        verify(taskWrites).sprint(any(), eq(RUNTIME_PROJECT_ID), eq(RUNTIME_TASK_ID),
+                eq("integration-test-key"), requestCaptor.capture());
+        assertEquals(RUNTIME_SPRINT_ID, requestCaptor.getValue().sprintId());
+        assertFalse(requestCaptor.getValue().backlog());
+        verifyNoInteractions(jiraProvider);
+    }
+
+    @Test
+    void backlogOnlyRequestReachesWriteService() throws Exception {
+        ArgumentCaptor<JiraTaskSprintRequest> requestCaptor = ArgumentCaptor.forClass(JiraTaskSprintRequest.class);
+
+        mockMvc.perform(sprintRequest("{\"backlog\":true}"))
+                .andExpect(status().isOk());
+
+        verify(taskWrites).sprint(any(), eq(RUNTIME_PROJECT_ID), eq(RUNTIME_TASK_ID),
+                eq("integration-test-key"), requestCaptor.capture());
+        assertNull(requestCaptor.getValue().sprintId());
+        assertTrue(requestCaptor.getValue().backlog());
+        verifyNoInteractions(jiraProvider);
+    }
+
+    @Test
+    void malformedTaskUuidIsMappedToGenericInvalidRequestBeforeService() throws Exception {
+        mockMvc.perform(request(HttpMethod.PUT,
+                        "/api/v1/projects/" + RUNTIME_PROJECT_ID + "/tasks/not-a-uuid/sprint")
+                        .header("Idempotency-Key", "integration-test-key")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"sprintId\":\"" + RUNTIME_SPRINT_ID + "\"}")
+                        .with(authentication(authenticationFor(ApplicationRole.ADMIN)))
+                        .with(csrf()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("INVALID_REQUEST"));
+
+        verifyNoInteractions(taskWrites, jiraProvider);
+    }
+
+    @Test
+    void malformedSprintJsonIsMappedToGenericInvalidRequestBeforeService() throws Exception {
+        mockMvc.perform(sprintRequest("{\"sprintId\":"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("INVALID_REQUEST"));
+
+        verifyNoInteractions(taskWrites, jiraProvider);
+    }
+
+    @Test
+    void missingIdempotencyKeyKeepsExistingInternalErrorBehavior() throws Exception {
+        mockMvc.perform(request(HttpMethod.PUT,
+                        "/api/v1/projects/" + RUNTIME_PROJECT_ID + "/tasks/" + RUNTIME_TASK_ID + "/sprint")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"sprintId\":\"" + RUNTIME_SPRINT_ID + "\"}")
+                        .with(authentication(authenticationFor(ApplicationRole.ADMIN)))
+                        .with(csrf()))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.error").value("INTERNAL_SERVER_ERROR"));
+
+        verifyNoInteractions(taskWrites, jiraProvider);
+    }
+
+    @Test
+    void missingCsrfRejectsSprintRequestBeforeService() throws Exception {
+        mockMvc.perform(request(HttpMethod.PUT,
+                        "/api/v1/projects/" + RUNTIME_PROJECT_ID + "/tasks/" + RUNTIME_TASK_ID + "/sprint")
+                        .header("Idempotency-Key", "integration-test-key")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"sprintId\":\"" + RUNTIME_SPRINT_ID + "\"}")
+                        .with(authentication(authenticationFor(ApplicationRole.ADMIN))))
+                .andExpect(status().isForbidden());
+
+        verifyNoInteractions(taskWrites, jiraProvider);
+    }
+
+    private MockHttpServletRequestBuilder sprintRequest(String body) {
+        return request(HttpMethod.PUT,
+                "/api/v1/projects/" + RUNTIME_PROJECT_ID + "/tasks/" + RUNTIME_TASK_ID + "/sprint")
+                .header("Idempotency-Key", "integration-test-key")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body)
+                .with(authentication(authenticationFor(ApplicationRole.ADMIN)))
+                .with(csrf());
     }
 
     private static Stream<Route> allRoutes() {
