@@ -1,5 +1,11 @@
 # SAGA — Trạng thái hiện tại
 
+## Update 2026-08-09 — Create Task không cần Jira numeric IDs
+
+- **CONFIRMED:** normal `POST /api/v1/projects/{projectId}/tasks` dùng `type` và `priority` business optional để resolve exact Jira IDs từ metadata của Jira Project hiện tại.
+- **CONFIRMED:** `issueTypeId`/`priorityId` là advanced explicit override optional và chỉ được dùng sau validation local metadata. Issue type invalid trả `400 JIRA_ISSUE_TYPE_INVALID`; priority override invalid trả `400 JIRA_PRIORITY_INVALID`; không forward ID invalid tới Jira.
+- **CONFIRMED:** normal auto-resolution zero/multiple candidate fail closed bằng code resolution cụ thể. Assignee vẫn chỉ resolve `IdentityMap ACTIVE -> externalAccountId`; không thêm Jira-side validation hay scope.
+
 ## Update 2026-08-08 — Jira Sprint state trong list response
 
 - **CONFIRMED:** hai list route Project/Team cùng dùng `SprintSummaryResponse`; mỗi item nay có `state` (`String` nullable) lấy trực tiếp từ canonical local `Sprint.state`. Các giá trị Jira được giữ nguyên, gồm `future`, `active`, `closed`; không tạo business state mới, không suy diễn theo ngày và không gọi Jira provider khi GET.

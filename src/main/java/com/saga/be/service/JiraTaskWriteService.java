@@ -18,9 +18,12 @@ import com.saga.be.entity.enums.IntegrationProvider;
 import com.saga.be.entity.enums.IntegrationStatus;
 import com.saga.be.entity.enums.JiraWriteOperationStatus;
 import com.saga.be.entity.enums.JiraWriteOperationType;
+import com.saga.be.entity.enums.Priority;
+import com.saga.be.entity.enums.TaskType;
 import com.saga.be.exception.IntegrationException;
 import com.saga.be.integration.project.JiraCredentialService;
 import com.saga.be.integration.provider.JiraCreateField;
+import com.saga.be.integration.provider.JiraCreateFieldAllowedValue;
 import com.saga.be.integration.provider.JiraCreateIssueType;
 import com.saga.be.integration.provider.JiraIssueReference;
 import com.saga.be.integration.provider.JiraProviderClient;
@@ -39,14 +42,19 @@ import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class JiraTaskWriteService {
+
+    private static final Logger log = LoggerFactory.getLogger(JiraTaskWriteService.class);
 
     private final ProjectIntegrationAuthorizationService authorization;
     private final JiraBoardRepository boardRepository;
@@ -291,34 +299,107 @@ public class JiraTaskWriteService {
 
     @Transactional
     public TaskReadResponse create(SagaPrincipal principal, UUID projectId, String idempotencyKey, JiraTaskCreateRequest request) {
-        Project project = authorization.requireProjectManager(principal, projectId);
-        String fingerprint = operationService.fingerprint(fingerprint(request));
-        JiraWriteOperation operation = operationService.claim(project, principal,
-                JiraWriteOperationType.TASK_CREATE, idempotencyKey, fingerprint);
-        if (operation.getStatus() == JiraWriteOperationStatus.COMPLETED) return completed(operation, projectId);
-
-        JiraBoard board = activeBoard(projectId);
-        String accessToken = credentialService.validAccessToken(board);
-        JiraWriteScope.requireGranted(board);
-        if (operation.getStatus() == JiraWriteOperationStatus.REMOTE_SUCCEEDED) {
-            return reconcile(operation, board, projectId);
-        }
+        JiraWriteOperation operation = null;
+        JiraBoard board = null;
+        TaskCreateStage stage = TaskCreateStage.SCOPE_PREFLIGHT;
+        TaskCreateResourceType resourceType = TaskCreateResourceType.PROJECT;
+        TaskCreateResolutionMode resolutionMode = TaskCreateResolutionMode.NOT_APPLICABLE;
+        TaskCreateResolutionResult resolutionResult = TaskCreateResolutionResult.NOT_APPLICABLE;
         try {
-            validateCreateMetadata(jiraClient.getCreateIssueTypes(accessToken, board.getCloudId(), board.getJiraProjectId()),
-                    jiraClient.getCreateFields(accessToken, board.getCloudId(), board.getJiraProjectId(), request.issueTypeId()), request);
-            JiraIssueReference remote = jiraClient.createIssue(accessToken, board.getCloudId(), fields(board, request));
+            Project project = authorization.requireProjectManager(principal, projectId);
+            stage = TaskCreateStage.WRITE_OPERATION_CLAIM;
+            String fingerprint = operationService.fingerprint(fingerprint(request));
+            operation = operationService.claim(project, principal,
+                    JiraWriteOperationType.TASK_CREATE, idempotencyKey, fingerprint);
+            if (operation.getStatus() == JiraWriteOperationStatus.COMPLETED) {
+                stage = TaskCreateStage.LOCAL_UPSERT;
+                resourceType = TaskCreateResourceType.CREATED_ISSUE;
+                return completed(operation, projectId);
+            }
+
+            stage = TaskCreateStage.SCOPE_PREFLIGHT;
+            resourceType = TaskCreateResourceType.PROJECT;
+            board = activeBoard(projectId);
+            String accessToken = credentialService.validAccessToken(board);
+            JiraWriteScope.requireGranted(board);
+            if (operation.getStatus() == JiraWriteOperationStatus.REMOTE_SUCCEEDED) {
+                stage = TaskCreateStage.CANONICAL_ISSUE_FETCH;
+                resourceType = TaskCreateResourceType.CREATED_ISSUE;
+                return reconcile(operation, board, projectId);
+            }
+
+            stage = TaskCreateStage.JIRA_METADATA_ISSUE_TYPES;
+            resourceType = TaskCreateResourceType.ISSUE_TYPE;
+            List<JiraCreateIssueType> issueTypes = jiraClient.getCreateIssueTypes(
+                    accessToken, board.getCloudId(), board.getJiraProjectId());
+            stage = TaskCreateStage.ISSUE_TYPE_RESOLUTION;
+            resolutionMode = request.issueTypeId() == null
+                    ? TaskCreateResolutionMode.AUTO
+                    : TaskCreateResolutionMode.EXPLICIT;
+            resolutionResult = TaskCreateResolutionResult.NOT_APPLICABLE;
+            String issueTypeId = resolveIssueType(issueTypes, request, resolutionMode);
+            resolutionResult = TaskCreateResolutionResult.RESOLVED;
+            stage = TaskCreateStage.JIRA_METADATA_CREATE_FIELDS;
+            List<JiraCreateField> createFields = jiraClient.getCreateFields(
+                    accessToken, board.getCloudId(), board.getJiraProjectId(), issueTypeId);
+            Set<String> allowed = allowedCreateFields(createFields);
+            requireCreateRequiredFields(allowed);
+            requireAllowed(allowed, "description", request.description());
+            stage = TaskCreateStage.PRIORITY_RESOLUTION;
+            resourceType = TaskCreateResourceType.PRIORITY;
+            resolutionMode = request.priorityId() == null
+                    ? TaskCreateResolutionMode.AUTO
+                    : TaskCreateResolutionMode.EXPLICIT;
+            resolutionResult = TaskCreateResolutionResult.NOT_APPLICABLE;
+            String priorityId = resolvePriority(createFields, request, allowed, resolutionMode);
+            resolutionResult = priorityId == null
+                    ? TaskCreateResolutionResult.NOT_APPLICABLE
+                    : TaskCreateResolutionResult.RESOLVED;
+            stage = TaskCreateStage.JIRA_METADATA_CREATE_FIELDS;
+            resourceType = TaskCreateResourceType.PROJECT;
+            requireAllowed(allowed, "duedate", request.dueDate());
+            requireAllowed(allowed, "labels", request.labels());
+            requireAllowed(allowed, "components", request.componentIds());
+            stage = TaskCreateStage.ASSIGNEE_RESOLUTION;
+            resourceType = TaskCreateResourceType.ASSIGNEE;
+            requireAllowed(allowed, "assignee", request.assigneeId());
+            String externalAssignee = request.assigneeId() == null ? null : assignee(request.assigneeId());
+            stage = TaskCreateStage.JIRA_PROVIDER_CREATE_ISSUE;
+            resourceType = TaskCreateResourceType.PROJECT;
+            resolutionMode = TaskCreateResolutionMode.NOT_APPLICABLE;
+            resolutionResult = TaskCreateResolutionResult.NOT_APPLICABLE;
+            JiraIssueReference remote = jiraClient.createIssue(
+                    accessToken, board.getCloudId(), fields(board, request, issueTypeId, priorityId, externalAssignee));
             operation.setRemoteResourceId(remote.id());
             operation.setRemoteResourceKey(remote.key());
             operation.setStatus(JiraWriteOperationStatus.REMOTE_SUCCEEDED);
             operationService.markRemoteSucceeded(operation.getId(), remote.id(), remote.key());
         } catch (IntegrationException exception) {
-            operationService.failed(operation.getId(), exception.getCode());
+            if (operation != null && stage.isBeforeRemoteSuccess()) {
+                operationService.failed(operation.getId(), exception.getCode());
+            }
+            logCreateFailure(projectId, stage, resourceType, resolutionMode, resolutionResult(resolutionResult, exception), exception,
+                    operationStatus(operation, stage.isBeforeRemoteSuccess() ? JiraWriteOperationStatus.FAILED : null));
             throw exception;
         } catch (RuntimeException exception) {
-            operationService.unknown(operation.getId(), "JIRA_WRITE_OUTCOME_UNKNOWN");
+            if (operation != null && stage.isBeforeRemoteSuccess()) {
+                operationService.unknown(operation.getId(), "JIRA_WRITE_OUTCOME_UNKNOWN");
+            }
+            logCreateFailure(projectId, stage, resourceType, resolutionMode, resolutionResult, null,
+                    operationStatus(operation, stage.isBeforeRemoteSuccess() ? JiraWriteOperationStatus.UNKNOWN : null));
             throw exception;
         }
-        return reconcile(operation, board, projectId);
+        stage = TaskCreateStage.CANONICAL_ISSUE_FETCH;
+        resourceType = TaskCreateResourceType.CREATED_ISSUE;
+        try {
+            return reconcile(operation, board, projectId);
+        } catch (IntegrationException exception) {
+            logCreateFailure(projectId, stage, resourceType, resolutionMode, resolutionResult, exception, operationStatus(operation, null));
+            throw exception;
+        } catch (RuntimeException exception) {
+            logCreateFailure(projectId, stage, resourceType, resolutionMode, resolutionResult, null, operationStatus(operation, null));
+            throw exception;
+        }
     }
 
     private TaskReadResponse reconcile(JiraWriteOperation operation, JiraBoard board, UUID projectId) {
@@ -355,18 +436,38 @@ public class JiraTaskWriteService {
         return board;
     }
 
-    private void validateCreateMetadata(List<JiraCreateIssueType> types, List<JiraCreateField> fields, JiraTaskCreateRequest request) {
-        if (types.stream().noneMatch(type -> type.id().equals(request.issueTypeId())))
-            throw IntegrationException.invalid("JIRA_ISSUE_TYPE_INVALID", "The Jira issue type is not available for this project");
-        Set<String> allowed = fields.stream().map(JiraCreateField::key).collect(java.util.stream.Collectors.toSet());
+    private String resolveIssueType(
+            List<JiraCreateIssueType> issueTypes,
+            JiraTaskCreateRequest request,
+            TaskCreateResolutionMode resolutionMode
+    ) {
+        if (resolutionMode == TaskCreateResolutionMode.EXPLICIT) {
+            return issueTypes.stream()
+                    .filter(issueType -> issueType.id().equals(request.issueTypeId()))
+                    .map(JiraCreateIssueType::id)
+                    .findFirst()
+                    .orElseThrow(() -> IntegrationException.invalid(
+                            "JIRA_ISSUE_TYPE_INVALID", "The Jira issue type is not available for this project"));
+        }
+        if (request.type() == null) {
+            throw IntegrationException.invalid(
+                    "JIRA_TASK_TYPE_REQUIRED", "A business task type is required when no Jira issue type override is supplied");
+        }
+        return exactlyOne(
+                issueTypes.stream().filter(issueType -> taskType(issueType.name()) == request.type()).map(JiraCreateIssueType::id).toList(),
+                "JIRA_ISSUE_TYPE_RESOLUTION_NOT_FOUND",
+                "JIRA_ISSUE_TYPE_RESOLUTION_AMBIGUOUS",
+                "The Jira issue type could not be resolved uniquely for this project"
+        );
+    }
+
+    private Set<String> allowedCreateFields(List<JiraCreateField> fields) {
+        return fields.stream().map(JiraCreateField::key).collect(java.util.stream.Collectors.toSet());
+    }
+
+    private void requireCreateRequiredFields(Set<String> allowed) {
         if (!allowed.contains("summary") || !allowed.contains("issuetype"))
             throw IntegrationException.conflict("JIRA_CREATE_METADATA_INVALID", "Jira create metadata does not permit required issue fields");
-        requireAllowed(allowed, "description", request.description());
-        requireAllowed(allowed, "priority", request.priorityId());
-        requireAllowed(allowed, "duedate", request.dueDate());
-        requireAllowed(allowed, "labels", request.labels());
-        requireAllowed(allowed, "components", request.componentIds());
-        requireAllowed(allowed, "assignee", request.assigneeId());
     }
 
     private void requireAllowed(Set<String> allowed, String field, Object value) {
@@ -378,18 +479,183 @@ public class JiraTaskWriteService {
         }
     }
 
-    private Map<String, Object> fields(JiraBoard board, JiraTaskCreateRequest request) {
+    private String resolvePriority(
+            List<JiraCreateField> createFields,
+            JiraTaskCreateRequest request,
+            Set<String> allowed,
+            TaskCreateResolutionMode resolutionMode
+    ) {
+        if (request.priorityId() == null && request.priority() == null) return null;
+        requireAllowed(allowed, "priority", request.priorityId() != null ? request.priorityId() : request.priority());
+        JiraCreateField priority = createFields.stream()
+                .filter(field -> "priority".equals(field.key()))
+                .findFirst()
+                .orElseThrow(() -> IntegrationException.invalid(
+                        "JIRA_CREATE_FIELD_NOT_ALLOWED", "The Jira create metadata does not allow the requested field"));
+        if (resolutionMode == TaskCreateResolutionMode.EXPLICIT) {
+            return priority.allowedValues().stream()
+                    .filter(value -> request.priorityId().equals(value.id()))
+                    .map(JiraCreateFieldAllowedValue::id)
+                    .findFirst()
+                    .orElseThrow(() -> IntegrationException.invalid(
+                            "JIRA_PRIORITY_INVALID", "The Jira priority is not available for this project"));
+        }
+        if (request.priority() == null) return null;
+        return exactlyOne(
+                priority.allowedValues().stream()
+                        .filter(value -> priority(value.name()) == request.priority())
+                        .map(JiraCreateFieldAllowedValue::id)
+                        .filter(java.util.Objects::nonNull)
+                        .toList(),
+                "JIRA_PRIORITY_RESOLUTION_NOT_FOUND",
+                "JIRA_PRIORITY_RESOLUTION_AMBIGUOUS",
+                "The Jira priority could not be resolved uniquely for this project"
+        );
+    }
+
+    private String exactlyOne(List<String> candidates, String notFoundCode, String ambiguousCode, String message) {
+        if (candidates.size() == 1) return candidates.get(0);
+        if (candidates.isEmpty()) throw IntegrationException.conflict(notFoundCode, message);
+        throw IntegrationException.conflict(ambiguousCode, message);
+    }
+
+    private TaskType taskType(String value) {
+        return switch (normalize(value)) {
+            case "BUG" -> TaskType.BUG;
+            case "FEATURE", "NEW_FEATURE" -> TaskType.FEATURE;
+            case "STORY", "USER_STORY" -> TaskType.STORY;
+            case "EPIC" -> TaskType.EPIC;
+            case "SUBTASK", "SUB_TASK" -> TaskType.SUBTASK;
+            default -> TaskType.TASK;
+        };
+    }
+
+    private Priority priority(String value) {
+        String normalized = normalize(value);
+        if (normalized.contains("HIGHEST") || normalized.contains("CRITICAL")) return Priority.CRITICAL;
+        if (normalized.contains("HIGH")) return Priority.HIGH;
+        if (normalized.contains("LOW")) return Priority.LOW;
+        return Priority.MEDIUM;
+    }
+
+    private String normalize(String value) {
+        return value == null ? "" : value.trim().toUpperCase(Locale.ROOT).replaceAll("[^A-Z0-9]+", "_");
+    }
+
+    private Map<String, Object> fields(
+            JiraBoard board,
+            JiraTaskCreateRequest request,
+            String issueTypeId,
+            String priorityId,
+            String externalAssignee
+    ) {
         Map<String, Object> fields = new LinkedHashMap<>();
         fields.put("project", Map.of("id", board.getJiraProjectId()));
         fields.put("summary", request.title().trim());
-        fields.put("issuetype", Map.of("id", request.issueTypeId()));
+        fields.put("issuetype", Map.of("id", issueTypeId));
         if (request.description() != null) fields.put("description", adf(request.description()));
-        if (request.priorityId() != null) fields.put("priority", Map.of("id", request.priorityId()));
+        if (priorityId != null) fields.put("priority", Map.of("id", priorityId));
         if (request.dueDate() != null) fields.put("duedate", request.dueDate().format(DateTimeFormatter.ISO_LOCAL_DATE));
         if (request.labels() != null) fields.put("labels", List.copyOf(request.labels()));
         if (request.componentIds() != null) fields.put("components", request.componentIds().stream().map(id -> Map.of("id", id)).toList());
-        if (request.assigneeId() != null) fields.put("assignee", Map.of("accountId", assignee(request.assigneeId())));
+        if (externalAssignee != null) fields.put("assignee", Map.of("accountId", externalAssignee));
         return fields;
+    }
+
+    private void logCreateFailure(
+            UUID projectId,
+            TaskCreateStage stage,
+            TaskCreateResourceType resourceType,
+            TaskCreateResolutionMode resolutionMode,
+            TaskCreateResolutionResult resolutionResult,
+            IntegrationException exception,
+            String writeOperationStatus
+    ) {
+        log.warn("Jira task create failed: projectId={}, operation=TASK_CREATE, stage={}, resourceType={}, "
+                        + "resolutionMode={}, resolutionResult={}, upstreamHttpStatus={}, errorCategory={}, writeOperationStatus={}",
+                projectId,
+                stage,
+                resourceType,
+                resolutionMode,
+                resolutionResult,
+                upstreamHttpStatus(exception),
+                exception == null ? "JIRA_WRITE_OUTCOME_UNKNOWN" : exception.getCode(),
+                writeOperationStatus);
+    }
+
+    private String upstreamHttpStatus(IntegrationException exception) {
+        if (exception == null) return "UNKNOWN";
+        return switch (exception.getCode()) {
+            case "JIRA_REQUEST_REJECTED" -> "400";
+            case "JIRA_ACCESS_REVOKED" -> "401";
+            case "JIRA_ACCESS_FORBIDDEN" -> "403";
+            case "JIRA_RESOURCE_NOT_FOUND" -> "404";
+            case "JIRA_RATE_LIMITED" -> "429";
+            default -> "NONE";
+        };
+    }
+
+    private TaskCreateResolutionResult resolutionResult(
+            TaskCreateResolutionResult current,
+            IntegrationException exception
+    ) {
+        if (exception == null) return current;
+        return switch (exception.getCode()) {
+            case "JIRA_ISSUE_TYPE_INVALID", "JIRA_PRIORITY_INVALID", "JIRA_TASK_TYPE_REQUIRED" ->
+                    TaskCreateResolutionResult.INVALID;
+            case "JIRA_ISSUE_TYPE_RESOLUTION_NOT_FOUND", "JIRA_PRIORITY_RESOLUTION_NOT_FOUND" ->
+                    TaskCreateResolutionResult.NOT_FOUND;
+            case "JIRA_ISSUE_TYPE_RESOLUTION_AMBIGUOUS", "JIRA_PRIORITY_RESOLUTION_AMBIGUOUS" ->
+                    TaskCreateResolutionResult.AMBIGUOUS;
+            default -> current;
+        };
+    }
+
+    private String operationStatus(JiraWriteOperation operation, JiraWriteOperationStatus replacement) {
+        if (replacement != null) return replacement.name();
+        return operation == null ? "NOT_CLAIMED" : operation.getStatus().name();
+    }
+
+    private enum TaskCreateStage {
+        SCOPE_PREFLIGHT,
+        WRITE_OPERATION_CLAIM,
+        JIRA_METADATA_ISSUE_TYPES,
+        JIRA_METADATA_CREATE_FIELDS,
+        ISSUE_TYPE_RESOLUTION,
+        PRIORITY_RESOLUTION,
+        ASSIGNEE_RESOLUTION,
+        JIRA_PROVIDER_CREATE_ISSUE,
+        CANONICAL_ISSUE_FETCH,
+        LOCAL_UPSERT;
+
+        private boolean isBeforeRemoteSuccess() {
+            return this != SCOPE_PREFLIGHT
+                    && this != WRITE_OPERATION_CLAIM
+                    && this != CANONICAL_ISSUE_FETCH
+                    && this != LOCAL_UPSERT;
+        }
+    }
+
+    private enum TaskCreateResourceType {
+        ISSUE_TYPE,
+        PRIORITY,
+        ASSIGNEE,
+        PROJECT,
+        CREATED_ISSUE
+    }
+
+    private enum TaskCreateResolutionMode {
+        AUTO,
+        EXPLICIT,
+        NOT_APPLICABLE
+    }
+
+    private enum TaskCreateResolutionResult {
+        RESOLVED,
+        NOT_FOUND,
+        AMBIGUOUS,
+        INVALID,
+        NOT_APPLICABLE
     }
 
     private String assignee(UUID studentId) {
@@ -405,8 +671,8 @@ public class JiraTaskWriteService {
     }
 
     private String fingerprint(JiraTaskCreateRequest request) {
-        return String.join("|", request.title(), request.issueTypeId(), String.valueOf(request.description()),
-                String.valueOf(request.priorityId()), String.valueOf(request.dueDate()), String.valueOf(request.labels()),
+        return String.join("|", request.title(), String.valueOf(request.type()), String.valueOf(request.issueTypeId()),
+                String.valueOf(request.priority()), String.valueOf(request.description()), String.valueOf(request.priorityId()), String.valueOf(request.dueDate()), String.valueOf(request.labels()),
                 String.valueOf(request.componentIds()), String.valueOf(request.assigneeId()));
     }
 

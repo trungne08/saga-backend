@@ -95,6 +95,10 @@ class GeneratedOpenApiDocumentationIntegrationTest {
         assertTrue(teamSprint.at("/responses/404").isObject());
         assertTrue(root.at("/components/schemas/SprintListResponse/properties/state").isObject());
         assertTrue(root.at("/components/schemas/SprintSummaryResponse/properties/state").isObject());
+        JsonNode taskCreateRequired = root.at("/components/schemas/JiraTaskCreateRequest/required");
+        assertTrue(taskCreateRequired.toString().contains("title"));
+        assertFalse(taskCreateRequired.toString().contains("issueTypeId"));
+        assertFalse(taskCreateRequired.toString().contains("priorityId"));
     }
 
     private Set<String> documentedTagNames(JsonNode root) {

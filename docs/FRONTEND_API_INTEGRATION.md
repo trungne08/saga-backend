@@ -1,5 +1,11 @@
 # SAGA Frontend API Integration Guide
 
+## Jira Task Create metadata — 2026-08-09
+
+`POST /api/v1/projects/{projectId}/tasks` normal không yêu cầu FE hiển thị hoặc nhập Jira numeric IDs. FE gửi `title`, business `type` (`BUG`, `FEATURE`, `STORY`, `TASK`, `EPIC`, `SUBTASK`) và, khi cần đặt priority, business `priority` (`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`). Backend resolve Jira issue type/priority theo metadata của đúng Project hiện tại.
+
+`issueTypeId` và `priorityId` vẫn được chấp nhận như advanced override optional cho client cũ/debug admin. Backend luôn validate: ID issue type phải thuộc metadata Project; ID priority phải thuộc `priority.allowedValues`. Không gửi `customfield_*`, token, Bearer hay Jira numeric ID hardcode. Nếu auto-resolution không có đúng một candidate, API fail closed; FE không fallback sang tự chọn numeric ID.
+
 ## Sprint list item state — 2026-08-08
 
 `GET /api/v1/projects/{projectId}/sprints` và `GET /api/v1/teams/{teamId}/sprints` cùng trả thêm trường additive `state` trong từng phần tử `sprints`. Đây là Jira Sprint state canonical cục bộ, kiểu `string`, giữ nguyên giá trị Jira như `future`, `active` hoặc `closed`; không suy diễn từ ngày tháng và không gọi Jira khi đọc danh sách.

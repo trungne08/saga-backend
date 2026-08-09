@@ -4,6 +4,8 @@ Nguồn audit: OpenAPI sinh từ `/v3/api-docs` lúc chạy `GeneratedOpenApiDoc
 
 Quy ước: `OAS` là response được khai báo trực tiếp trong OpenAPI; `TBD` là source/OpenAPI hiện không chứng minh contract chi tiết cho cột đó. `OK` nghĩa là endpoint có trong source và không có false-error đã biết; không suy diễn authorization hay business semantics. Provider code (JIRA_*/GITHUB_*/INTEGRATION_*) giữ nguyên qua `IntegrationException`.
 
+**Update 2026-08-09 — Task Create:** `POST /api/v1/projects/{projectId}/tasks` nhận business `type`/`priority` cho normal flow; `issueTypeId`/`priorityId` là advanced optional override. Local metadata validation trả `400 JIRA_ISSUE_TYPE_INVALID` hoặc `400 JIRA_PRIORITY_INVALID`; auto-resolution zero/multiple candidate fail closed bằng `409 JIRA_*_RESOLUTION_NOT_FOUND` hoặc `409 JIRA_*_RESOLUTION_AMBIGUOUS`. Provider 404 thực sự vẫn giữ `409 JIRA_RESOURCE_NOT_FOUND`.
+
 | Method | Path | Controller | Current success | Empty behavior | Parent missing | Missing prerequisite | 400 | 401 | 403 | 404 | 409 | provider/5xx | Current code/state | Classification | Recommendation |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | GET | `/api/v1/subjects/{id}` | SubjectController | OAS: 200 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | getSubjectById; OAS: 200 | OK | Bổ sung response metadata chi tiết theo task riêng. |

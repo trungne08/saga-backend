@@ -1,5 +1,12 @@
 # SAGA — Context kỹ thuật hệ thống hiện tại
 
+## Update 2026-08-09 — Jira Task Create metadata ownership
+
+- **CONFIRMED:** Backend sở hữu Jira create metadata theo từng Jira Project; FE normal gửi business `type` (`TaskType`) và `priority` (`Priority`), không nhập Jira numeric ID.
+- **CONFIRMED:** `issueTypeId` và `priorityId` vẫn là optional advanced override tương thích ngược. Backend lấy issue-type metadata trước, validate explicit issue type thuộc Project rồi mới gọi create-fields; explicit priority phải thuộc `priority.allowedValues`.
+- **CONFIRMED:** auto-resolution dùng đúng normalization đã có ở canonical Jira upsert. Zero hoặc nhiều candidate fail closed; không hardcode Jira ID, không cache metadata cross-project, không đổi write-operation/session/CSRF/authorization.
+- **CONFIRMED:** task-create diagnostics chỉ ghi projectId, operation/stage/resource type, resolution mode/result, upstream status, error category và write-operation status; không ghi credential, raw response hay Idempotency-Key.
+
 ## Update 2026-08-08 — Jira Sprint state trong list response
 
 - **CONFIRMED:** `Sprint.state` đã tồn tại là `String` nullable trong canonical local read model và `JiraSprintResponse` đã trả nguyên representation này. `SprintSummaryResponse` nay trả thêm `state` từ trực tiếp `Sprint#getState()` cho cả `GET /api/v1/projects/{projectId}/sprints` và `GET /api/v1/teams/{teamId}/sprints`.

@@ -1,5 +1,15 @@
 # SAGA — Nhật ký quyết định kỹ thuật
 
+## DEC-046 — Backend sở hữu Jira Task create metadata (2026-08-09)
+
+**Status: ACCEPTED.**
+
+**Decision.** FE normal gửi `TaskType`/`Priority` business; backend lấy create metadata của đúng Jira Project cho từng request, resolve một candidate duy nhất rồi gửi provider ID canonical. `issueTypeId`/`priorityId` hiện hữu được giữ optional làm advanced override và phải được validate trong metadata trước mutation.
+
+**Rationale.** Jira numeric IDs là provider/project-specific. Gọi create-fields với issue type override chưa validate có thể trả 404 generic; priority stale trước đây có thể bị forward tới `POST /issue`.
+
+**Consequences.** Không hardcode hoặc cache cross-project metadata. Zero/multiple auto candidate fail closed; explicit invalid trả lỗi local specific. Không đổi authorization, credential, idempotency state machine, session/CSRF, entity hay migration.
+
 ## DEC-045 — Jira simple-board capability bằng read-only Sprint probe (2026-08-07)
 
 **Status: PARTIAL — source/test CONFIRMED; SDP production probe TBD. Supersedes giả định chọn board từ `boardFeature=SPRINTS`.**
