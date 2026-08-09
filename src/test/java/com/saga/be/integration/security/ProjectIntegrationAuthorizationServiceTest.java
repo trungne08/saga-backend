@@ -168,7 +168,7 @@ class ProjectIntegrationAuthorizationServiceTest {
                 )
         );
         verify(auditService).recordRequiredIntegrationEvent(
-                admin.cognitoSub(),
+                admin,
                 "PROJECT_INTEGRATION_ADMIN_OVERRIDE",
                 "TEAM",
                 team.getId(),

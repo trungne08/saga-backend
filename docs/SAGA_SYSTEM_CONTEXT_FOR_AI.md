@@ -1,5 +1,15 @@
 # SAGA — Context kỹ thuật hệ thống hiện tại
 
+## A12 — Admin backend closure, 2026-08-09
+
+**CONFIRMED:** Admin core gồm user list/status/import, CRUD master data, active Semester,
+global rubric, progress/export, global audit/stats/integration health và global team/project read.
+Toàn bộ dùng browser session; unsafe mutation cần CSRF, không Bearer/Cognito Admin API.
+
+**PARTIAL/BLOCKED:** A11A chỉ ghi durable local actor cho event audit mới. Per-user audit history,
+notification broadcast, impersonation, role/password mutation, manual Course membership, Project
+DELETE và generic settings không có contract/source endpoint; không được suy diễn là Admin core.
+
 ## Cập nhật 2026-08-09 — Account lifecycle M3B
 
 **CONFIRMED:** `AccountStatus` áp dụng cho Student và Lecturer; Admin không có status. V21 thêm `lecturer.account_status NOT NULL DEFAULT 'ACTIVE'`, backfill row cũ và Lecturer mới/cũ null đều ACTIVE. `PATCH /api/admin/users/{id}/status` là ADMIN + CSRF, resolve localProfileId cùng Admin user union; chỉ Student/Lecturer, chỉ nhận ACTIVE/INACTIVE/SUSPENDED, PENDING bị provisioning Student sở hữu.
@@ -62,6 +72,15 @@ password reset và manual Course add/remove cũng chưa có contract/session/gov
 **CONFIRMED:** `GET /api/admin/users`, `/audit-logs`, `/system-stats`, `/teams` và `/projects` yêu cầu session `ROLE_ADMIN`. Chúng chỉ đọc snapshot MySQL/Mongo local, không mutation hay provider call. DTO không trả Cognito subject, token, provider/raw audit payload, IP, repository URL hoặc secret integration. Users union ba local profile table với phân trang/count tại DB; audit logs sort timestamp giảm dần.
 
 ## Update 2026-08-09 — Jira Task Create metadata ownership
+
+### J1C — exact canonical name trước semantic fallback
+
+- **CONFIRMED runtime:** sau J1 dedup provider ID, production vẫn ghi `ISSUE_TYPE_RESOLUTION`
+  và `PRIORITY_RESOLUTION` AUTO `AMBIGUOUS`; đây là nhiều provider ID khác nhau cùng map về một
+  business enum, không phải duplicate ID.
+- **CONFIRMED:** resolver dedup provider ID trước; trong semantic candidates, đúng một name đã
+  normalize trùng enum (`TASK`, `CRITICAL`, `LOW`, `MEDIUM`...) được ưu tiên. Không có exact thì
+  chỉ một semantic ID mới được dùng; nhiều ID thật sự vẫn fail-closed 409 `*_AMBIGUOUS`.
 
 - **CONFIRMED:** Backend sở hữu Jira create metadata theo từng Jira Project; FE normal gửi business `type` (`TaskType`) và `priority` (`Priority`), không nhập Jira numeric ID.
 - **CONFIRMED:** `issueTypeId` và `priorityId` vẫn là optional advanced override tương thích ngược. Backend lấy issue-type metadata trước, validate explicit issue type thuộc Project rồi mới gọi create-fields; explicit priority phải thuộc `priority.allowedValues`.
@@ -481,7 +500,7 @@ erDiagram
 | Team/TeamMember/Project | MySQL | Team→Course; Team→Project one-to-one unique; member has domain `RoleInTeam`. Product rule: Student tối đa một Team mỗi Course; application guard có, DB invariant trực tiếp chưa có | CONFIRMED/PARTIAL |
 | Jira/GitHub integration | MySQL | `JiraBoard`, `GitHubInstallation`, `GitRepo`, migration unique external IDs | CONFIRMED |
 | external data | MySQL | task/sprint/issue/PR/review/commit/comment, upsert/dedup constraints migration | CONFIRMED |
-| audit | Mongo / `SystemAuditLogRepository` | collection `system_audit_log` | CONFIRMED |
+| audit | Mongo / `SystemAuditLogRepository` | collection `system_audit_log`; event mới có `actorLocalProfileId` UUID-text nullable và `actorRole` nullable | CONFIRMED |
 | assessment/risk/meeting/document/AI | MySQL entities | relationships exist in annotations; no full HTTP use-case proven | PARTIAL |
 
 Transactions are declared on service methods, notably profile sync, team/project/integration/sync and `ExcelImportService#importStudentsToCourse`. Cascade behavior is entity-specific; no global rule should be assumed. `IntegrationSecretCipher` handles encrypted provider credentials; do not log/decrypt values.

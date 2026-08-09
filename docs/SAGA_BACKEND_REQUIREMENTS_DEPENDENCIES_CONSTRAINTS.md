@@ -1,5 +1,13 @@
 # SAGA Backend — Yêu cầu, Dependency, Phân quyền và Ràng buộc
 
+## A12 Admin closure constraints — 2026-08-09
+
+- `/api/admin/**` cần `ROLE_ADMIN`; unsafe request chịu CSRF global, chỉ webhook provider được
+  exempt. Master-data mutation ngoài namespace này cũng có `hasRole('ADMIN')`.
+- Admin read chỉ dùng local MySQL/Mongo snapshots. Không thêm provider call, Mongo backfill/index,
+  MySQL migration, generic setting hay support capability khi không có governance contract.
+- Browser E2E production không được suy diễn từ integration test; FE cần smoke session + CSRF riêng.
+
 ## Account lifecycle M3B constraints — 2026-08-09
 
 V21 thêm `lecturer.account_status` non-null default ACTIVE; Admin không có cột này. `PATCH /api/admin/users/{id}/status` yêu cầu ADMIN session + CSRF, request chỉ có `status` ACTIVE/INACTIVE/SUSPENDED. Target là local profile ID Student/Lecturer; Admin target, PENDING và unknown ID fail controlled. Browser-session business API check current local DB status mỗi request; auth me/csrf/logout exempt và `/me` trả current status. Không provider lookup, role mutation, cascade Course/membership/Project/history.
@@ -709,6 +717,14 @@ chặn nullable repair.
 
 ## Ràng buộc M10 Support & Diagnostics — 2026-08-09
 
+### A11A durable identity additive
+
+- `SystemAuditLog` mới có `actorLocalProfileId` UUID canonical text nullable và `actorRole`
+  nullable. Chỉ `SagaPrincipal`/`AuthenticatedProfile` exact mới set hai field; webhook, system
+  và identity-conflict không có local profile/role ghi `null`.
+- Không có Mongo backfill, MySQL migration, managed index hoặc API per-user trong thay đổi này.
+  `actorId` giữ nguyên Cognito subject; không nhận subject từ FE hay invent mapping/heuristic.
+
 - Integration health chỉ đọc local MySQL qua repository: enabled flag, count/link/state
   Jira/GitHub, Jira stored webhook-id presence, GitHub installation state, receipt state và
   latest persisted sync timestamp. Không dùng token/credential/property secret để xác nhận
@@ -738,6 +754,15 @@ chặn nullable repair.
 - Không có dependency/config Spring Session, Redis, JDBC session hay Hazelcast. `HttpSessionSecurityContextRepository` là in-memory process state; shared session/multi-replica là architectural decision riêng. Railway build hiện skip tests; CI gate không được suy diễn từ build command.
 
 ## Ràng buộc J1B Task Create canonical completion — 2026-08-09
+
+## Ràng buộc J1C Jira metadata exact-name-first — 2026-08-09
+
+- Metadata vẫn project-scoped. Dedup provider ID trước resolution; exact canonical provider name
+  normalize bằng business enum được ưu tiên chỉ khi đúng một ID. Không có exact thì `exactlyOne`
+  semantic fallback; zero/multiple distinct ID vẫn fail-closed với code resolution hiện hữu.
+- Metadata failure xảy ra trước Jira create POST. Không đổi explicit `issueTypeId`/`priorityId`
+  validation, priority omitted, idempotency/canonical recovery, scope, session/CSRF, entity/schema
+  hay migration; không cache cross-project, sort/pick-first hoặc hardcode provider ID.
 
 - `TASK_CREATE` chỉ ghi `COMPLETED` sau Jira POST đã được đánh dấu `REMOTE_SUCCEEDED`, canonical Jira GET/upsert hoàn tất và `TaskRepository.findByProjectIdAndExternalId(projectId, remoteResourceId)` xác nhận Task local để trả response. Upsert dùng transaction mới và `saveAndFlush`; lookup dùng `projectId + externalId`, không có điều kiện soft-delete.
 - Canonical fetch, upsert hoặc local confirmation fail sau remote success phải giữ `REMOTE_SUCCEEDED`, giữ remote id/key, trả `JIRA_WRITE_RECOVERY_REQUIRED` khi cần và không chuyển `FAILED`. Retry cùng `Idempotency-Key` chỉ canonical recovery; `COMPLETED` thiếu Task local fail-safe, không POST Jira.

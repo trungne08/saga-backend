@@ -1,122 +1,36 @@
-# Missing Admin APIs
+# Ma trận trạng thái Admin backend — A12 closure, 2026-08-09
 
-## Account lifecycle M3B — hoàn thành 2026-08-09
+Tài liệu này là ma trận trạng thái hiện hành từ controller/service/repository, không phải wishlist.
+Các ghi chú milestone cũ được supersede khi mâu thuẫn với bảng này.
 
-`PATCH /api/admin/users/{id}/status` đã có. API chỉ hỗ trợ Student/Lecturer, không thêm status Admin, không nhận PENDING và không gọi Cognito. V21 backfill Lecturer ACTIVE; request-time local DB enforcement áp dụng cho business API. API không còn missing.
+| Capability | Status | Endpoint/source thực tế | Giới hạn chốt |
+| --- | --- | --- | --- |
+| Global users | IMPLEMENTED | `GET /api/admin/users` | Local profile an toàn, phân trang; không Cognito subject. |
+| Student/Lecturer status | IMPLEMENTED | `PATCH /api/admin/users/{id}/status` | ADMIN + CSRF; chỉ ACTIVE/INACTIVE/SUSPENDED; Admin target và PENDING bị từ chối; không Cognito/role mutation. |
+| Global user import | IMPLEMENTED | `POST /api/admin/users/import` | Chỉ STUDENT/LECTURER, pre-provision local; không import Admin/Course/Team/Cognito. |
+| Subject/Class | IMPLEMENTED | `POST/PUT/DELETE /api/v1/subjects`, `/api/v1/classes` | ADMIN mutation; soft-delete retention hiện hữu. |
+| Semester | IMPLEMENTED | `POST/PUT/DELETE /api/v1/semesters` | Soft-delete; chặn Course và active-semester reference. |
+| Course | IMPLEMENTED | `POST/PUT/DELETE /api/v1/courses` | Soft-delete; chặn Team/Project/invitation/weight config. |
+| Active Semester | IMPLEMENTED | `GET/PUT /api/admin/settings/active-semester` | Typed singleton setting, không generic key/value. |
+| Global rubric | IMPLEMENTED | `POST/PUT/DELETE /api/admin/peer-review-rubrics` | Chỉ global active; soft-delete, không sửa Subject rubric/history. |
+| Course progress | IMPLEMENTED | `GET /api/admin/course-progress-overview` | Current local counts, không final grade/Assessment. |
+| Course XLSX export | IMPLEMENTED | `GET /api/admin/reports/courses/{courseId}/export` | Local snapshot, không official grade/Cognito/provider data. |
+| Global audit/statistics/health | IMPLEMENTED | `/api/admin/audit-logs`, `/system-stats`, `/integrations/health` | Sanitized/local-only; health không gọi provider. |
+| Global teams/projects | IMPLEMENTED | `GET /api/admin/teams`, `/api/admin/projects` | Read-only; không Project DELETE. |
+| A11A durable audit identity | PARTIAL | `SystemAuditLog.actorLocalProfileId`, `actorRole` | Chỉ event mới có exact local actor; không backfill Mongo. |
+| Per-user audit history | BLOCKED | Không có endpoint | Historical coverage không complete; không tạo `GET /api/admin/users/{id}/audit-logs`. |
+| Notification broadcast | BLOCKED | Không có controller/service/repository | `Notification` isolated; thiếu schema evidence, producer/consumer và audience/lifecycle contract. |
+| Impersonation, role mutation, password reset | BLOCKED | Không có endpoint/contract | Không temporary token, Bearer hay Cognito Admin API. |
+| Manual Course membership | BLOCKED | Không có Admin mutation | Team/Project/retention contract chưa đủ. |
+| Generic system settings | BLOCKED | Không có generic endpoint/model | Active Semester là typed setting riêng; không gom rubric/contribution domain config. |
 
-## AccountStatus M3A — policy chưa đủ, 2026-08-09
+## Browser boundary
 
-`PATCH /api/admin/users/{id}/status` là **MISSING CÓ CHỦ ĐÍCH**. Chỉ Student có `AccountStatus`; source không chứng minh transition Admin được phép, self-target/last-admin policy hay request-time enforcement. Không thêm endpoint, schema Admin/Lecturer, Cognito Admin API hoặc arbitrary status mutation cho đến khi có business decision.
+Mọi route Admin dùng browser `JSESSIONID` và `credentials: include`. GET không cần CSRF;
+POST/PUT/PATCH/DELETE cần cookie `XSRF-TOKEN` cùng header `X-XSRF-TOKEN`. Không có Bearer.
+Source/test integration xác nhận contract; browser E2E/deployed smoke là **TBD** trừ khi có evidence runtime riêng.
 
-## Course M2B — hoàn thành 2026-08-09
+## Closure
 
-`PUT /api/v1/courses/{id}` và `DELETE /api/v1/courses/{id}` đã có, ADMIN-only và CSRF-protected. DELETE là soft-delete V20, chặn 409 khi có Team, Project, StudentCourseInvitation hoặc TaskWeightConfig; không hard-delete/cascade. Course Update/Delete không còn là missing API.
-
-## Semester M2A — hoàn thành 2026-08-09
-
-`PUT /api/v1/semesters/{id}` và `DELETE /api/v1/semesters/{id}` đã có, ADMIN-only và CSRF-protected. DELETE là soft-delete V19, chặn 409 khi có Course reference; không có hard-delete/cascade. Semester Update/Delete không còn là missing API.
-
-## Trạng thái sau Admin Read Foundation — 2026-08-09
-
-Đã có năm read API Admin: `/api/admin/users`, `/audit-logs`, `/system-stats`,
-`/teams`, `/projects`. Chúng read-only, local-store-only và Admin-only.
-
-Không có Admin mutation, `DELETE /api/projects/{projectId}`, thay đổi account-status
-policy, entity/schema/migration trong milestone này. Subject và Class CRUD đã tồn tại
-ở source hiện hành nên không reimplement. Các API Admin mutation/retention policy là
-**TBD**, cần thiết kế authorization, dependency guard và retention riêng.
-
-## Rubric Admin M4-R2 — không thêm CRUD, 2026-08-09
-
-Không tạo `POST`, `PUT` hoặc `DELETE /api/admin/peer-review-rubrics`. V22 chỉ repair
-nullable schema cho **EXISTING_BASELINED_DB_UPGRADE**, không seed rubric và không thay
-Peer Review. **REPLAY_FROM_EXTERNAL_V1_BASELINE** cần baseline/compatibility decision;
-**TRUE_EMPTY_DATABASE_BOOTSTRAP** là `BLOCKED_EXISTING_BASELINE_GAP`. Admin Rubric CRUD
-vẫn là missing có chủ đích cho đến khi policy cấu trúc, retention và migration replay
-được chốt.
-
-Runtime verification 2026-08-09 xác nhận V22 `SUCCESS`, rubric `subject_id` nullable
-và 0 row. Duplicate FK vẫn tồn tại nhưng không chặn repair; không cleanup FK, seed
-rubric hoặc mở Admin CRUD.
-
-## Rubric Admin M4B — CRUD global active, 2026-08-09
-
-Thay thế trạng thái M4-R2 phía trên cho phạm vi M4B: đã có `POST`, `PUT`,
-`DELETE /api/admin/peer-review-rubrics` dành riêng cho ADMIN session + CSRF. Chỉ
-rubric global active (`subject_id NULL`, `deleted_at NULL`) nằm trong scope; không
-có API batch hay CRUD rubric theo Subject.
-
-DELETE là soft-delete và giữ history; active global tối đa 4, có thể là 0.
-Không suy diễn ràng buộc 100% hay uniqueness. V23 production migration đã được
-CONFIRMED runtime thành công.
-
-## Admin Course progress overview M5 — hoàn thành 2026-08-09
-
-`GET /api/admin/course-progress-overview` đã cung cấp overview read-only phân trang
-theo Course active; nhận `keyword`, `semesterId`, `lecturerId`. Contract chỉ công bố
-local current counts Team, Student distinct, Project, Sprint active/non-deleted theo
-state và PeerReview. Không có Assessment status/finalization, grade, completion
-percentage hay Contribution calculation toàn hệ thống.
-
-## Admin Course report export M6 — hoàn thành 2026-08-09
-
-`GET /api/admin/reports/courses/{courseId}/export` đã có cho ADMIN session. Endpoint
-trả attachment XLSX local-only, gồm Course, Team Members, Sprints, Tasks và raw
-Peer Reviews không comment. Không có Assessment/final grade/Contribution sheet, không
-gọi provider và không export email, Cognito subject hay credential.
-
-## Admin global user import M7 — hoàn thành 2026-08-09
-
-`POST /api/admin/users/import` không còn missing cho pre-provision local **STUDENT** và
-**LECTURER**. Nó không là CRUD/role-management tổng quát: ADMIN session + CSRF, multipart
-`role=STUDENT|LECTURER`, XLSX schema tách theo role và chỉ response summary an toàn. Không
-import ADMIN, không tạo Cognito user/group, Course, Team, membership hoặc invitation.
-Bulk Admin provisioning, Admin governance, role mutation và Course assignment vẫn là
-**MISSING CÓ CHỦ ĐÍCH**.
-
-## Admin active Semester setting M8A — hoàn thành 2026-08-09
-
-`GET` và `PUT /api/admin/settings/active-semester` không còn missing. Đây là typed singleton
-explicit, không phải `PUT /api/admin/settings/system`: ADMIN chỉ chọn Semester active bằng UUID
-và FE chỉ đọc default/filter hint. Không tự suy theo date, không mutate/lọc Course, không có
-Semester status. Generic system settings API vẫn **MISSING CÓ CHỦ ĐÍCH**.
-
-## Admin notification broadcast M9 — BLOCKED có chủ đích, 2026-08-09
-
-`POST /api/admin/notifications/broadcast` chưa tồn tại và không được thêm chỉ vì có entity
-`Notification`. Entity này không có repository/service/controller/producer/consumer/read API;
-không có polling, realtime hoặc email delivery. Persist-only không có consumer không phải
-capability hoàn chỉnh.
-
-Physical schema không được chứng minh bởi migration repository: V1 legacy không có trong source,
-V2–V24 không chứa notification. `admin`, `lecturer`, `student` là ba profile table tách biệt;
-`recipientId` + `recipientRole` hiện không có FK/enum constraint được xác nhận. Audience role,
-policy account status, validation nội dung, read/unread, retention và audit metadata cần decision
-riêng trước schema versioned/fanout. Invitation outbox, Cognito và generic system settings không
-được reuse cho mục đích này.
-
-`GENERIC_SYSTEM_SETTINGS = TBD_NOT_IMPLEMENTED_NO_CONFIRMED_GLOBAL_SETTINGS`.
-
-## Ma trận closure Admin M10 — 2026-08-09
-
-| Capability | Status | Implemented route | Blocker/TBD reason | FE có thể tích hợp ngay |
-| --- | --- | --- | --- | --- |
-| User list | CONFIRMED | `GET /api/admin/users` | — | Có |
-| User status | CONFIRMED | `PATCH /api/admin/users/{id}/status` | chỉ Student/Lecturer | Có |
-| Master data update/delete | CONFIRMED | Class/Subject/Semester/Course routes hiện hữu | retention guard theo domain | Có |
-| Admin teams/projects | CONFIRMED | `GET /api/admin/teams`, `/projects` | read-only local | Có |
-| Audit logs | CONFIRMED | `GET /api/admin/audit-logs` | global sanitized logs | Có |
-| System stats | CONFIRMED | `GET /api/admin/system-stats` | local-only | Có |
-| Rubric CRUD | CONFIRMED | `/api/admin/peer-review-rubrics` | global active only | Có |
-| Course progress overview | CONFIRMED | `GET /api/admin/course-progress-overview` | local counts only | Có |
-| Course report export | CONFIRMED | `GET /api/admin/reports/courses/{courseId}/export` | snapshot, không grade | Có |
-| Bulk user import | CONFIRMED | `POST /api/admin/users/import` | Student/Lecturer only | Có |
-| Active Semester | CONFIRMED | `GET/PUT /api/admin/settings/active-semester` | typed singleton | Có |
-| Integration health | CONFIRMED | `GET /api/admin/integrations/health` | local snapshot, không provider-live | Có |
-| Generic system settings | TBD có chủ đích | — | không có global typed setting đủ evidence | Không |
-| Notification broadcast | BLOCKED | — | thiếu schema, consumer, business contract | Không |
-| Per-user audit logs | BLOCKED | — | Mongo không có stable localProfileId cho mọi log | Không |
-| Impersonation | TBD có chủ đích | — | thiếu delegated session/restore/audit contract | Không |
-| Role mutation | TBD có chủ đích | — | thiếu governance role/Cognito contract | Không |
-| Password reset | TBD có chủ đích | — | Cognito flow chưa có contract | Không |
-| Manual Course student add/remove | BLOCKED | — | Student-Course qua TeamMember; Team/Project/history mơ hồ | Không |
+`ADMIN_CORE_BACKEND_STATUS = COMPLETE` cho capability core ở bảng IMPLEMENTED.
+`ADMIN_ADVANCED_SUPPORT_STATUS = DOCUMENTED_TBD_OR_BLOCKED`; đây không có nghĩa Admin 100% feature complete.

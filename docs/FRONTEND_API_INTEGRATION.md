@@ -1,5 +1,26 @@
 # SAGA Frontend API Integration Guide
 
+## A12 — Bàn giao Admin cho FE, 2026-08-09
+
+| Feature | Endpoint | Method | Role | CSRF | Request / response | Status | FE action |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| User toàn cục | `/api/admin/users` | GET | ADMIN | Không | filter/page → safe `Page` | CONFIRMED | Render danh sách. |
+| Account status | `/api/admin/users/{id}/status` | PATCH | ADMIN | Có | `{status}` → safe user | CONFIRMED | Chỉ Student/Lecturer; không gửi PENDING. |
+| Global import | `/api/admin/users/import` | POST | ADMIN | Có | multipart role STUDENT/LECTURER + XLSX → summary | CONFIRMED | Không gọi cho Admin. |
+| Audit/stats/health | `/api/admin/audit-logs`, `/system-stats`, `/integrations/health` | GET | ADMIN | Không | local sanitized snapshot | CONFIRMED | Không render actor/IP/payload; health không live provider. |
+| Teams/projects | `/api/admin/teams`, `/api/admin/projects` | GET | ADMIN | Không | paged local summaries | CONFIRMED | Read-only. |
+| Course progress | `/api/admin/course-progress-overview` | GET | ADMIN | Không | paged current counts | CONFIRMED | Không diễn giải final grade. |
+| Course export | `/api/admin/reports/courses/{courseId}/export` | GET | ADMIN | Không | XLSX attachment | CONFIRMED | Tải file, không coi là bảng điểm. |
+| Active Semester | `/api/admin/settings/active-semester` | GET/PUT | ADMIN | PUT có | typed Semester setting | CONFIRMED | Không dùng generic settings UI. |
+| Global rubric | `/api/admin/peer-review-rubrics` | POST | ADMIN | Có | criterion/weight/description → rubric | CONFIRMED | Chỉ global active. |
+| Global rubric | `/api/admin/peer-review-rubrics/{id}` | PUT/DELETE | ADMIN | Có | update / soft-disable | CONFIRMED | Không sửa Subject rubric/history. |
+| Subject/Class/Semester/Course | `/api/v1/subjects`, `/classes`, `/semesters`, `/courses` | POST/PUT/DELETE | ADMIN | Có | request domain → entity/204 | CONFIRMED | DELETE là soft-delete có dependency guard. |
+| Course instructors | `/api/v1/courses/instructors` | GET | ADMIN | Không | paged lecturer options | CONFIRMED | Dùng khi gán Course. |
+
+Không gọi endpoint không tồn tại cho per-user audit, notification broadcast, impersonation, role
+mutation, password reset, manual Course membership, Project DELETE hoặc generic settings. Mọi request
+dùng `credentials: "include"`; không dùng Bearer.
+
 ## Account lifecycle M3B — 2026-08-09
 
 `PATCH /api/admin/users/{id}/status` đã có. Chỉ ADMIN, `credentials: "include"` và `X-XSRF-TOKEN`; body là `{ "status": "ACTIVE" | "INACTIVE" | "SUSPENDED" }`. Response 200 là safe `AdminUserReadResponse`; Student/Lecturer hỗ trợ, Admin target 400 `ACCOUNT_STATUS_TARGET_UNSUPPORTED`, PENDING 400 `ACCOUNT_STATUS_PENDING_NOT_ALLOWED`, ID không có 404. Sau status change, business API của session đó bị check DB ngay request tiếp theo; `/api/auth/me` vẫn 200 và trả status hiện tại, logout vẫn dùng được.
@@ -42,11 +63,20 @@ secret, webhook ID, payload, URL hay Cognito subject.
 Không có route per-user audit log hoặc impersonation. FE không gửi Cognito subject/token để
 tìm audit và không có token tạm thời/Bearer flow.
 
+A11A chỉ bổ sung metadata durable nội bộ cho event audit mới; không đổi response
+`GET /api/admin/audit-logs` và không expose `actorLocalProfileId`, `actorRole`, Cognito subject,
+IP hay raw payload. Chưa có route per-user vì history trước đó không đủ coverage.
+
 ## Jira Task Create metadata — 2026-08-09
 
 `POST /api/v1/projects/{projectId}/tasks` normal không yêu cầu FE hiển thị hoặc nhập Jira numeric IDs. FE gửi `title`, business `type` (`BUG`, `FEATURE`, `STORY`, `TASK`, `EPIC`, `SUBTASK`) và, khi cần đặt priority, business `priority` (`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`). Backend resolve Jira issue type/priority theo metadata của đúng Project hiện tại.
 
 `issueTypeId` và `priorityId` vẫn được chấp nhận như advanced override optional cho client cũ/debug admin. Backend luôn validate: ID issue type phải thuộc metadata Project; ID priority phải thuộc `priority.allowedValues`. Không gửi `customfield_*`, token, Bearer hay Jira numeric ID hardcode. Nếu auto-resolution không có đúng một candidate, API fail closed; FE không fallback sang tự chọn numeric ID.
+
+J1C ưu tiên exact canonical name sau khi backend dedup provider ID: ví dụ `Task` thắng
+`Spike` cho `TASK`, `Critical` thắng `Highest` cho `CRITICAL`. Khi không có exact, backend chỉ
+dùng semantic fallback nếu còn đúng một ID; nhiều ID thật sự vẫn là `409` resolution ambiguous.
+FE không đổi request normal và khi chọn “Mặc định” vẫn omit cả `priority`/`priorityId`.
 
 ## Sprint list item state — 2026-08-08
 

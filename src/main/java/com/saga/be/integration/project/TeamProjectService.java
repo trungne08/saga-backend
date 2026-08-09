@@ -58,7 +58,7 @@ public class TeamProjectService {
         team.setProject(project);
         teamRepository.saveAndFlush(team);
         auditService.recordIntegrationEvent(
-                principal.cognitoSub(),
+                principal,
                 "TEAM_PROJECT_CREATED",
                 "PROJECT",
                 project.getId(),

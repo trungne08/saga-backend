@@ -1,5 +1,12 @@
 # Ma trận semantics response API
 
+## A12 — Admin closure response boundary
+
+Không có response/API mới trong A12. Global Admin read giữ `200` local sanitized; mutation Admin
+giữ response/controller hiện hữu và `401/403` theo session/role/CSRF. Per-user audit, notification
+broadcast, impersonation, role/password mutation, generic settings, membership mutation và Project
+DELETE không có endpoint để FE gọi.
+
 ## Account lifecycle M3B — 2026-08-09
 
 | Method | Path | Success | Failure | Safety |
@@ -42,6 +49,10 @@ Query enum/page/size không hợp lệ trả `400 INVALID_REQUEST`; size là 1..
 `/api/admin/integrations/health` không là provider-live health: không probe Jira/GitHub và
 không trả credential, secret, webhook ID hoặc payload. `/api/admin/users/{id}/audit-logs`
 và impersonation không tồn tại do thiếu stable audit identity/session contract.
+
+A11A chưa tạo API response mới: `GET /api/admin/audit-logs` vẫn sanitize identity/payload.
+Event future có durable local identity nullable, nhưng historical Mongo không backfill nên
+`GET /api/admin/users/{id}/audit-logs` vẫn không an toàn để hứa complete history.
 
 Nguồn audit: OpenAPI sinh từ `/v3/api-docs` lúc chạy `GeneratedOpenApiDocumentationIntegrationTest` ngày 2026-08-07, đối chiếu controller/service/handler hiện hành. Có đúng **96 operations**; mỗi operation sinh ra có một dòng bên dưới.
 

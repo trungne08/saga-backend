@@ -237,6 +237,19 @@ class JiraTaskWriteServiceTest {
     }
 
     @Test
+    void omitsPriorityWhenNeitherBusinessPriorityNorOverrideIsRequested() {
+        CreateFixture fixture = fixture();
+        remoteCreateThenCanonicalFetch(fixture);
+
+        fixture.service().create(fixture.principal, fixture.projectId, "key",
+                new JiraTaskCreateRequest("Task", TaskType.TASK, null, null, null,
+                        null, null, null, null, null));
+
+        verify(fixture.provider).createIssue(eq("token"), eq("cloud"), argThat(fields ->
+                !fields.containsKey("priority")));
+    }
+
+    @Test
     void failsClosedWhenAutoIssueTypeHasNoCandidate() {
         CreateFixture fixture = fixture();
         when(fixture.provider.getCreateIssueTypes("token", "cloud", "10000"))
@@ -252,19 +265,20 @@ class JiraTaskWriteServiceTest {
     }
 
     @Test
-    void failsClosedWhenAutoIssueTypeIsAmbiguous() {
+    void prefersExactTaskNameOverSpikeSemanticFallback() {
         CreateFixture fixture = fixture();
         when(fixture.provider.getCreateIssueTypes("token", "cloud", "10000")).thenReturn(List.of(
                 new JiraCreateIssueType("3", "Task", false, null),
                 new JiraCreateIssueType("4", "Spike", false, null)
         ));
+        remoteCreateThenCanonicalFetch(fixture);
 
-        assertEquals("JIRA_ISSUE_TYPE_RESOLUTION_AMBIGUOUS", assertThrows(IntegrationException.class,
-                () -> fixture.service().create(fixture.principal, fixture.projectId, "key",
-                        new JiraTaskCreateRequest("Task", TaskType.TASK, null, null, null,
-                                null, null, null, null, null))).getCode());
+        fixture.service().create(fixture.principal, fixture.projectId, "key",
+                new JiraTaskCreateRequest("Task", TaskType.TASK, null, null, null,
+                        null, null, null, null, null));
 
-        verify(fixture.provider, never()).getCreateFields(any(), any(), any(), any());
+        verify(fixture.provider).createIssue(eq("token"), eq("cloud"), argThat(fields ->
+                Map.of("id", "3").equals(fields.get("issuetype"))));
     }
 
     @Test
@@ -285,7 +299,56 @@ class JiraTaskWriteServiceTest {
     }
 
     @Test
-    void failsClosedWhenAutoPriorityIsAmbiguous() {
+    void usesSingleSpikeSemanticFallbackWhenNoExactTaskExists() {
+        CreateFixture fixture = fixture();
+        when(fixture.provider.getCreateIssueTypes("token", "cloud", "10000"))
+                .thenReturn(List.of(new JiraCreateIssueType("4", "Spike", false, null)));
+        when(fixture.provider.getCreateFields("token", "cloud", "10000", "4")).thenReturn(requiredFields());
+        remoteCreateThenCanonicalFetch(fixture);
+
+        fixture.service().create(fixture.principal, fixture.projectId, "key",
+                new JiraTaskCreateRequest("Task", TaskType.TASK, null, null, null,
+                        null, null, null, null, null));
+
+        verify(fixture.provider).createIssue(eq("token"), eq("cloud"), argThat(fields ->
+                Map.of("id", "4").equals(fields.get("issuetype"))));
+    }
+
+    @Test
+    void failsClosedWhenMultipleExactTaskNamesHaveDistinctProviderIds() {
+        CreateFixture fixture = fixture();
+        when(fixture.provider.getCreateIssueTypes("token", "cloud", "10000")).thenReturn(List.of(
+                new JiraCreateIssueType("3", "Task", false, null),
+                new JiraCreateIssueType("4", "Task", false, null)
+        ));
+
+        assertEquals("JIRA_ISSUE_TYPE_RESOLUTION_AMBIGUOUS", assertThrows(IntegrationException.class,
+                () -> fixture.service().create(fixture.principal, fixture.projectId, "key",
+                        new JiraTaskCreateRequest("Task", TaskType.TASK, null, null, null,
+                                null, null, null, null, null))).getCode());
+
+        verify(fixture.provider, never()).getCreateFields(any(), any(), any(), any());
+        verify(fixture.provider, never()).createIssue(any(), any(), any());
+    }
+
+    @Test
+    void failsClosedWhenMultipleIssueTypeFallbacksRemainWithoutExactName() {
+        CreateFixture fixture = fixture();
+        when(fixture.provider.getCreateIssueTypes("token", "cloud", "10000")).thenReturn(List.of(
+                new JiraCreateIssueType("3", "Spike", false, null),
+                new JiraCreateIssueType("4", "Technical Task", false, null)
+        ));
+
+        assertEquals("JIRA_ISSUE_TYPE_RESOLUTION_AMBIGUOUS", assertThrows(IntegrationException.class,
+                () -> fixture.service().create(fixture.principal, fixture.projectId, "key",
+                        new JiraTaskCreateRequest("Task", TaskType.TASK, null, null, null,
+                                null, null, null, null, null))).getCode());
+
+        verify(fixture.provider, never()).createIssue(any(), any(), any());
+    }
+
+    @Test
+    void prefersExactCriticalNameOverHighestSemanticFallback() {
         CreateFixture fixture = fixture();
         when(fixture.provider.getCreateFields("token", "cloud", "10000", "3")).thenReturn(List.of(
                 new JiraCreateField("summary", "Summary", true, "string", null, List.of()),
@@ -295,13 +358,48 @@ class JiraTaskWriteServiceTest {
                         new JiraCreateFieldAllowedValue("2", null, "Critical")
                 ))
         ));
+        remoteCreateThenCanonicalFetch(fixture);
 
-        assertEquals("JIRA_PRIORITY_RESOLUTION_AMBIGUOUS", assertThrows(IntegrationException.class,
-                () -> fixture.service().create(fixture.principal, fixture.projectId, "key",
-                        new JiraTaskCreateRequest("Task", TaskType.TASK, null, Priority.CRITICAL, null,
-                                null, null, null, null, null))).getCode());
+        fixture.service().create(fixture.principal, fixture.projectId, "key",
+                new JiraTaskCreateRequest("Task", TaskType.TASK, null, Priority.CRITICAL, null,
+                        null, null, null, null, null));
 
-        verify(fixture.provider, never()).createIssue(any(), any(), any());
+        verify(fixture.provider).createIssue(eq("token"), eq("cloud"), argThat(fields ->
+                Map.of("id", "2").equals(fields.get("priority"))));
+    }
+
+    @Test
+    void prefersExactLowNameOverLowestSemanticFallback() {
+        CreateFixture fixture = fixture();
+        when(fixture.provider.getCreateFields("token", "cloud", "10000", "3")).thenReturn(priorityFields(
+                new JiraCreateFieldAllowedValue("1", null, "Low"),
+                new JiraCreateFieldAllowedValue("2", null, "Lowest")
+        ));
+        remoteCreateThenCanonicalFetch(fixture);
+
+        fixture.service().create(fixture.principal, fixture.projectId, "key",
+                new JiraTaskCreateRequest("Task", TaskType.TASK, null, Priority.LOW, null,
+                        null, null, null, null, null));
+
+        verify(fixture.provider).createIssue(eq("token"), eq("cloud"), argThat(fields ->
+                Map.of("id", "1").equals(fields.get("priority"))));
+    }
+
+    @Test
+    void prefersExactMediumNameOverBroadSemanticFallback() {
+        CreateFixture fixture = fixture();
+        when(fixture.provider.getCreateFields("token", "cloud", "10000", "3")).thenReturn(priorityFields(
+                new JiraCreateFieldAllowedValue("1", null, "Medium"),
+                new JiraCreateFieldAllowedValue("2", null, "Normal")
+        ));
+        remoteCreateThenCanonicalFetch(fixture);
+
+        fixture.service().create(fixture.principal, fixture.projectId, "key",
+                new JiraTaskCreateRequest("Task", TaskType.TASK, null, Priority.MEDIUM, null,
+                        null, null, null, null, null));
+
+        verify(fixture.provider).createIssue(eq("token"), eq("cloud"), argThat(fields ->
+                Map.of("id", "1").equals(fields.get("priority"))));
     }
 
     @Test
@@ -323,6 +421,65 @@ class JiraTaskWriteServiceTest {
 
         verify(fixture.provider).createIssue(eq("token"), eq("cloud"), argThat(fields ->
                 Map.of("id", "1").equals(fields.get("priority"))));
+    }
+
+    @Test
+    void usesSinglePrioritySemanticFallbackWhenNoExactNameExists() {
+        CreateFixture fixture = fixture();
+        when(fixture.provider.getCreateFields("token", "cloud", "10000", "3")).thenReturn(List.of(
+                new JiraCreateField("summary", "Summary", true, "string", null, List.of()),
+                new JiraCreateField("issuetype", "Issue type", true, "string", null, List.of()),
+                new JiraCreateField("priority", "Priority", false, "string", null,
+                        List.of(new JiraCreateFieldAllowedValue("1", null, "Highest")))
+        ));
+        remoteCreateThenCanonicalFetch(fixture);
+
+        fixture.service().create(fixture.principal, fixture.projectId, "key",
+                new JiraTaskCreateRequest("Task", TaskType.TASK, null, Priority.CRITICAL, null,
+                        null, null, null, null, null));
+
+        verify(fixture.provider).createIssue(eq("token"), eq("cloud"), argThat(fields ->
+                Map.of("id", "1").equals(fields.get("priority"))));
+    }
+
+    @Test
+    void failsClosedWhenMultiplePriorityFallbacksRemainWithoutExactName() {
+        CreateFixture fixture = fixture();
+        when(fixture.provider.getCreateFields("token", "cloud", "10000", "3")).thenReturn(List.of(
+                new JiraCreateField("summary", "Summary", true, "string", null, List.of()),
+                new JiraCreateField("issuetype", "Issue type", true, "string", null, List.of()),
+                new JiraCreateField("priority", "Priority", false, "string", null, List.of(
+                        new JiraCreateFieldAllowedValue("1", null, "Highest"),
+                        new JiraCreateFieldAllowedValue("2", null, "Critical Fallback")
+                ))
+        ));
+
+        assertEquals("JIRA_PRIORITY_RESOLUTION_AMBIGUOUS", assertThrows(IntegrationException.class,
+                () -> fixture.service().create(fixture.principal, fixture.projectId, "key",
+                        new JiraTaskCreateRequest("Task", TaskType.TASK, null, Priority.CRITICAL, null,
+                                null, null, null, null, null))).getCode());
+
+        verify(fixture.provider, never()).createIssue(any(), any(), any());
+    }
+
+    @Test
+    void failsClosedWhenMultipleExactPriorityNamesHaveDistinctProviderIds() {
+        CreateFixture fixture = fixture();
+        when(fixture.provider.getCreateFields("token", "cloud", "10000", "3")).thenReturn(List.of(
+                new JiraCreateField("summary", "Summary", true, "string", null, List.of()),
+                new JiraCreateField("issuetype", "Issue type", true, "string", null, List.of()),
+                new JiraCreateField("priority", "Priority", false, "string", null, List.of(
+                        new JiraCreateFieldAllowedValue("1", null, "Critical"),
+                        new JiraCreateFieldAllowedValue("2", null, "Critical")
+                ))
+        ));
+
+        assertEquals("JIRA_PRIORITY_RESOLUTION_AMBIGUOUS", assertThrows(IntegrationException.class,
+                () -> fixture.service().create(fixture.principal, fixture.projectId, "key",
+                        new JiraTaskCreateRequest("Task", TaskType.TASK, null, Priority.CRITICAL, null,
+                                null, null, null, null, null))).getCode());
+
+        verify(fixture.provider, never()).createIssue(any(), any(), any());
     }
 
     @Test
@@ -478,6 +635,21 @@ class JiraTaskWriteServiceTest {
         Task task = Task.builder().project(fixture.project).externalId("101").externalKey("P-1").title("Task").build();
         task.setId(UUID.randomUUID());
         when(fixture.tasks.findByProjectIdAndExternalId(fixture.projectId, "101")).thenReturn(Optional.of(task));
+    }
+
+    private List<JiraCreateField> requiredFields() {
+        return List.of(
+                new JiraCreateField("summary", "Summary", true, "string", null, List.of()),
+                new JiraCreateField("issuetype", "Issue type", true, "string", null, List.of())
+        );
+    }
+
+    private List<JiraCreateField> priorityFields(JiraCreateFieldAllowedValue... values) {
+        return List.of(
+                new JiraCreateField("summary", "Summary", true, "string", null, List.of()),
+                new JiraCreateField("issuetype", "Issue type", true, "string", null, List.of()),
+                new JiraCreateField("priority", "Priority", false, "string", null, List.of(values))
+        );
     }
 
     private CreateFixture fixture() {

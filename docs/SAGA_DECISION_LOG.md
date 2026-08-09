@@ -1,5 +1,13 @@
 # SAGA — Nhật ký quyết định kỹ thuật
 
+## DEC-059 — A12 Admin closure boundary (2026-08-09)
+
+**Status: ACCEPTED.** Admin core được đóng theo source/test hiện có: user list/status/import,
+master-data CRUD có retention guard, typed active Semester, global rubric, progress/export và
+operational reads. Các gap còn lại là governance/business-contract blocker, không phải feature
+được ngầm phê duyệt. Không thêm per-user audit, broadcast, impersonation, role/password mutation,
+generic settings, membership mutation, Project DELETE, Bearer hoặc Cognito Admin API.
+
 ## DEC-049 — Account lifecycle Student và Lecturer
 
 **Status: ACCEPTED / CONFIRMED bởi business decision, source và test.**
@@ -21,6 +29,11 @@ Semester dùng cùng retention model với Subject/Class nhưng chỉ sau audit 
 ## DEC-046 — Backend sở hữu Jira Task create metadata (2026-08-09)
 
 **Status: ACCEPTED.**
+
+**J1C clarification.** Dedup canonical provider ID là bước đầu. Khi nhiều ID semantic còn lại,
+resolver ưu tiên đúng một provider name normalize trùng business enum; chỉ khi không có exact mới
+dùng semantic fallback nếu còn đúng một ID. Nhiều exact hoặc fallback distinct tiếp tục fail closed,
+không sort/pick-first và không làm FE gửi Jira numeric ID.
 
 **Decision.** FE normal gửi `TaskType`/`Priority` business; backend lấy create metadata của đúng Jira Project cho từng request, resolve một candidate duy nhất rồi gửi provider ID canonical. `issueTypeId`/`priorityId` hiện hữu được giữ optional làm advanced override và phải được validate trong metadata trước mutation.
 
@@ -662,6 +675,13 @@ Không có secret hoặc thông tin đăng nhập thật trong decision log này
   per recipient trong schema versioned riêng.
 
 ## DEC-057 — Integration health Admin chỉ là snapshot local, audit theo user fail-closed
+
+### Cập nhật A11A — 2026-08-09
+
+- Event mới có `actorLocalProfileId` UUID-text nullable và `actorRole` nullable khi producer có
+  exact local profile/role; `actorId` không đổi nghĩa Cognito subject.
+- Không backfill Mongo. Vì vậy quyết định không mở user-scoped audit history vẫn giữ nguyên cho
+  complete historical coverage.
 
 - Ngày: 2026-08-09; trạng thái: ACCEPTED.
 - Quyết định: thêm `GET /api/admin/integrations/health` cho ADMIN session, không CSRF.

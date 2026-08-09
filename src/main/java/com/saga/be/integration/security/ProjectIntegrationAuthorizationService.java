@@ -66,7 +66,7 @@ public class ProjectIntegrationAuthorizationService {
     private void requireTeamManager(SagaPrincipal principal, Team team) {
         if (principal.applicationRole() == ApplicationRole.ADMIN) {
             auditService.recordRequiredIntegrationEvent(
-                    principal.cognitoSub(),
+                    principal,
                     "PROJECT_INTEGRATION_ADMIN_OVERRIDE",
                     "TEAM",
                     team.getId(),

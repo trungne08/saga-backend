@@ -1,5 +1,15 @@
 # SAGA — Trạng thái hiện tại
 
+## A12 — Admin closure, 2026-08-09
+
+- **CONFIRMED:** Core Admin source/test có user management, master-data retention CRUD, typed
+  active Semester, global rubric, Course progress/XLSX export, local operational reads và global
+  team/project visibility.
+- **PARTIAL:** A11A durable audit identity chỉ forward cho producer có exact local actor; không
+  làm historical coverage complete.
+- **BLOCKED/TBD:** per-user audit, broadcast notification, impersonation, role/password mutation,
+  membership mutation, Project DELETE, generic settings và browser/deployed smoke evidence.
+
 ## Cập nhật 2026-08-09 — Account lifecycle M3B
 
 - **CONFIRMED:** Student và Lecturer có AccountStatus; Admin vẫn null/không có schema. Lecturer default ACTIVE qua V21 và provisioning, không re-login thành ACTIVE khi DB là INACTIVE/SUSPENDED.
@@ -32,6 +42,14 @@
 - **CONFIRMED:** Stats/Teams/Projects chỉ dùng repository local. Project chỉ trả Course summary, Jira connectionStatus và GitHub aggregate; không provider call, secret, repository URL hay Project DELETE.
 
 ## Update 2026-08-09 — Create Task không cần Jira numeric IDs
+
+### J1C — exact-name-first resolution
+
+- **CONFIRMED runtime:** `Task`/`Spike` cùng map `TASK` và `Critical`/`Highest` cùng map
+  `CRITICAL` với provider ID khác nhau, nên J1 dedup ID một mình không loại được ambiguity.
+- **CONFIRMED:** sau dedup, canonical name normalize trùng business enum được ưu tiên khi chỉ có
+  một ID exact; semantic fallback chỉ resolve khi còn đúng một ID. Nhiều exact hoặc nhiều fallback
+  distinct vẫn trả resolution `AMBIGUOUS` trước Jira POST; không pick-first hay hardcode ID.
 
 - **CONFIRMED:** normal `POST /api/v1/projects/{projectId}/tasks` dùng `type` và `priority` business optional để resolve exact Jira IDs từ metadata của Jira Project hiện tại.
 - **CONFIRMED:** `issueTypeId`/`priorityId` là advanced explicit override optional và chỉ được dùng sau validation local metadata. Issue type invalid trả `400 JIRA_ISSUE_TYPE_INVALID`; priority override invalid trả `400 JIRA_PRIORITY_INVALID`; không forward ID invalid tới Jira.
@@ -492,6 +510,15 @@ BASE HEAD của snapshot cũ: `0bc30be`. HEAD audit hiện hành là `4f3dee9`; 
 - **M8B:** `GENERIC_SYSTEM_SETTINGS = TBD_NOT_IMPLEMENTED_NO_CONFIRMED_GLOBAL_SETTINGS`.
 
 ## M10 Support & Diagnostics — 2026-08-09
+
+### A11A durable audit identity — 2026-08-09
+
+- **CONFIRMED:** Event `SystemAuditLog` mới từ `SagaPrincipal`/login profile có thêm
+  `actorLocalProfileId` (UUID canonical text) và `actorRole`. `actorId` vẫn là Cognito subject.
+  Webhook, system và identity conflict thiếu profile chính xác ghi hai field mới là `null`, không
+  invent UUID/role. Document cũ có thể thiếu field; không backfill hay rewrite Mongo.
+- **PARTIAL/BLOCKED:** Coverage durable là forward-only và không bao phủ mọi event historical;
+  chưa có `GET /api/admin/users/{id}/audit-logs` hoặc per-user history contract.
 
 - **Đã hoàn thành / CONFIRMED:** `GET /api/admin/integrations/health` là ADMIN browser
   session GET local-only. Response chỉ có enabled flag, linked-project count, raw

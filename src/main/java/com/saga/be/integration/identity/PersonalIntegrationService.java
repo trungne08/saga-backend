@@ -110,7 +110,7 @@ public class PersonalIntegrationService {
                 user.email()
         );
         auditService.recordIntegrationEvent(
-                principal.cognitoSub(),
+                principal,
                 "PERSONAL_IDENTITY_CONNECTED",
                 "JIRA_IDENTITY",
                 mapping.getId(),
@@ -221,7 +221,7 @@ public class PersonalIntegrationService {
                 user.email()
         );
         auditService.recordIntegrationEvent(
-                principal.cognitoSub(),
+                principal,
                 "PERSONAL_IDENTITY_CONNECTED",
                 "GITHUB_IDENTITY",
                 mapping.getId(),
@@ -238,7 +238,7 @@ public class PersonalIntegrationService {
     ) {
         identityMappingService.disconnectOwn(principal, provider);
         auditService.recordIntegrationEvent(
-                principal.cognitoSub(),
+                principal,
                 "PERSONAL_IDENTITY_DISCONNECTED",
                 provider.name() + "_IDENTITY",
                 principal.localProfileId(),

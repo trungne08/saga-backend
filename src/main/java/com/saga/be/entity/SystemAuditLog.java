@@ -13,6 +13,14 @@ public class SystemAuditLog {
     private String id; // Mongo dùng String làm ID
 
     private String actorId;
+    /**
+     * Stable local profile identity for newly written user-originated events.
+     * Stored as canonical UUID text so Mongo does not require UUID binary
+     * representation configuration; absent for system-originated events.
+     */
+    private String actorLocalProfileId;
+    /** Application role when the producer has an exact authenticated role. */
+    private String actorRole;
     private String action;
     private String targetEntity;
 

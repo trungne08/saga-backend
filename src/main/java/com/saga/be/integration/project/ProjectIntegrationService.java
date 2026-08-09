@@ -334,7 +334,7 @@ public class ProjectIntegrationService {
 
             dispatchAfterCommit(() -> syncDispatcher.initialJiraBackfill(saved.getId()));
             auditService.recordIntegrationEvent(
-                    principal.cognitoSub(),
+                    principal,
                     "PROJECT_JIRA_LINKED",
                     "PROJECT",
                     projectId,
@@ -405,7 +405,7 @@ public class ProjectIntegrationService {
         board.setWebhookExpiresAt(null);
         jiraBoardRepository.saveAndFlush(board);
         auditService.recordIntegrationEvent(
-                principal.cognitoSub(),
+                principal,
                 "PROJECT_JIRA_DISCONNECTED",
                 "PROJECT",
                 projectId,
@@ -794,7 +794,7 @@ public class ProjectIntegrationService {
         }
 
         auditService.recordIntegrationEvent(
-                principal.cognitoSub(),
+                principal,
                 "PROJECT_GITHUB_REPOSITORIES_LINKED",
                 "PROJECT",
                 projectId,
@@ -820,7 +820,7 @@ public class ProjectIntegrationService {
         repository.setConnectionStatus(IntegrationStatus.DISCONNECTED);
         gitRepoRepository.saveAndFlush(repository);
         auditService.recordIntegrationEvent(
-                principal.cognitoSub(),
+                principal,
                 "PROJECT_GITHUB_REPOSITORY_DISCONNECTED",
                 "PROJECT",
                 projectId,
@@ -848,7 +848,7 @@ public class ProjectIntegrationService {
         repository.setConsecutiveFailures(0);
         GitRepo saved = gitRepoRepository.saveAndFlush(repository);
         dispatchAfterCommit(() -> syncDispatcher.initialGitHubBackfill(saved.getId()));
-        auditService.recordIntegrationEvent(principal.cognitoSub(), "PROJECT_GITHUB_REPOSITORY_RECONNECTED",
+        auditService.recordIntegrationEvent(principal, "PROJECT_GITHUB_REPOSITORY_RECONNECTED",
                 "PROJECT", projectId, "BACKFILLING", remoteAddress);
     }
 

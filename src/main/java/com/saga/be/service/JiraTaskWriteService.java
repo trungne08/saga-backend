@@ -45,6 +45,7 @@ import java.util.Map;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
 import org.springframework.http.HttpStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -455,8 +456,11 @@ public class JiraTaskWriteService {
             throw IntegrationException.invalid(
                     "JIRA_TASK_TYPE_REQUIRED", "A business task type is required when no Jira issue type override is supplied");
         }
-        return exactlyOne(
-                issueTypes.stream().filter(issueType -> taskType(issueType.name()) == request.type()).map(JiraCreateIssueType::id).toList(),
+        return resolveSpecificCandidate(
+                issueTypes.stream().filter(issueType -> taskType(issueType.name()) == request.type()).toList(),
+                JiraCreateIssueType::id,
+                JiraCreateIssueType::name,
+                request.type().name(),
                 "JIRA_ISSUE_TYPE_RESOLUTION_NOT_FOUND",
                 "JIRA_ISSUE_TYPE_RESOLUTION_AMBIGUOUS",
                 "The Jira issue type could not be resolved uniquely for this project"
@@ -503,15 +507,50 @@ public class JiraTaskWriteService {
                             "JIRA_PRIORITY_INVALID", "The Jira priority is not available for this project"));
         }
         if (request.priority() == null) return null;
-        return exactlyOne(
+        return resolveSpecificCandidate(
                 priority.allowedValues().stream()
                         .filter(value -> priority(value.name()) == request.priority())
-                        .map(JiraCreateFieldAllowedValue::id)
-                        .filter(java.util.Objects::nonNull)
                         .toList(),
+                JiraCreateFieldAllowedValue::id,
+                JiraCreateFieldAllowedValue::name,
+                request.priority().name(),
                 "JIRA_PRIORITY_RESOLUTION_NOT_FOUND",
                 "JIRA_PRIORITY_RESOLUTION_AMBIGUOUS",
                 "The Jira priority could not be resolved uniquely for this project"
+        );
+    }
+
+    /**
+     * Provider IDs are deduplicated before selection. An exact canonical provider
+     * name is more specific than a broad business-semantic fallback, but any
+     * remaining choice between distinct provider IDs still fails closed.
+     */
+    private <T> String resolveSpecificCandidate(
+            List<T> semanticCandidates,
+            Function<T, String> providerId,
+            Function<T, String> providerName,
+            String requestedName,
+            String notFoundCode,
+            String ambiguousCode,
+            String message
+    ) {
+        List<String> exactProviderIds = semanticCandidates.stream()
+                .filter(candidate -> normalize(providerName.apply(candidate)).equals(requestedName))
+                .map(providerId)
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .toList();
+        if (exactProviderIds.size() == 1) {
+            return exactProviderIds.get(0);
+        }
+        if (exactProviderIds.size() > 1) {
+            throw IntegrationException.conflict(ambiguousCode, message);
+        }
+        return exactlyOne(
+                semanticCandidates.stream().map(providerId).toList(),
+                notFoundCode,
+                ambiguousCode,
+                message
         );
     }
 
