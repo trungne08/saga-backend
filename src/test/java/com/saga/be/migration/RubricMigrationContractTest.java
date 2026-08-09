@@ -53,7 +53,7 @@ class RubricMigrationContractTest {
     }
 
     @Test
-    void preservesHistoricalV10AndV13SourcesAndMakesV22NewestMigration() throws IOException {
+    void preservesHistoricalV10AndV13SourcesWhileLaterMigrationsRemainAdditive() throws IOException {
         assertEquals(
                 "A62E5A372E43CB7BAB0DAE327DAECE67D0F55296919336126CD6134373B28E5B",
                 sha256("V10__add_peer_review_detail.sql")
@@ -77,8 +77,8 @@ class RubricMigrationContractTest {
                     .toList();
         }
 
-        assertTrue(versions.containsAll(List.of(10, 13, 21, 22, 23)));
-        assertEquals(23, versions.stream().mapToInt(Integer::intValue).max().orElseThrow());
+        assertTrue(versions.containsAll(List.of(10, 13, 21, 22, 23, 24)));
+        assertEquals(24, versions.stream().mapToInt(Integer::intValue).max().orElseThrow());
     }
 
     private String read(String migrationName) throws IOException {

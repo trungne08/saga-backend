@@ -3,6 +3,7 @@ package com.saga.be.service;
 import com.saga.be.dto.request.SemesterRequest;
 import com.saga.be.entity.Semester;
 import com.saga.be.repository.CourseRepository;
+import com.saga.be.repository.ActiveSemesterSettingRepository;
 import com.saga.be.repository.SemesterRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -20,6 +21,7 @@ public class SemesterService {
 
     private final SemesterRepository semesterRepository;
     private final CourseRepository courseRepository;
+    private final ActiveSemesterSettingRepository activeSemesterSettingRepository;
 
     public Semester getSemesterById(UUID id) {
         return requireActiveSemester(id);
@@ -72,6 +74,10 @@ public class SemesterService {
         if (courseRepository.existsBySemesterId(id)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "Semester is currently used by a course");
+        }
+        if (activeSemesterSettingRepository.existsBySemesterId(id)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Semester is currently selected as the active semester");
         }
         semester.setDeletedAt(LocalDateTime.now());
         semesterRepository.save(semester);

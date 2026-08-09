@@ -682,3 +682,9 @@ chặn nullable repair.
 - Student chỉ reuse khi email/code cùng một Student; Lecturer chỉ reuse khi email là
   Lecturer. Partial/cross-role conflict; reuse không update. New Student PENDING, Lecturer
   ACTIVE. Không tạo Course/Team/TeamMember/invitation/outbox; không entity/migration.
+
+## Ràng buộc Admin active Semester M8A — 2026-08-09
+
+- Không có Semester status/active field, current-date inference hoặc generic settings model. V24 thêm đúng một bảng typed `active_semester_setting`; singleton id `1`, reference Semester nullable, PK/check/FK bảo vệ cardinality và integrity.
+- `GET`/`PUT /api/admin/settings/active-semester` là ADMIN browser session. PUT yêu cầu CSRF, request tối thiểu `semesterId`; Semester missing/tombstone là 404. Same Semester được phép lặp deterministic. Không public setting/non-admin và không Bearer.
+- Setting không đổi Semester, Course hoặc Course filter. Delete Semester có thêm dependency guard setting và fail closed 409; không cascade/clear. Không provider call, AccountStatus, Rubric, Import, Contribution hay Analytics change.

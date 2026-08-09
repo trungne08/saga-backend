@@ -160,6 +160,7 @@ public class VietnameseOpenApiDocumentationConfiguration {
             case "CourseController" -> "Khóa học";
             case "CourseContributionWeightController", "TeamContributionController" -> "Đóng góp";
             case "SemesterController" -> "Học kỳ";
+            case "AdminActiveSemesterController" -> "Quản trị";
             case "SubjectController" -> "Môn học";
             case "MyCourseTeamController", "TeamRosterController" -> "Nhóm";
             case "TeamProjectController", "ProjectDetailController" -> "Dự án";

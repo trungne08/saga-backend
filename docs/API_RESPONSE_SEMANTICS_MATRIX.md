@@ -179,3 +179,10 @@ Quy ước: `OAS` là response được khai báo trực tiếp trong OpenAPI; `
 | Method | Route | Success | Failure controlled | Ghi chú |
 |---|---|---|---|---|
 | POST | `/api/admin/users/import` | 200 `AdminUserImportResponse` | 400 file/header/required/formula/duplicate/role sai; 401 anonymous; 403 non-ADMIN hoặc CSRF; 409 cross-profile/partial identity | multipart `role=STUDENT|LECTURER`, `file`; summary không identity row; không side effect Course/Team/invitation/Cognito |
+
+## Admin active Semester setting M8A
+
+| Method | Route | Success | Failure controlled | Ghi chú |
+|---|---|---|---|---|
+| GET | `/api/admin/settings/active-semester` | 200 `ActiveSemesterSettingResponse` | 401 anonymous, 403 non-ADMIN | ADMIN-only current explicit setting; unset trả Semester fields null |
+| PUT | `/api/admin/settings/active-semester` | 200 `ActiveSemesterSettingResponse` | 400 body thiếu/sai UUID, 401 anonymous, 403 non-ADMIN/CSRF, 404 missing/tombstoned Semester | chỉ `semesterId`; repeat deterministic; không mutate Course/Semester |

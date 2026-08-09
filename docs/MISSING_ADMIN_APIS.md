@@ -73,3 +73,10 @@ gọi provider và không export email, Cognito subject hay credential.
 import ADMIN, không tạo Cognito user/group, Course, Team, membership hoặc invitation.
 Bulk Admin provisioning, Admin governance, role mutation và Course assignment vẫn là
 **MISSING CÓ CHỦ ĐÍCH**.
+
+## Admin active Semester setting M8A — hoàn thành 2026-08-09
+
+`GET` và `PUT /api/admin/settings/active-semester` không còn missing. Đây là typed singleton
+explicit, không phải `PUT /api/admin/settings/system`: ADMIN chỉ chọn Semester active bằng UUID
+và FE chỉ đọc default/filter hint. Không tự suy theo date, không mutate/lọc Course, không có
+Semester status. Generic system settings API vẫn **MISSING CÓ CHỦ ĐÍCH**.

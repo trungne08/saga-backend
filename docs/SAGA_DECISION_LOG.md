@@ -632,3 +632,9 @@ Không có secret hoặc thông tin đăng nhập thật trong decision log này
 - Reuse không merge/overwrite profile/status/Cognito subject. Student mới PENDING, Lecturer
   mới ACTIVE, subject null. Không gọi Cognito Admin API và không tạo/mutate Course, Team,
   TeamMember, invitation/outbox, membership, role hay group.
+
+## DEC-055 — Active Semester là singleton typed explicit và delete fail-closed
+
+- Quyết định: dùng `active_semester_setting` singleton id `1`, với `semester_id` nullable FK. V24 tạo bảng additive và seed setting unset; không dùng JSON/generic system settings, không hardcode Semester ID và không thêm field vào `semester`.
+- ADMIN quản lý qua `GET`/`PUT /api/admin/settings/active-semester`; PUT chỉ nhận `semesterId`, cần browser session + CSRF. Default không được suy từ date; Semester selected phải active. GET cùng route được thêm vì FE cần đọc default filter hint, vẫn ADMIN-only.
+- Retention: `SemesterService.softDeleteSemester` có guard explicit khi setting đang reference Semester, trả 409. Không clear setting âm thầm, không cascade/hard-delete và không mutate Course. Active Semester chỉ là hint; backend không áp global Course filter.

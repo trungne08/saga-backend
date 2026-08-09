@@ -1269,3 +1269,18 @@ Success 200: `{ "role": "STUDENT", "createdCount": 1, "reusedCount": 0 }`. Khôn
 email, studentCode, profile id hay row error. Invalid file/schema/role 400; partial hoặc
 cross-profile identity 409; anonymous 401; sai role/CSRF 403. Không tạo Course, Team,
 membership, invitation hay Cognito account.
+
+## Admin active Semester setting M8A
+
+FE ADMIN lấy setting bằng `GET /api/admin/settings/active-semester` và đặt bằng `PUT` cùng
+route. Cả hai dùng `credentials: "include"`; PUT lấy CSRF từ `/api/auth/csrf` và gửi
+`X-XSRF-TOKEN`. Không dùng bearer.
+
+```json
+{ "semesterId": "uuid" }
+```
+
+`200` trả `{ semesterId, semesterCode, semesterName, startDate, endDate }`; tất cả field
+Semester có thể null khi chưa cấu hình. `404` cho Semester missing/tombstone; anonymous 401;
+non-ADMIN hoặc CSRF sai 403; không có date override. Giá trị này chỉ là hint để FE điền/filter:
+backend không tự đổi Course hoặc áp global filter.

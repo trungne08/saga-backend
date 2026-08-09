@@ -717,3 +717,9 @@ và reliability regression 20 tests đều pass.
 - **CONFIRMED:** parser XLSX M7 tách hoàn toàn Course import; toàn bộ validate và identity
   preflight chạy trước write trong một transaction. Không tạo Course, Team, TeamMember,
   invitation/outbox, Cognito user/group hay mutate profile hiện hữu.
+
+## Admin active Semester setting M8A — 2026-08-09
+
+- **CONFIRMED:** `Semester` không có status/active field và không có logic current/default hoặc suy từ ngày. V24 thêm model typed singleton `active_semester_setting`, chỉ chứa reference nullable tới Semester; migration seed row singleton rỗng, không hardcode Semester ID và không sửa schema Semester.
+- **CONFIRMED:** ADMIN dùng `GET`/`PUT /api/admin/settings/active-semester` qua browser session; PUT cần CSRF và body chỉ có `semesterId`. Selection explicit chỉ chấp nhận Semester active; missing/tombstone trả 404, lặp cùng ID deterministic.
+- **CONFIRMED:** setting không mutate Semester/Course, không lọc Course toàn hệ thống và không gọi provider. Semester đang selected không thể soft-delete: Semester delete guard trả 409 thay vì clear/cascade, nên không dangling reference.

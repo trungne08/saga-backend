@@ -461,3 +461,9 @@ BASE HEAD của snapshot cũ: `0bc30be`. HEAD audit hiện hành là `4f3dee9`; 
 - **Đã hoàn thành / CONFIRMED:** validate toàn bộ XLSX trước write, reject formula,
   header/required/duplicate sai; transaction rollback toàn bộ. `ADMIN` import unsupported
   do thiếu governance. Targeted M7/OpenAPI/Course-import-idempotency: 20 tests pass.
+
+## Admin active Semester setting M8A — 2026-08-09
+
+- **Đã hoàn thành / CONFIRMED:** default Semester toàn hệ thống là lựa chọn explicit của ADMIN, không suy từ `startDate`/`endDate` và không thêm status/active field vào Semester. `GET`/`PUT /api/admin/settings/active-semester` là ADMIN session; PUT CSRF-protected, body `{ "semesterId": "uuid" }`.
+- **Đã hoàn thành / CONFIRMED:** V24 thêm bảng typed singleton có FK Semester và seed singleton unset. Một setting tối đa; missing/tombstone 404, repeated PUT idempotent/deterministic. Response trả current setting, kể cả unset với field Semester null.
+- **Đã hoàn thành / CONFIRMED:** selecting không đổi Course/Semester hay ép filter Course. DELETE Semester active trả 409; không clear/cascade. Targeted M8A + Semester/migration/OpenAPI/Admin M1–M7 pass.
