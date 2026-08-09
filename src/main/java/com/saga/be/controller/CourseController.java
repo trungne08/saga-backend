@@ -136,12 +136,6 @@ public class CourseController {
             @AuthenticationPrincipal SagaPrincipal principal,
             @PathVariable UUID courseId,
             @RequestParam("file") MultipartFile file) {
-        
-        // Kiểm tra định dạng file
-        if (file.isEmpty() || !file.getOriginalFilename().endsWith(".xlsx")) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Vui lòng tải lên file Excel (.xlsx) hợp lệ");
-        }
-
         excelImportService.importStudentsToCourse(principal, courseId, file);
         return ResponseEntity.ok("Import danh sách sinh viên thành công!");
     }

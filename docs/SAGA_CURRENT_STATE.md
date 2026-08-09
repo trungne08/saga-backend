@@ -497,3 +497,16 @@ BASE HEAD của snapshot cũ: `0bc30be`. HEAD audit hiện hành là `4f3dee9`; 
   impersonation/delegated session/restore/audit model; không thêm token/JWT/Bearer.
 - **TBD/BLOCKED:** role mutation và password reset cần Cognito/governance contract; Student
   thuộc Course qua TeamMember nên manual add/remove Course không rõ Team/Project/history.
+
+## I1 Course import hardening — 2026-08-09
+
+- **Đã hoàn thành / CONFIRMED:** existing Course import đã có schema XLSX exact, formula rejection, giới hạn 1 MiB/1.000 data rows, duplicate-in-file và safe error code; không có preview, validate hoặc template endpoint.
+- **Đã hoàn thành / CONFIRMED:** parse + bulk preflight identity/Team/membership chạy trước write trong transaction. Lỗi `INVALID_HEADER`, `FORMULA_NOT_ALLOWED`, `MALFORMED_WORKBOOK`, `FILE_TOO_LARGE`, `ROW_LIMIT`, `INVALID_ROW`, `DUPLICATE_IN_FILE` là 400; `IDENTITY_CONFLICT` và `COURSE_TEAM_MEMBERSHIP_CONFLICT` là 409; không trả raw workbook/row values.
+- **PARTIAL:** invariant một Student/một Team/mỗi Course vẫn là application guard có lock, chưa có DB unique invariant trực tiếp; không tự sửa dữ liệu legacy.
+
+## D1 Session/CSRF/CORS production readiness — 2026-08-09
+
+- **CONFIRMED_SOURCE/TEST:** browser-session security giữ token-free `SagaPrincipal`, session fixation migration, CSRF cookie/header (`XSRF-TOKEN`/`X-XSRF-TOKEN`), explicit credentialed CORS và logout POST có CSRF, invalidate session, xóa hai cookie rồi redirect Cognito. AccountStatus filter chạy sau CSRF và miễn `/api/auth/me`, `/csrf`, `/logout`.
+- **CONFIRMED_SOURCE:** prod default cookie Secure=true, SameSite=none, session HttpOnly=true; CSRF path `/`, HttpOnly=false và mirror Secure/SameSite. Cookie Domain, session Path, max-age và session timeout không explicit.
+- **PARTIAL:** Railway/source yêu cầu đúng một replica nhưng không có Spring Session/shared store. Restart/redeploy làm mất HttpSession; nhiều replica không an toàn nếu không sticky session hoặc shared store.
+- **TBD_RUNTIME:** Cognito login thật, browser cross-site cookie, proxy forwarded header, logout redirect và Railway deploy chưa được quan sát runtime.

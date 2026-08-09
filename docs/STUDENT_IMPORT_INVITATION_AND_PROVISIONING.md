@@ -146,3 +146,13 @@ Toàn bộ workbook parse/validate/preflight trước write: header, required fi
 duplicate normalized row, partial identity và cross-profile email đều bị chặn; invalid file
 400, local identity conflict 409, không partial success. Không thay parser/semantics Course
 import; invitation chỉ do Course/Team flow tạo và không phải enrollment.
+
+## Course import I1 hardened contract — 2026-08-09
+
+`POST /api/v1/courses/{courseId}/import-students` là Course provisioning flow, độc lập với M7 Admin global import. Request là `multipart/form-data` với field `file`; FE gửi browser cookie/session và CSRF, không bearer. Success vẫn là `200` text `Import danh sách sinh viên thành công!`.
+
+Workbook là `.xlsx`, tối đa 1 MiB; sheet đầu tiên có header exact theo thứ tự: `Class`, `RollNumber`, `Email`, `MemberCode`, `FullName`, `Group`, `Leader`. Header có thiếu/thừa/sai case/sai thứ tự bị từ chối. Mọi formula ở header, data và cell extra bị reject, không được evaluate. Tối đa 1.000 data rows; `RollNumber`, `Email`, `FullName` phải non-blank. Không gửi lại cell, row hay workbook trong lỗi.
+
+Email được trim/lower và student code trim/upper. Một duplicate trong file, identity partial/split với local record, hoặc membership Team khác cùng Course đều dừng toàn transaction trước write. Student existing chỉ reuse, không rewrite fullName/status/Cognito subject và không reactivate. Group trống giữ behavior cũ: không TeamMember/invitation; Group không trống dùng `Group {value}`, leader mark `x` là LEADER, giá trị khác là MEMBER. Same Team idempotent giữ role; nhiều Course vẫn hợp lệ với role riêng.
+
+Mã lỗi safe: 400 `MALFORMED_WORKBOOK`, `FILE_TOO_LARGE`, `INVALID_HEADER`, `FORMULA_NOT_ALLOWED`, `INVALID_ROW`, `DUPLICATE_IN_FILE`, `ROW_LIMIT`; 409 `IDENTITY_CONFLICT`, `COURSE_TEAM_MEMBERSHIP_CONFLICT`. Invitation outbox được giữ nguyên và chỉ enqueue sau TeamMember; không có provider/Cognito call mới.

@@ -514,8 +514,12 @@ public class JiraTaskWriteService {
     }
 
     private String exactlyOne(List<String> candidates, String notFoundCode, String ambiguousCode, String message) {
-        if (candidates.size() == 1) return candidates.get(0);
-        if (candidates.isEmpty()) throw IntegrationException.conflict(notFoundCode, message);
+        List<String> distinctProviderIds = candidates.stream()
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .toList();
+        if (distinctProviderIds.size() == 1) return distinctProviderIds.get(0);
+        if (distinctProviderIds.isEmpty()) throw IntegrationException.conflict(notFoundCode, message);
         throw IntegrationException.conflict(ambiguousCode, message);
     }
 

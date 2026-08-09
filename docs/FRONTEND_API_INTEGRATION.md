@@ -1296,3 +1296,17 @@ route. Cả hai dùng `credentials: "include"`; PUT lấy CSRF từ `/api/auth/c
 Semester có thể null khi chưa cấu hình. `404` cho Semester missing/tombstone; anonymous 401;
 non-ADMIN hoặc CSRF sai 403; không có date override. Giá trị này chỉ là hint để FE điền/filter:
 backend không tự đổi Course hoặc áp global filter.
+
+## Course student import I1 — 2026-08-09
+
+FE gửi `POST /api/v1/courses/{courseId}/import-students` với `multipart/form-data`, field duy nhất `file`. Dùng `credentials: "include"`; lấy CSRF qua `/api/auth/csrf` và gửi `X-XSRF-TOKEN`. Không dùng `Authorization: Bearer`. ADMIN import mọi Course; LECTURER chỉ Course mình dạy; STUDENT 403, anonymous 401.
+
+FE phải tạo XLSX (không CSV) tối đa 1 MiB, tối đa 1.000 row data, sheet đầu tiên có chính xác các cột theo thứ tự `Class,RollNumber,Email,MemberCode,FullName,Group,Leader`. Không dùng formula ở bất kỳ cột nào; `RollNumber`, `Email`, `FullName` không được blank. Không có preview/validate/template endpoint, vì vậy FE validate UX cục bộ chỉ là hỗ trợ và không thay backend validation.
+
+Success vẫn là plain text `Import danh sách sinh viên thành công!` (200), không đổi sang DTO. FE map lỗi 400 theo error code `MALFORMED_WORKBOOK`, `FILE_TOO_LARGE`, `INVALID_HEADER`, `FORMULA_NOT_ALLOWED`, `INVALID_ROW`, `DUPLICATE_IN_FILE`, `ROW_LIMIT`; 409 `IDENTITY_CONFLICT` hoặc `COURSE_TEAM_MEMBERSHIP_CONFLICT`. Không render raw provider/workbook/cell content; import không partial success.
+
+## D1 Browser session và CSRF — 2026-08-09
+
+FE giữ `credentials: "include"`, không Bearer. Sau khi Cognito redirect hoàn tất, dùng `GET /api/auth/me` để đọc safe session identity; lấy token hiện hành qua `GET /api/auth/csrf`, rồi gửi `X-XSRF-TOKEN` cho POST/PUT/PATCH/DELETE cùng cookies. Không dùng `/auth/callback` để bắt đầu login và không giả định FE phải đọc cookie cross-origin bằng `document.cookie`.
+
+Backend chỉ cho origin explicit từ `FRONTEND_ORIGINS`; credentials=true, CORS cho `Content-Type`, `X-XSRF-TOKEN` và `Idempotency-Key`, không wildcard. `POST /api/auth/logout` cần CSRF, xóa local session/cookies rồi redirect Cognito; không có GET logout. Browser/Cognito/Railway E2E vẫn TBD: FE cần smoke test thật sau deploy cho login, `/me`, `/csrf`, mutation và logout.

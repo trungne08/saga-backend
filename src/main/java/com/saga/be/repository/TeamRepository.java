@@ -22,6 +22,8 @@ public interface TeamRepository extends JpaRepository<Team, UUID> {
 
     Optional<Team> findByCourseIdAndName(UUID courseId, String name);
 
+    List<Team> findByCourseIdAndNameIn(UUID courseId, java.util.Collection<String> names);
+
     List<Team> findByCourseId(UUID courseId);
 
     boolean existsByCourseId(UUID courseId);

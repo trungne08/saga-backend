@@ -669,3 +669,11 @@ Không có secret hoặc thông tin đăng nhập thật trong decision log này
   phần producer, nên không có mapping stable/local-profile semantics cho mọi historical log.
 - Hệ quả: không triển khai impersonation, token/Bearer/JWT, role mutation, password reset
   hoặc manual Course student add/remove trong M10. Các capability này cần contract riêng.
+
+## DEC-058 — Harden Course import theo contract workbook hiện hữu, không đổi provisioning
+
+- Ngày: 2026-08-09; trạng thái: ACCEPTED.
+- Quyết định: chỉ harden `POST /api/v1/courses/{courseId}/import-students`; giữ success text, authorization scope, browser-session/CSRF, Team/role semantics, invitation outbox và M7 global import. Không thêm preview/validate/template endpoint, migration/entity hay Cognito Admin API.
+- Workbook accepted chỉ là XLSX, sheet đầu tiên; file tối đa 1 MiB, tối đa 1.000 data rows; header exact theo thứ tự `Class,RollNumber,Email,MemberCode,FullName,Group,Leader`. Formula ở mọi ô có liên quan bị reject thay vì được tính.
+- Quyết định transactional: parse, duplicate và bulk identity/Team/membership preflight trước write; local partial/split identity hoặc Team khác cùng Course trả conflict. Existing Student được reuse không overwrite profile/status/subject; same Team idempotent giữ role.
+- Error contract an toàn chỉ lộ category/code, không echo workbook/cell value: 400 `MALFORMED_WORKBOOK`, `FILE_TOO_LARGE`, `INVALID_HEADER`, `FORMULA_NOT_ALLOWED`, `INVALID_ROW`, `DUPLICATE_IN_FILE`, `ROW_LIMIT`; 409 `IDENTITY_CONFLICT`, `COURSE_TEAM_MEMBERSHIP_CONFLICT`.

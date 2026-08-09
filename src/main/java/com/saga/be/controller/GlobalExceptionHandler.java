@@ -2,6 +2,7 @@ package com.saga.be.controller;
 
 import com.saga.be.dto.response.ApiErrorResponse;
 import com.saga.be.exception.IdentityConflictException;
+import com.saga.be.exception.CourseImportException;
 import com.saga.be.exception.AccountStatusException;
 import com.saga.be.exception.IdentityServiceException;
 import com.saga.be.exception.IntegrationException;
@@ -71,6 +72,14 @@ public class GlobalExceptionHandler {
                 request.getRequestURI()
             )
         );
+    }
+
+    @ExceptionHandler(CourseImportException.class)
+    public ResponseEntity<ApiErrorResponse> courseImport(
+            CourseImportException exception,
+            HttpServletRequest request
+    ) {
+        return response(exception.getStatus(), exception.getErrorCode(), exception.getMessage(), request);
     }
 
     @ExceptionHandler(AccountStatusException.class)

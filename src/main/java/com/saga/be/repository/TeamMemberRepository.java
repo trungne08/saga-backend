@@ -10,6 +10,8 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.Lock;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
@@ -36,6 +38,18 @@ public interface TeamMemberRepository extends JpaRepository<TeamMember, UUID> {
 
     @EntityGraph(attributePaths = "team")
     List<TeamMember> findByStudentIdAndTeamCourseId(UUID studentId, UUID courseId);
+
+    @EntityGraph(attributePaths = "team")
+    List<TeamMember> findByStudentIdInAndTeamCourseId(
+            java.util.Collection<UUID> studentIds,
+            UUID courseId
+    );
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select student from Student student where student.id in :ids")
+    List<com.saga.be.entity.Student> findStudentsForCourseImportWriteByIdIn(
+            @Param("ids") java.util.Collection<UUID> ids
+    );
 
     @EntityGraph(attributePaths = {"student", "team", "team.course"})
     List<TeamMember> findAllByStudentIdAndTeamCourseId(

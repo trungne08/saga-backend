@@ -191,3 +191,9 @@ Quy ước: `OAS` là response được khai báo trực tiếp trong OpenAPI; `
 |---|---|---|---|---|
 | GET | `/api/admin/settings/active-semester` | 200 `ActiveSemesterSettingResponse` | 401 anonymous, 403 non-ADMIN | ADMIN-only current explicit setting; unset trả Semester fields null |
 | PUT | `/api/admin/settings/active-semester` | 200 `ActiveSemesterSettingResponse` | 400 body thiếu/sai UUID, 401 anonymous, 403 non-ADMIN/CSRF, 404 missing/tombstoned Semester | chỉ `semesterId`; repeat deterministic; không mutate Course/Semester |
+
+## Course student import I1
+
+| Method | Route | Success | Failure controlled | Ghi chú |
+|---|---|---|---|---|
+| POST | `/api/v1/courses/{courseId}/import-students` | 200 plain text `Import danh sách sinh viên thành công!` | 400 `MALFORMED_WORKBOOK`/`FILE_TOO_LARGE`/`INVALID_HEADER`/`FORMULA_NOT_ALLOWED`/`INVALID_ROW`/`DUPLICATE_IN_FILE`/`ROW_LIMIT`; 401 anonymous; 403 Student, ownership hoặc CSRF; 404 Course missing; 409 `IDENTITY_CONFLICT`/`COURSE_TEAM_MEMBERSHIP_CONFLICT` | multipart `file`; XLSX first sheet, exact 7 headers, ≤1 MiB/1.000 rows; transaction all-or-nothing, không echo data, không preview/template/validate route |

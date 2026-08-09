@@ -267,6 +267,23 @@ class JiraTaskWriteServiceTest {
     }
 
     @Test
+    void deduplicatesSameProviderIdBeforeAutoIssueTypeResolution() {
+        CreateFixture fixture = fixture();
+        when(fixture.provider.getCreateIssueTypes("token", "cloud", "10000")).thenReturn(List.of(
+                new JiraCreateIssueType("3", "Task", false, null),
+                new JiraCreateIssueType("3", "Task", false, null)
+        ));
+        remoteCreateThenCanonicalFetch(fixture);
+
+        fixture.service().create(fixture.principal, fixture.projectId, "key",
+                new JiraTaskCreateRequest("Task", TaskType.TASK, null, null, null,
+                        null, null, null, null, null));
+
+        verify(fixture.provider).createIssue(eq("token"), eq("cloud"), argThat(fields ->
+                Map.of("id", "3").equals(fields.get("issuetype"))));
+    }
+
+    @Test
     void failsClosedWhenAutoPriorityIsAmbiguous() {
         CreateFixture fixture = fixture();
         when(fixture.provider.getCreateFields("token", "cloud", "10000", "3")).thenReturn(List.of(
@@ -284,6 +301,27 @@ class JiraTaskWriteServiceTest {
                                 null, null, null, null, null))).getCode());
 
         verify(fixture.provider, never()).createIssue(any(), any(), any());
+    }
+
+    @Test
+    void deduplicatesSameProviderIdBeforeAutoPriorityResolution() {
+        CreateFixture fixture = fixture();
+        when(fixture.provider.getCreateFields("token", "cloud", "10000", "3")).thenReturn(List.of(
+                new JiraCreateField("summary", "Summary", true, "string", null, List.of()),
+                new JiraCreateField("issuetype", "Issue type", true, "string", null, List.of()),
+                new JiraCreateField("priority", "Priority", false, "string", null, List.of(
+                        new JiraCreateFieldAllowedValue("1", null, "High"),
+                        new JiraCreateFieldAllowedValue("1", null, "High")
+                ))
+        ));
+        remoteCreateThenCanonicalFetch(fixture);
+
+        fixture.service().create(fixture.principal, fixture.projectId, "key",
+                new JiraTaskCreateRequest("Task", TaskType.TASK, null, Priority.HIGH, null,
+                        null, null, null, null, null));
+
+        verify(fixture.provider).createIssue(eq("token"), eq("cloud"), argThat(fields ->
+                Map.of("id", "1").equals(fields.get("priority"))));
     }
 
     @Test
@@ -340,6 +378,16 @@ class JiraTaskWriteServiceTest {
         } finally {
             logger.detachAppender(appender);
         }
+    }
+
+    private void remoteCreateThenCanonicalFetch(CreateFixture fixture) {
+        when(fixture.provider.createIssue(eq("token"), eq("cloud"), any()))
+                .thenReturn(new JiraIssueReference("101", "P-1"));
+        JiraIssueSnapshot canonical = snapshot();
+        when(fixture.provider.getIssue("token", "cloud", "101")).thenReturn(canonical);
+        Task task = Task.builder().project(fixture.project).externalId("101").externalKey("P-1").title("Task").build();
+        task.setId(UUID.randomUUID());
+        when(fixture.tasks.findByProjectIdAndExternalId(fixture.projectId, "101")).thenReturn(Optional.of(task));
     }
 
     private CreateFixture fixture() {

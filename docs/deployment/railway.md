@@ -195,3 +195,21 @@ Không được có failed Flyway row.
 - Flyway flags đã trở về `false` sau migration đầu tiên.
 - Reconciliation và webhook processing vẫn bật.
 - Không có secret/token trong log, API response hoặc Railway build variables.
+
+## 7. D1 browser session and proxy readiness — 2026-08-09
+
+Source production default đặt session cookie Secure và SameSite `none`; HttpOnly được đặt
+ở cấu hình chung. CSRF cookie `XSRF-TOKEN` có path `/`, HttpOnly false và dùng cùng
+Secure/SameSite source property để FE gửi header `X-XSRF-TOKEN` với credentialed request.
+Cookie Domain, JSESSIONID path/max-age và session timeout không được cấu hình explicit;
+operator phải quan sát `Set-Cookie` thực tế qua HTTPS sau deploy, không suy diễn từ MockMvc.
+
+`server.forward-headers-strategy=framework` có trong source. `PUBLIC_BASE_URL` và các
+callback/webhook URL được startup validator kiểm tra HTTPS/origin/route theo profile
+production, nhưng Railway proxy headers, Cognito redirect, browser third-party-cookie và
+CORS credentials vẫn cần smoke test runtime thật.
+
+Application dùng in-memory `HttpSession`; không có Spring Session, Redis, JDBC session hay
+Hazelcast. Chính sách vận hành hiện hữu là một replica. Restart/redeploy làm mất session;
+không tăng replica khi chưa có sticky session hoặc shared store được phê duyệt. Railway build
+hiện chạy `mvn clean package -DskipTests`; CI/test gate phải chạy ngoài Railway build.

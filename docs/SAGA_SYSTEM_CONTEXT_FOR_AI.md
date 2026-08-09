@@ -760,3 +760,18 @@ và reliability regression 20 tests đều pass.
 - **CONFIRMED:** `Semester` không có status/active field và không có logic current/default hoặc suy từ ngày. V24 thêm model typed singleton `active_semester_setting`, chỉ chứa reference nullable tới Semester; migration seed row singleton rỗng, không hardcode Semester ID và không sửa schema Semester.
 - **CONFIRMED:** ADMIN dùng `GET`/`PUT /api/admin/settings/active-semester` qua browser session; PUT cần CSRF và body chỉ có `semesterId`. Selection explicit chỉ chấp nhận Semester active; missing/tombstone trả 404, lặp cùng ID deterministic.
 - **CONFIRMED:** setting không mutate Semester/Course, không lọc Course toàn hệ thống và không gọi provider. Semester đang selected không thể soft-delete: Semester delete guard trả 409 thay vì clear/cascade, nên không dangling reference.
+
+## Course student import I1 — 2026-08-09
+
+- **CONFIRMED:** `POST /api/v1/courses/{courseId}/import-students` giữ response `200` text `Import danh sách sinh viên thành công!`; dùng browser session + CSRF, không bearer. ADMIN import mọi Course, LECTURER phải là instructor, STUDENT/anonymous bị chặn.
+- **CONFIRMED:** XLSX chỉ đọc sheet đầu tiên, tối đa 1 MiB và 1.000 row dữ liệu. Header bắt buộc đúng thứ tự `Class,RollNumber,Email,MemberCode,FullName,Group,Leader`; mọi formula ở header/data/ô thừa bị từ chối, không evaluate formula.
+- **CONFIRMED:** parser và identity/team preflight hoàn tất trước write. Email trim/lower, student code trim/upper; duplicate trong file, partial/split local identity và Team khác cùng Course fail toàn transaction. Student đang tồn tại không bị overwrite/reactivate; same Team giữ role, khác Course hợp lệ.
+- **CONFIRMED:** M7 Admin global import vẫn là parser/business flow độc lập; không đổi entity, migration, Cognito call hay invitation delivery semantics.
+
+## D1 Browser session, CSRF và Railway readiness — 2026-08-09
+
+- **CONFIRMED_SOURCE:** `HttpSessionSecurityContextRepository`, `SessionCreationPolicy.IF_REQUIRED` và session-fixation `migrateSession` giữ `SagaPrincipal` token-free trong server session. OAuth access/id/refresh token không được trả cho FE hoặc lưu trong session; FE không cần Bearer.
+- **CONFIRMED_SOURCE:** production default `JSESSIONID` là Secure và SameSite `none`; HttpOnly là true. CSRF cookie `XSRF-TOKEN` có path `/`, HttpOnly false để FE đọc cùng cookie jar, và mirror Secure/SameSite của session cookie. Domain, session cookie path, max-age và timeout không được set explicit nên là container/runtime concern.
+- **CONFIRMED_SOURCE/TEST:** CORS chỉ nhận explicit `FRONTEND_ORIGINS`, reject wildcard, cho credentials, `Content-Type`, `X-XSRF-TOKEN` và `Idempotency-Key`; MockMvc xác nhận preflight và CSRF/logout/account-status regressions. Đây không xác nhận browser third-party-cookie behavior.
+- **CONFIRMED_SOURCE:** `server.forward-headers-strategy=framework`; `IntegrationPublicUrlValidator` fail startup với public URL/callback không hợp lệ và yêu cầu HTTPS ngoài local/test. Railway build dùng `mvn clean package -DskipTests`, healthcheck `/actuator/health`, restart ON_FAILURE.
+- **PARTIAL/TBD_RUNTIME:** không có Spring Session/Redis/JDBC/Hazelcast. Session và OAuth state là in-memory HttpSession: one replica là điều kiện vận hành, restart làm mất session; multi-instance cần sticky session hoặc shared store. Chưa có evidence browser Cognito flow, Set-Cookie, cross-site cookie hay Railway proxy header thật.

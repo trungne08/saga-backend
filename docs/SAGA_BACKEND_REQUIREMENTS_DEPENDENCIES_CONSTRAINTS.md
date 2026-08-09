@@ -721,3 +721,18 @@ chặn nullable repair.
 - Course không có enrollment entity; relation Student–Course thực tế là
   `Student -> TeamMember -> Team -> Course`. Không thêm/remove Student khi Team, role,
   Project và historical retention chưa được quyết định.
+
+## Ràng buộc I1 Course student import — 2026-08-09
+
+- Contract route không đổi: `POST /api/v1/courses/{courseId}/import-students`, multipart field `file`, success `200` plain text hiện hữu. Session browser + CSRF bắt buộc; ADMIN mọi Course, LECTURER ownership, STUDENT 403, anonymous 401.
+- File phải `.xlsx`, không rỗng, không quá 1.048.576 bytes; chỉ sheet đầu tiên được xử lý. Tối đa 1.000 data rows. Header sau trim phải exact-case và đúng thứ tự `Class,RollNumber,Email,MemberCode,FullName,Group,Leader`, không extra/missing; formula ở header, data hoặc ô extra bị reject.
+- `RollNumber`, `Email`, `FullName` non-blank; email normalized trim/lower, code trim/upper. File không partial success: duplicate normalized identity, malformed row/file, partial/split identity hoặc Team khác cùng Course chặn toàn transaction trước side effect.
+- `Group` trống giữ behavior cũ: chỉ Student provision/reuse, không tạo TeamMember/invitation. Group có giá trị dùng Team `Group {Group}`; `Leader = x` (case-insensitive) là LEADER, còn lại MEMBER. Same Team không rewrite role; Course khác được membership độc lập.
+- Preflight bulk Student/Team/membership rồi lock Student khi write; invitation outbox vẫn là luồng existing dedup sau TeamMember và không có provider/Cognito call. Không thay đổi M7 parser/business, entity, schema hay migration. DB invariant trực tiếp Student+Course vẫn chưa có.
+
+## Ràng buộc D1 browser session và deployment — 2026-08-09
+
+- Không được chuyển sang Bearer/JWT/localStorage token hoặc disable CSRF. `GET /api/auth/csrf` cần authenticated session; mutation gửi cookie `XSRF-TOKEN` cùng header `X-XSRF-TOKEN` và `credentials: include`. Webhook exemption vẫn chỉ là hai POST provider route.
+- Prod source đặt `server.servlet.session.cookie.secure=${SESSION_COOKIE_SECURE:true}`, `same-site=${SESSION_COOKIE_SAME_SITE:none}` và HttpOnly true. CSRF cookie explicit path `/`, HttpOnly false, Secure/SameSite theo cùng source property. Domain, JSESSIONID path/lifetime/timeout không có setting source; không được coi là confirmed runtime.
+- `FRONTEND_ORIGINS` là required public config: phải là origin HTTP(S) explicit, không wildcard/path/query/fragment; CORS cho GET/POST/PUT/PATCH/DELETE/OPTIONS, `Content-Type`, `X-XSRF-TOKEN`, `Idempotency-Key`, credentials=true, exposed `Location`, max-age 3600. `PUBLIC_BASE_URL`, auth redirect và Cognito/OAuth/database/integration config là required theo property/validator tương ứng; secret chỉ được nêu tên, không log/expose giá trị.
+- Không có dependency/config Spring Session, Redis, JDBC session hay Hazelcast. `HttpSessionSecurityContextRepository` là in-memory process state; shared session/multi-replica là architectural decision riêng. Railway build hiện skip tests; CI gate không được suy diễn từ build command.
