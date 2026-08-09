@@ -37,4 +37,7 @@ public interface TaskRepository extends JpaRepository<Task, UUID>, JpaSpecificat
     List<Task> findByProjectIdAndAssigneeId(UUID projectId, UUID assigneeId);
 
     List<Task> findByProjectCourseId(UUID courseId);
+
+    @EntityGraph(attributePaths = {"project", "sprint", "assignee"})
+    List<Task> findByProjectCourseIdAndDeletedAtIsNullOrderByCreatedAtAscIdAsc(UUID courseId);
 }

@@ -167,3 +167,9 @@ Quy ước: `OAS` là response được khai báo trực tiếp trong OpenAPI; `
 | Method | Route | Success | Failure controlled | Ghi chú |
 |---|---|---|---|---|
 | GET | `/api/admin/course-progress-overview` | 200 Page | 400 pagination sai, 401 anonymous, 403 Lecturer/Student | DB local-only; Course tombstone bị loại |
+
+## Admin Course report export M6
+
+| Method | Route | Success | Failure controlled | Ghi chú |
+|---|---|---|---|---|
+| GET | `/api/admin/reports/courses/{courseId}/export` | 200 XLSX attachment | 401 anonymous, 403 Lecturer/Student, 404 missing/tombstone | no-store, local-only, không phải grade |

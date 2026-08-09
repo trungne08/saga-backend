@@ -437,3 +437,14 @@ BASE HEAD của snapshot cũ: `0bc30be`. HEAD audit hiện hành là `4f3dee9`; 
   loop gọi `ContributionCalculationService` theo Team.
 - **PARTIAL/TBD:** Assessment chỉ là entity/repository không có lifecycle/API; raw
   PeerReview count không được diễn giải thành completion percentage hay completion status.
+
+## Cập nhật 2026-08-09 — Admin Course report export M6
+
+- **CONFIRMED:** ADMIN tải XLSX từ `/api/admin/reports/courses/{courseId}/export`.
+  Missing/tombstoned Course trả 404; anonymous 401; Lecturer/Student 403; GET không
+  cần CSRF. Empty Course vẫn tạo workbook hợp lệ.
+- **CONFIRMED:** Course metadata, Team Member, Sprint canonical local, Task canonical
+  local và raw PeerReview không comment được bulk-load theo Course. Không có provider
+  call, Assessment sheet hoặc Current Contribution sheet.
+- **Verification:** targeted XLSX parse/security/privacy/provider-isolation/OpenAPI
+  regression pass. Assessment và official grade vẫn không được implement.

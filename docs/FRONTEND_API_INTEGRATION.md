@@ -1151,6 +1151,16 @@ admin global. Default/Team form chỉ nhận rubric active; FE phải tiếp t�
 Mỗi row gồm Course, lecturer summary và các count local: `teamCount`, `studentCount`,
 `projectCount`, `sprintCount`, `activeSprintCount`, `closedSprintCount`, `peerReviewCount`.
 Đây không phải grade, completion percentage, assessment finalized hay contribution snapshot.
+
+## Admin Course report export M6
+
+| Method | Route | Quyền | Response |
+|---|---|---|---|
+| GET | `/api/admin/reports/courses/{courseId}/export` | ADMIN session, không CSRF | attachment XLSX `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` |
+
+FE tải body như file; filename do server tạo `course-report-{safe-course-code}.xlsx`.
+Workbook chỉ là local current snapshot, không phải bảng điểm/finalization. Không có email,
+Cognito subject, comment Peer Review hoặc dữ liệu provider/credential.
 | GET | `/api/v1/teams/{teamId}/sprints/{sprintId}/peer-reviews/candidates` | ADMIN, STUDENT | Service thực tế chỉ chấp nhận STUDENT thuộc Team; ADMIN bị `403` | `200 PeerReviewCandidatesResponse` |
 | POST | `/api/v1/teams/{teamId}/sprints/{sprintId}/peer-reviews` | ADMIN, STUDENT | Service thực tế chỉ chấp nhận STUDENT thuộc Team; ADMIN bị `403` | `200 PeerReviewResponse` |
 | GET | `/api/v1/teams/{teamId}/sprints/{sprintId}/peer-reviews` | ADMIN, LECTURER, STUDENT | ADMIN; LECTURER là Course instructor; STUDENT thuộc Team | `200 SprintPeerReviewResponse` |

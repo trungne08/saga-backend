@@ -608,3 +608,14 @@ Không có secret hoặc thông tin đăng nhập thật trong decision log này
   assessment finalization, completion percentage hay contribution finalized.
 - Lý do: Assessment không có application lifecycle/HTTP; candidate PeerReview cho phép
   reviewer thấy các member khác nhưng không chứng minh obligation denominator hoặc completion.
+
+## DEC-053 — Course report export là XLSX local snapshot, không phải bảng điểm
+
+- Quyết định: dùng Apache POI `poi-ooxml` hiện hữu để tạo attachment XLSX nhiều sheet
+  cho `GET /api/admin/reports/courses/{courseId}/export`; không thêm dependency hoặc
+  endpoint download thứ hai.
+- Phạm vi dữ liệu: Course, Team Member, Sprint/Task active canonical local và raw
+  PeerReview không comment. Loại Assessment và Contribution calculation do thiếu lifecycle
+  grade/finalization hoặc chi phí toàn Course.
+- Privacy: không export email, Cognito subject, provider/external ID, token, secret,
+  raw payload hay comment Peer Review. Filename chỉ dùng Course code đã sanitize.

@@ -57,3 +57,10 @@ theo Course active; nhận `keyword`, `semesterId`, `lecturerId`. Contract chỉ
 local current counts Team, Student distinct, Project, Sprint active/non-deleted theo
 state và PeerReview. Không có Assessment status/finalization, grade, completion
 percentage hay Contribution calculation toàn hệ thống.
+
+## Admin Course report export M6 — hoàn thành 2026-08-09
+
+`GET /api/admin/reports/courses/{courseId}/export` đã có cho ADMIN session. Endpoint
+trả attachment XLSX local-only, gồm Course, Team Members, Sprints, Tasks và raw
+Peer Reviews không comment. Không có Assessment/final grade/Contribution sheet, không
+gọi provider và không export email, Cognito subject hay credential.

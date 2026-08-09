@@ -104,6 +104,7 @@ class GeneratedOpenApiDocumentationIntegrationTest {
         assertTrue(root.path("paths").has("/api/admin/system-stats"));
         assertTrue(root.path("paths").has("/api/admin/teams"));
         assertTrue(root.path("paths").has("/api/admin/projects"));
+        assertTrue(root.at("/paths/~1api~1admin~1reports~1courses~1{courseId}~1export/get").isObject());
         JsonNode adminStatusPatch = root.at("/paths/~1api~1admin~1users~1{id}~1status/patch");
         assertTrue(adminStatusPatch.isObject());
         assertTrue(adminStatusPatch.toString().contains("AdminUserStatusRequest"));

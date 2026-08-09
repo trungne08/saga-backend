@@ -690,3 +690,15 @@ và reliability regression 20 tests đều pass.
 - **TBD:** Assessment không có HTTP/lifecycle ứng dụng chứng minh; PeerReview không có
   denominator obligation để suy diễn phần trăm completion. Contribution là aggregate
   hiện tại nhưng không được chạy theo toàn bộ Team trong endpoint này.
+
+## Cập nhật 2026-08-09 — Admin Course report export M6
+
+- **CONFIRMED:** `GET /api/admin/reports/courses/{courseId}/export` là ADMIN-only,
+  session browser, GET không CSRF, local-only. Response là attachment XLSX no-store với
+  filename deterministic đã sanitize từ Course code.
+- **CONFIRMED:** XLSX có năm sheet: Course, Team Members, Sprints active/non-deleted,
+  Tasks active/non-deleted và Peer Reviews raw. Không gọi Jira/GitHub, không dùng
+  Lecturer Analytics hay `ContributionCalculationService` theo Team.
+- **CONFIRMED:** không export email, Cognito subject, credential/provider ID, comment
+  Peer Review, Assessment hay Contribution. File không là final grade, transcript,
+  finalized score hoặc completed assessment.

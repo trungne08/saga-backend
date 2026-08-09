@@ -8,6 +8,7 @@ import org.springframework.stereotype.Repository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.repository.query.Param;
 
 import java.util.UUID;
@@ -26,6 +27,9 @@ public interface CourseRepository extends JpaRepository<Course, UUID>, JpaSpecif
     boolean existsBySemesterId(UUID semesterId);
 
     Optional<Course> findByIdAndDeletedAtIsNull(UUID id);
+
+    @EntityGraph(attributePaths = {"semester", "subject", "clazz", "instructor"})
+    Optional<Course> findWithReportDetailsByIdAndDeletedAtIsNull(UUID id);
 
     Page<Course> findAllByDeletedAtIsNull(Pageable pageable);
 

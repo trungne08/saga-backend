@@ -38,4 +38,9 @@ public interface PeerReviewRepository extends JpaRepository<PeerReview, UUID> {
         List<PeerReview> findByRevieweeIdAndSprintId(UUID revieweeId, UUID sprintId);
 
         List<PeerReview> findByRevieweeIdAndSprintBoardProjectId(UUID revieweeId, UUID projectId);
+
+        @EntityGraph(attributePaths = {"sprint", "reviewer", "reviewee"})
+        List<PeerReview> findBySprintBoardProjectCourseIdAndSprintDeletedAtIsNullOrderByCreatedAtAscIdAsc(
+                        UUID courseId
+        );
 }

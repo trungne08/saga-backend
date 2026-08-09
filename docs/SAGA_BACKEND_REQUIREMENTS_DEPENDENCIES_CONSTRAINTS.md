@@ -662,3 +662,12 @@ chặn nullable repair.
   PeerReview count. Course tombstone không xuất hiện. Không có field score/grade/completion.
 - Assessment có `student`, `lecturer`, `rubric`, `score`, `note` nhưng không status,
   finalized/submitted field hay service/controller application flow; không dùng overview.
+
+## Cập nhật 2026-08-09 — Admin Course report export M6
+
+- Report là XLSX read-only nhiều sheet; Course tombstone bị 404, Sprint/Task tombstone
+  bị loại. Repository bulk-load Course details, memberships, Sprints, Tasks và PeerReview
+  với entity graph cần thiết; không có N+1 theo Team/member/Sprint/review.
+- Không có Assessment/grade, contribution aggregate, review comment hoặc email trong
+  workbook. Dữ liệu chỉ là local operational snapshot hiện hữu, không chứng minh lifecycle
+  hoàn tất nào.

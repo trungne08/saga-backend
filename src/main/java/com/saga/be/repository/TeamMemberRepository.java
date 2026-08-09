@@ -9,6 +9,8 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 @Repository
@@ -43,6 +45,14 @@ public interface TeamMemberRepository extends JpaRepository<TeamMember, UUID> {
 
     @EntityGraph(attributePaths = {"student", "team", "team.project"})
     List<TeamMember> findByTeamCourseId(UUID courseId);
+
+    @EntityGraph(attributePaths = {"student", "team", "team.project"})
+    @Query("""
+            select membership from TeamMember membership
+            where membership.team.course.id = :courseId
+            order by lower(membership.team.name), lower(membership.student.studentCode), membership.id
+            """)
+    List<TeamMember> findForCourseReportByCourseId(@Param("courseId") UUID courseId);
 
     @EntityGraph(attributePaths = {"student", "team", "team.project"})
     Page<TeamMember> findByTeamId(UUID teamId, Pageable pageable);
