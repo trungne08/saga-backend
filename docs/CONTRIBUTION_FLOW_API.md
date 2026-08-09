@@ -548,11 +548,28 @@ Các điểm dưới đây là behavior/risk hiện tại, chưa được mô t�
 
 ## Cập nhật 2026-08-09 — trạng thái rubric database
 
-- Runtime/baselined production được báo cáo có V10/V13 `SUCCESS`, nhưng
-  `rubric_template` hiện có 0 row và `subject_id` vẫn `NOT NULL`. Vì vậy các ví dụ
-  bốn rubric/UUID phía trên chỉ là SQL/sample lịch sử, không phải runtime guarantee.
+- Trước V22, runtime/baselined production được báo cáo có V10/V13 `SUCCESS`,
+  `rubric_template` có 0 row và `subject_id` `NOT NULL`. Các ví dụ bốn rubric/UUID
+  phía trên vì thế chỉ là SQL/sample lịch sử, không phải runtime guarantee.
 - V22 chỉ làm nullable `subject_id` cho **EXISTING_BASELINED_DB_UPGRADE**; không seed
   default/global rubric. FE tiếp tục phải xử lý `criteria: []` và không hard-code ID.
 - **REPLAY_FROM_EXTERNAL_V1_BASELINE** cần baseline legacy và decision riêng trước
   V13; **TRUE_EMPTY_DATABASE_BOOTSTRAP** là `BLOCKED_EXISTING_BASELINE_GAP`.
 - Không có thay đổi authorization, visibility, submit hoặc contribution trong update này.
+- **Runtime verification 2026-08-09:** V22 `SUCCESS`; `subject_id` hiện nullable
+  `char(36)` và rubric row count vẫn 0. Không seed global/default rubric; FE tiếp tục
+  xử lý `criteria: []` và không hard-code ID.
+
+## Cập nhật 2026-08-09 — active rubric và Admin global management M4B
+
+- Resolver cho default GET, Team GET và detailed submit chỉ dùng rubric
+  `deleted_at IS NULL`: global active non-empty ưu tiên; nếu global active rỗng thì
+  fallback rubric Subject active. Khi cả hai rỗng, default có thể `[]` và detailed
+  submit giữ lỗi 400 hiện hữu; starRating-only không đổi.
+- Admin chỉ CRUD global active qua ba route `/api/admin/peer-review-rubrics`;
+  DELETE tạo tombstone, không hard-delete. History `PeerReviewDetail` và `Assessment`
+  không bị cascade/rewrite và vẫn dereference rubric tombstone.
+- Tối đa 4 global active do `criteriaRatings @Size(max=4)`; không yêu cầu bốn
+  rubric, total weight 100 hoặc criteriaName unique. Scoring và Contribution không đổi.
+- V23 chỉ thêm `rubric_template.deleted_at DATETIME(6) NULL`; runtime production V23
+  vẫn **TBD**.

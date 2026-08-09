@@ -7,6 +7,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.saga.be.dto.request.PeerReviewCriterionRequest;
@@ -97,7 +99,7 @@ class PeerReviewServiceTest {
                 .thenReturn(Optional.empty());
         when(sprintRepository.findByIdAndBoardProjectId(fixture.sprint.getId(), fixture.team.getProject().getId()))
                 .thenReturn(Optional.of(fixture.sprint));
-        when(rubricTemplateRepository.findBySubjectIdOrderByCreatedAtAsc(fixture.team.getCourse().getSubject().getId()))
+        when(rubricTemplateRepository.findBySubjectIdAndDeletedAtIsNullOrderByCreatedAtAsc(fixture.team.getCourse().getSubject().getId()))
                 .thenReturn(fixture.rubrics);
         when(peerReviewRepository.saveAndFlush(any(PeerReview.class))).thenAnswer(invocation -> {
             PeerReview peerReview = invocation.getArgument(0);
@@ -177,7 +179,7 @@ class PeerReviewServiceTest {
     void getPeerReviewRubricReturnsSubjectCriteriaForStudentForm() {
         Fixture fixture = fixture();
 
-        when(rubricTemplateRepository.findBySubjectIdOrderByCreatedAtAsc(fixture.team.getCourse().getSubject().getId()))
+        when(rubricTemplateRepository.findBySubjectIdAndDeletedAtIsNullOrderByCreatedAtAsc(fixture.team.getCourse().getSubject().getId()))
                 .thenReturn(fixture.rubrics);
 
         PeerReviewRubricResponse response = service.getPeerReviewRubric(
@@ -195,13 +197,45 @@ class PeerReviewServiceTest {
     void getDefaultPeerReviewRubricReturnsGlobalCriteria() {
         Fixture fixture = fixture();
 
-        when(rubricTemplateRepository.findBySubjectIdIsNullOrderByCreatedAtAsc())
+        when(rubricTemplateRepository.findBySubjectIdIsNullAndDeletedAtIsNullOrderByCreatedAtAsc())
                 .thenReturn(fixture.rubrics);
 
         PeerReviewDefaultRubricResponse response = service.getDefaultPeerReviewRubric();
 
         assertEquals(4, response.criteria().size());
         assertEquals("Communication", response.criteria().get(0).criteriaName());
+    }
+
+    @Test
+    void activeGlobalRubricsTakePrecedenceOverSubjectSpecificRubrics() {
+        Fixture fixture = fixture();
+        RubricTemplate global = rubric(null, "Global");
+
+        when(rubricTemplateRepository.findBySubjectIdIsNullAndDeletedAtIsNullOrderByCreatedAtAsc())
+                .thenReturn(List.of(global));
+
+        PeerReviewRubricResponse response = service.getPeerReviewRubric(
+                studentPrincipal(fixture.reviewer.getId()), fixture.team.getId());
+
+        assertEquals(List.of("Global"), response.criteria().stream()
+                .map(item -> item.criteriaName()).toList());
+        verify(rubricTemplateRepository, never()).findBySubjectIdAndDeletedAtIsNullOrderByCreatedAtAsc(
+                fixture.team.getCourse().getSubject().getId());
+    }
+
+    @Test
+    void tombstonedGlobalRubricsDoNotBlockSubjectSpecificFallback() {
+        Fixture fixture = fixture();
+
+        when(rubricTemplateRepository.findBySubjectIdIsNullAndDeletedAtIsNullOrderByCreatedAtAsc())
+                .thenReturn(List.of());
+        when(rubricTemplateRepository.findBySubjectIdAndDeletedAtIsNullOrderByCreatedAtAsc(
+                fixture.team.getCourse().getSubject().getId())).thenReturn(fixture.rubrics);
+
+        PeerReviewRubricResponse response = service.getPeerReviewRubric(
+                studentPrincipal(fixture.reviewer.getId()), fixture.team.getId());
+
+        assertEquals(4, response.criteria().size());
     }
 
     @Test

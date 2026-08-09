@@ -567,16 +567,33 @@ Không có secret hoặc thông tin đăng nhập thật trong decision log này
 - Quyết định: authorization Team Sprint phải chạy trước nhánh `project == null`, tránh lộ state Team cho actor không có quyền.
 - Quyết định: generic/framework error được serialize an toàn theo `ApiErrorResponse`; provider/domain error từ `IntegrationException` không bị map sang code generic.
 
-## DEC-032 — V22 chỉ repair upgrade database đã baseline
+## DEC-050 — V22 chỉ repair upgrade database đã baseline
 
 - Quyết định: thêm `V22__make_rubric_subject_nullable.sql` với đúng một thay đổi
   `rubric_template.subject_id CHAR(36) NULL`; không sửa V10/V13 có checksum runtime
   production, không seed data và không cleanup duplicate FK trong cùng migration.
-- Phạm vi: **EXISTING_BASELINED_DB_UPGRADE**. V10/V13 đã thành công trên runtime
-  được báo cáo, nhưng schema hiện tại không khớp JPA nullable.
+- Phạm vi: **EXISTING_BASELINED_DB_UPGRADE**. Trước V22, V10/V13 đã thành công trên
+  runtime được báo cáo nhưng schema chưa khớp JPA nullable.
 - Hệ quả: **REPLAY_FROM_EXTERNAL_V1_BASELINE** phải có baseline legacy và decision
   riêng vì V13 chèn global `NULL`; **TRUE_EMPTY_DATABASE_BOOTSTRAP** vẫn blocked do
   V1 không nằm trong repository. Không bật `outOfOrder`, không đổi validation/ignore
   pattern để chèn migration trước V13.
 - Evidence: V10, V13, V22, `RubricTemplate`, `application.properties`, runtime facts
   do người dùng cung cấp và `RubricMigrationContractTest`.
+- Runtime verification 2026-08-09: V19/V20/V21/V22 đều `SUCCESS`; nullable/column
+  state production khớp V19–V22 và duplicate FK không chặn V22. Không cleanup FK,
+  seed rubric hoặc mở CRUD từ fact này.
+
+## DEC-051 — Admin chỉ quản lý global rubric active qua soft-delete
+
+- Quyết định: thêm CRUD ADMIN cho `/api/admin/peer-review-rubrics`, chỉ áp dụng
+  `subject_id = NULL` và `deleted_at IS NULL`; không có batch hay subject-specific
+  CRUD. POST/PUT/DELETE dùng session browser + CSRF.
+- Ràng buộc: criteriaName trim/non-blank, weight bắt buộc, description nullable;
+  active global không quá 4 do `PeerReviewRequest.criteriaRatings @Size(max=4)`.
+  Cho phép zero active; không enforce 100%, uniqueness hoặc rebalance.
+- Retention: V23 thêm `deleted_at` nullable và DELETE set timestamp; không hard-delete,
+  cascade hoặc rewrite `PeerReviewDetail`/`Assessment`. Lookup cấu hình mới active-only,
+  lookup reference history vẫn cho phép tombstone.
+- Evidence: `AdminPeerReviewRubricIntegrationTest`, `PeerReviewServiceTest`,
+  `RubricMigrationContractTest` và OpenAPI test pass. Runtime production V23: **TBD**.

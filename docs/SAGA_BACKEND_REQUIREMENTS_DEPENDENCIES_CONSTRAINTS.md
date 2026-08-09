@@ -593,8 +593,9 @@ Full `./mvnw.cmd test` tại checkpoint hiện tại: **70 suites, 299 tests, 0 
   COLUMN subject_id CHAR(36) NULL`. Không có DML, không sửa V10/V13, không thêm
   dependency/config Flyway và không thay JPA `ddl-auto=validate`.
 - `RubricMigrationContractTest` pass; full Maven pass 105 suites / 646 tests /
-  0 failures / 0 errors / 0 skipped. Đây là source/application regression, không
-  chứng minh MySQL runtime execution của V22.
+  0 failures / 0 errors / 0 skipped. Test không thay thế MySQL execution; runtime
+  fact 2026-08-09 xác nhận V22 `SUCCESS`, `subject_id` nullable `char(36)`, row count
+  rubric giữ 0 và duplicate FK không chặn alteration.
 - **REPLAY_FROM_EXTERNAL_V1_BASELINE:** không implement. Với default Flyway
   `outOfOrder=false`, một migration mới version `12.1` xuất hiện khi DB đã ở V18/V21
   sẽ ở trạng thái ignored; validation mặc định không ignore `versioned:ignored`, nên
@@ -633,3 +634,22 @@ WHERE TABLE_SCHEMA = DATABASE()
 
 SELECT COUNT(*) FROM rubric_template;
 ```
+
+**Runtime fact 2026-08-09:** postflight production đã xác nhận V19/V20/V21/V22
+`SUCCESS`; `semester.deleted_at`/`course.deleted_at` nullable `datetime(6)`;
+`lecturer.account_status` `NOT NULL varchar(20) DEFAULT 'ACTIVE'`; rubric subject
+nullable `char(36)`, 0 row. Duplicate FK vẫn tồn tại, không được cleanup và không
+chặn nullable repair.
+
+## Cập nhật 2026-08-09 — ràng buộc Admin global rubric M4B
+
+- `rubric_template.deleted_at` do V23 bổ sung nullable; row cũ mặc định active.
+  Migration additive, không seed, cleanup FK hay thay migration cũ; production V23 **TBD**.
+- Mutation admin chỉ cho global active rubric. Missing/tombstone trả 404;
+  subject-specific bị từ chối có kiểm soát và không mutate; fifth active global
+  bị conflict. Security là `ROLE_ADMIN` + session/CSRF, không bearer.
+- Current-form resolver loại tombstone cho cả global và Subject; global active
+  non-empty có precedence. Entity không có global filter nên historical
+  `PeerReviewDetail`/`Assessment` vẫn giữ reference rubric tombstone.
+- Không thay đổi `PeerReviewRequest @Size(max=4)`, scoring, Contribution, AccountStatus,
+  Course, Import, Jira/GitHub hay authorization Peer Review.

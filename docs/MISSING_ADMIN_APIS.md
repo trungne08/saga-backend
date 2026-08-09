@@ -34,3 +34,18 @@ Peer Review. **REPLAY_FROM_EXTERNAL_V1_BASELINE** cần baseline/compatibility d
 **TRUE_EMPTY_DATABASE_BOOTSTRAP** là `BLOCKED_EXISTING_BASELINE_GAP`. Admin Rubric CRUD
 vẫn là missing có chủ đích cho đến khi policy cấu trúc, retention và migration replay
 được chốt.
+
+Runtime verification 2026-08-09 xác nhận V22 `SUCCESS`, rubric `subject_id` nullable
+và 0 row. Duplicate FK vẫn tồn tại nhưng không chặn repair; không cleanup FK, seed
+rubric hoặc mở Admin CRUD.
+
+## Rubric Admin M4B — CRUD global active, 2026-08-09
+
+Thay thế trạng thái M4-R2 phía trên cho phạm vi M4B: đã có `POST`, `PUT`,
+`DELETE /api/admin/peer-review-rubrics` dành riêng cho ADMIN session + CSRF. Chỉ
+rubric global active (`subject_id NULL`, `deleted_at NULL`) nằm trong scope; không
+có API batch hay CRUD rubric theo Subject.
+
+DELETE là soft-delete và giữ history; active global tối đa 4, có thể là 0.
+Không suy diễn ràng buộc 100% hay uniqueness. V23 còn cần production deploy/runtime
+verification.

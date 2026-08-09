@@ -1127,6 +1127,20 @@ type SprintListResponse = {
 | --- | --- | --- | --- | --- |
 | GET | `/api/v1/peer-review-rubrics/default` | Không có annotation riêng | Mọi authenticated session; global rubric được ưu tiên, Subject rubric chỉ dùng khi không có global | `200 PeerReviewDefaultRubricResponse` |
 | GET | `/api/v1/teams/{teamId}/peer-review-rubric` | Không có annotation riêng | ADMIN; LECTURER là Course instructor; STUDENT thuộc Team | `200 PeerReviewRubricResponse` |
+
+### Admin global rubric M4B
+
+| Method | Route | Quyền | Request | Kết quả |
+|---|---|---|---|---|
+| POST | `/api/admin/peer-review-rubrics` | ADMIN, session + CSRF | `criteriaName`, `weight`, `description` | `201`; tạo global rubric active |
+| PUT | `/api/admin/peer-review-rubrics/{id}` | ADMIN, session + CSRF | ba field như POST | `200`; chỉ global active |
+| DELETE | `/api/admin/peer-review-rubrics/{id}` | ADMIN, session + CSRF | không body | `204`; soft-delete |
+
+FE không gửi `subjectId`, id, actor hay `deletedAt`. `criteriaName` bị trim;
+weight là required. Tối đa bốn global rubric active; không có rule total weight
+hoặc uniqueness. Missing/tombstone là 404; rubric Subject không nằm trong scope
+admin global. Default/Team form chỉ nhận rubric active; FE phải tiếp tục xử lý
+`criteria: []` khi không có global active và không có fallback Subject.
 | GET | `/api/v1/teams/{teamId}/sprints/{sprintId}/peer-reviews/candidates` | ADMIN, STUDENT | Service thực tế chỉ chấp nhận STUDENT thuộc Team; ADMIN bị `403` | `200 PeerReviewCandidatesResponse` |
 | POST | `/api/v1/teams/{teamId}/sprints/{sprintId}/peer-reviews` | ADMIN, STUDENT | Service thực tế chỉ chấp nhận STUDENT thuộc Team; ADMIN bị `403` | `200 PeerReviewResponse` |
 | GET | `/api/v1/teams/{teamId}/sprints/{sprintId}/peer-reviews` | ADMIN, LECTURER, STUDENT | ADMIN; LECTURER là Course instructor; STUDENT thuộc Team | `200 SprintPeerReviewResponse` |

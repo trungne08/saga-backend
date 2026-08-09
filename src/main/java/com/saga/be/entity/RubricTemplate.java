@@ -1,5 +1,6 @@
 package com.saga.be.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
@@ -7,6 +8,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -34,4 +36,8 @@ public class RubricTemplate extends BaseEntity {
 
     @Column(name = "description")
     private String description;
+
+    @JsonIgnore
+    @Column(name = "deleted_at")
+    private LocalDateTime deletedAt;
 }

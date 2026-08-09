@@ -637,9 +637,9 @@ và reliability regression 20 tests đều pass.
 
 ## Cập nhật 2026-08-09 — Rubric schema repair M4-R2
 
-- **CONFIRMED (runtime fact do người dùng cung cấp):** Flyway production đã ghi V10 và
-  V13 thành công; `rubric_template.subject_id` vẫn là `CHAR(36) NOT NULL`, bảng có
-  0 row và V10 tạo hai FK cùng trỏ `subject(id)`.
+- **CONFIRMED (runtime fact trước V22 do người dùng cung cấp):** Flyway production
+  đã ghi V10 và V13 thành công; `rubric_template.subject_id` là `CHAR(36) NOT NULL`,
+  bảng có 0 row và V10 tạo hai FK cùng trỏ `subject(id)`.
 - **CONFIRMED:** V22 chỉ dành cho **EXISTING_BASELINED_DB_UPGRADE**: đổi
   `rubric_template.subject_id` thành nullable, không seed/sửa/xóa rubric và không
   đổi Peer Review. `RubricTemplate.subject` đã nullable trong JPA.
@@ -652,3 +652,29 @@ và reliability regression 20 tests đều pass.
 - **CONFIRMED:** `RubricMigrationContractTest` khóa source V10/V13 và nội dung tối
   thiểu của V22. Full Maven pass 105 suites / 646 tests / 0 failures / 0 errors /
   0 skipped. Đây không phải MySQL execution evidence.
+
+### Runtime verification production sau V22 — 2026-08-09
+
+- **CONFIRMED (runtime fact do người dùng cung cấp):** V19, V20, V21 và V22 đều
+  `SUCCESS`. `semester.deleted_at` và `course.deleted_at` là nullable `datetime(6)`;
+  `lecturer.account_status` là `varchar(20) NOT NULL DEFAULT 'ACTIVE'`;
+  `rubric_template.subject_id` là nullable `char(36)` và rubric row count vẫn 0.
+- **CONFIRMED:** duplicate FK rubric subject vẫn tồn tại nhưng không chặn V22 alter.
+  Không suy diễn rằng FK đã được cleanup; không có seed rubric, Admin CRUD hay thay
+  đổi Peer Review.
+
+## Cập nhật 2026-08-09 — Admin global rubric M4B
+
+- **CONFIRMED:** `RubricTemplate` có `deletedAt`; V23 chỉ bổ sung
+  `rubric_template.deleted_at DATETIME(6) NULL`. Không sửa V10/V13/V22, không
+  seed, không drop duplicate FK. Runtime production của V23 là **TBD**.
+- **CONFIRMED:** ADMIN qua browser session + CSRF có `POST`, `PUT`, `DELETE`
+  `/api/admin/peer-review-rubrics`; chỉ quản lý rubric global active
+  (`subject_id = NULL`). Không có bearer, batch API hay CRUD subject-specific.
+- **CONFIRMED:** criteriaName được trim và non-blank; weight bắt buộc;
+  description nullable. Tối đa 4 global rubric active, cho phép 0; không
+  enforce tổng weight = 100 hay uniqueness criteriaName.
+- **CONFIRMED:** DELETE chỉ set tombstone, không hard-delete/cascade. Resolver
+  cấu hình hiện tại chỉ lấy active global rồi fallback active Subject; reference history
+  vẫn dereference được tombstone. `PeerReviewRequest` `@Size(max = 4)`, scoring
+  và Contribution không đổi.

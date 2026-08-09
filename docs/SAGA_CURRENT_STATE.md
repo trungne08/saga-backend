@@ -390,9 +390,9 @@ BASE HEAD của snapshot cũ: `0bc30be`. HEAD audit hiện hành là `4f3dee9`; 
 
 ## Cập nhật 2026-08-09 — Rubric schema repair M4-R2
 
-- **Runtime fact do người dùng cung cấp:** production/baselined MySQL ghi V10/V13
-  `SUCCESS`; `rubric_template.subject_id` là `CHAR(36) NOT NULL`, có 0 rubric và hai
-  FK `subject_id -> subject(id)`.
+- **Runtime fact trước V22 do người dùng cung cấp:** production/baselined MySQL ghi
+  V10/V13 `SUCCESS`; `rubric_template.subject_id` là `CHAR(36) NOT NULL`, có 0 rubric
+  và hai FK `subject_id -> subject(id)`.
 - **Đã hoàn thành trong source:** V22 đổi duy nhất cột đó thành nullable cho
   **EXISTING_BASELINED_DB_UPGRADE**. Không có seed rubric, Admin CRUD hoặc thay đổi
   Peer Review/Contribution.
@@ -403,3 +403,26 @@ BASE HEAD của snapshot cũ: `0bc30be`. HEAD audit hiện hành là `4f3dee9`; 
 - **Tách biệt:** **REPLAY_FROM_EXTERNAL_V1_BASELINE** vẫn cần external baseline và
   compatibility decision trước V13; **TRUE_EMPTY_DATABASE_BOOTSTRAP** là
   `BLOCKED_EXISTING_BASELINE_GAP`, không tạo V1 trong milestone này.
+
+### Runtime verification production sau deploy — 2026-08-09
+
+- **CONFIRMED:** V19/V20/V21/V22 đều `SUCCESS`. `semester.deleted_at` và
+  `course.deleted_at` nullable `datetime(6)`; `lecturer.account_status` là
+  `varchar(20) NOT NULL DEFAULT 'ACTIVE'`; `rubric_template.subject_id` nullable
+  `char(36)`; rubric row count sau V22 là 0.
+- **CONFIRMED:** duplicate FK rubric subject không chặn nullable repair, nhưng vẫn
+  tồn tại. Không có cleanup FK, seed, Admin CRUD hoặc thay đổi Peer Review.
+
+## Cập nhật 2026-08-09 — Admin global rubric M4B
+
+- **CONFIRMED:** V23 additive thêm `rubric_template.deleted_at DATETIME(6) NULL`; V23
+  chưa có runtime production evidence. V10/V13/V22 và duplicate FK không bị sửa.
+- **CONFIRMED:** ba mutation admin `/api/admin/peer-review-rubrics` chỉ thao tác
+  global active rubric. POST luôn tạo `subject=null`, `deletedAt=null`; PUT giữ
+  id/subject/deletedAt; DELETE soft-delete, delete lần hai/missing/tombstone là 404.
+- **CONFIRMED:** active global tối đa 4 do compatibility `criteriaRatings max=4`;
+  active count 0 được phép để default trả `[]` và Team fallback Subject.
+  Không có invariant 100%, uniqueness, rebalance, hard-delete hay rewrite history.
+- **Verification:** targeted 43 tests pass, bao gồm V23, CRUD/security/CSRF,
+  resolver active-only, retention PeerReviewDetail/Assessment, OpenAPI và regression
+  AccountStatus/Admin read/Contribution.
