@@ -619,3 +619,16 @@ Không có secret hoặc thông tin đăng nhập thật trong decision log này
   grade/finalization hoặc chi phí toàn Course.
 - Privacy: không export email, Cognito subject, provider/external ID, token, secret,
   raw payload hay comment Peer Review. Filename chỉ dùng Course code đã sanitize.
+
+## DEC-054 — Global user import chỉ pre-provision Student và Lecturer local
+
+- Quyết định: dùng duy nhất `POST /api/admin/users/import` với multipart `role` enum
+  `STUDENT|LECTURER`; workbook không mang role tự do. ADMIN import không mở khi chưa có
+  governance bulk pre-provision.
+- Student schema exact `studentCode,email,fullName`; Lecturer `email,fullName`. Parse,
+  validate/header/formula/duplicate và preflight cross-profile hoàn tất trước mọi write;
+  transaction không partial success. Invalid file 400, identity conflict 409, success là
+  summary không chứa row identity.
+- Reuse không merge/overwrite profile/status/Cognito subject. Student mới PENDING, Lecturer
+  mới ACTIVE, subject null. Không gọi Cognito Admin API và không tạo/mutate Course, Team,
+  TeamMember, invitation/outbox, membership, role hay group.

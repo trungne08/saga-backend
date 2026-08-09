@@ -448,3 +448,16 @@ BASE HEAD của snapshot cũ: `0bc30be`. HEAD audit hiện hành là `4f3dee9`; 
   call, Assessment sheet hoặc Current Contribution sheet.
 - **Verification:** targeted XLSX parse/security/privacy/provider-isolation/OpenAPI
   regression pass. Assessment và official grade vẫn không được implement.
+
+## Admin global user import M7 — 2026-08-09
+
+- **Đã hoàn thành / CONFIRMED:** ADMIN có `POST /api/admin/users/import` multipart,
+  `role=STUDENT|LECTURER` do request enum kiểm soát; XLSX không có cột role. 200 chỉ trả
+  summary an toàn (`role`, `createdCount`, `reusedCount`); 400 file/schema/role sai, 409
+  identity conflict, 401 anonymous và 403 CSRF/role sai.
+- **Đã hoàn thành / CONFIRMED:** Student email+studentCode exact mới reuse; record mới
+  PENDING không subject/Course/Team/invitation. Lecturer email exact mới reuse; record mới
+  ACTIVE. Import không overwrite field, status, subject hay profile role hiện hữu.
+- **Đã hoàn thành / CONFIRMED:** validate toàn bộ XLSX trước write, reject formula,
+  header/required/duplicate sai; transaction rollback toàn bộ. `ADMIN` import unsupported
+  do thiếu governance. Targeted M7/OpenAPI/Course-import-idempotency: 20 tests pass.

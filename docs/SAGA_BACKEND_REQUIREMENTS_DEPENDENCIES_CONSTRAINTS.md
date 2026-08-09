@@ -671,3 +671,14 @@ chặn nullable repair.
 - Không có Assessment/grade, contribution aggregate, review comment hoặc email trong
   workbook. Dữ liệu chỉ là local operational snapshot hiện hữu, không chứng minh lifecycle
   hoàn tất nào.
+
+## Ràng buộc Admin global user import M7 — 2026-08-09
+
+- Endpoint chỉ nhận ADMIN session + CSRF. `role` enum request `STUDENT`/`LECTURER`, không
+  lấy role từ spreadsheet; `ADMIN` bị từ chối. Không thêm bearer, Cognito Admin API/group.
+- Student schema `studentCode,email,fullName`; Lecturer `email,fullName`. Một XLSX đúng một
+  sheet/header exact, required non-blank, không formula/duplicate normalized identity.
+  Không tái sử dụng schema/parser Course import.
+- Student chỉ reuse khi email/code cùng một Student; Lecturer chỉ reuse khi email là
+  Lecturer. Partial/cross-role conflict; reuse không update. New Student PENDING, Lecturer
+  ACTIVE. Không tạo Course/Team/TeamMember/invitation/outbox; không entity/migration.

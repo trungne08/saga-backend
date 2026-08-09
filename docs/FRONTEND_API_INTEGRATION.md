@@ -1252,3 +1252,20 @@ vì database chỉ giữ trạng thái hiện tại.
 - `READY`: có Sprint; HTTP 200.
 
 Team không tồn tại trả HTTP 404 với `error: "TEAM_NOT_FOUND"`. Generic error JSON dùng `timestamp`, `status`, `error`, `message`, `path`; FE phân nhánh bằng `status` và `error`, không parse `message`. Session/CSRF không đổi.
+
+## Admin global user import M7
+
+`POST /api/admin/users/import` chỉ ADMIN browser session. FE lấy CSRF qua
+`GET /api/auth/csrf`, gửi cookie session và header CSRF; không bearer. Request là
+`multipart/form-data` với `role` enum `STUDENT` hoặc `LECTURER` và `file` `.xlsx`.
+Workbook không có cột role.
+
+| role | Header exact theo thứ tự | New profile | Reuse |
+|---|---|---|---|
+| `STUDENT` | `studentCode,email,fullName` | PENDING, không Cognito subject | chỉ khi email + code cùng Student |
+| `LECTURER` | `email,fullName` | ACTIVE, không Cognito subject | chỉ khi email là Lecturer hiện hữu |
+
+Success 200: `{ "role": "STUDENT", "createdCount": 1, "reusedCount": 0 }`. Không trả
+email, studentCode, profile id hay row error. Invalid file/schema/role 400; partial hoặc
+cross-profile identity 409; anonymous 401; sai role/CSRF 403. Không tạo Course, Team,
+membership, invitation hay Cognito account.

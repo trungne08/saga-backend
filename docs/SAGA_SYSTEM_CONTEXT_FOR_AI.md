@@ -702,3 +702,18 @@ và reliability regression 20 tests đều pass.
 - **CONFIRMED:** không export email, Cognito subject, credential/provider ID, comment
   Peer Review, Assessment hay Contribution. File không là final grade, transcript,
   finalized score hoặc completed assessment.
+
+## Admin global user import M7 — 2026-08-09
+
+- **CONFIRMED:** `POST /api/admin/users/import` là ADMIN-only, browser session + CSRF,
+  multipart `role` enum (`STUDENT` hoặc `LECTURER`) và `file`; không có bearer hay role
+  tự do trong workbook. Response chỉ trả `role`, `createdCount`, `reusedCount`.
+- **CONFIRMED:** Student dùng normalizer email trim/lower và studentCode trim/upper. Cặp
+  identity phải match cùng một Student để reuse; partial/cross-profile conflict trả 409.
+  Student mới là `PENDING`, không có Cognito subject; first login bind cặp chính xác.
+- **CONFIRMED:** Lecturer email exact được reuse không overwrite status, subject hay fullName.
+  Lecturer mới `ACTIVE`, subject null; first login bind subject theo email. ADMIN không được
+  import vì chưa có governance bulk pre-provision.
+- **CONFIRMED:** parser XLSX M7 tách hoàn toàn Course import; toàn bộ validate và identity
+  preflight chạy trước write trong một transaction. Không tạo Course, Team, TeamMember,
+  invitation/outbox, Cognito user/group hay mutate profile hiện hữu.

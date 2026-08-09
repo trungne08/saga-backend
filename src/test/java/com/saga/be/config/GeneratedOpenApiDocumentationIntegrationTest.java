@@ -100,6 +100,7 @@ class GeneratedOpenApiDocumentationIntegrationTest {
         assertFalse(taskCreateRequired.toString().contains("issueTypeId"));
         assertFalse(taskCreateRequired.toString().contains("priorityId"));
         assertTrue(root.path("paths").has("/api/admin/users"));
+        assertTrue(root.at("/paths/~1api~1admin~1users~1import/post").isObject());
         assertTrue(root.path("paths").has("/api/admin/audit-logs"));
         assertTrue(root.path("paths").has("/api/admin/system-stats"));
         assertTrue(root.path("paths").has("/api/admin/teams"));

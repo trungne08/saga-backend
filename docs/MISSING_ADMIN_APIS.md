@@ -64,3 +64,12 @@ percentage hay Contribution calculation toàn hệ thống.
 trả attachment XLSX local-only, gồm Course, Team Members, Sprints, Tasks và raw
 Peer Reviews không comment. Không có Assessment/final grade/Contribution sheet, không
 gọi provider và không export email, Cognito subject hay credential.
+
+## Admin global user import M7 — hoàn thành 2026-08-09
+
+`POST /api/admin/users/import` không còn missing cho pre-provision local **STUDENT** và
+**LECTURER**. Nó không là CRUD/role-management tổng quát: ADMIN session + CSRF, multipart
+`role=STUDENT|LECTURER`, XLSX schema tách theo role và chỉ response summary an toàn. Không
+import ADMIN, không tạo Cognito user/group, Course, Team, membership hoặc invitation.
+Bulk Admin provisioning, Admin governance, role mutation và Course assignment vẫn là
+**MISSING CÓ CHỦ ĐÍCH**.

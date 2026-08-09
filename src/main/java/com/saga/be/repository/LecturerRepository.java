@@ -5,6 +5,10 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.stereotype.Repository;
 import java.util.Optional;
+import java.util.Collection;
+import java.util.List;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import java.util.UUID;
 
 @Repository
@@ -12,4 +16,7 @@ public interface LecturerRepository extends JpaRepository<Lecturer, UUID>, JpaSp
     Optional<Lecturer> findByCognitoSub(String cognitoSub);
 
     Optional<Lecturer> findByEmailIgnoreCase(String email);
+
+    @Query("select lecturer from Lecturer lecturer where lower(lecturer.email) in :emails")
+    List<Lecturer> findAllByNormalizedEmailIn(@Param("emails") Collection<String> emails);
 }

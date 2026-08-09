@@ -133,3 +133,16 @@ outbox as enrollment. GET uses the existing browser session and needs no CSRF.
 Jira label snapshot persistence is separate from import/provisioning: it does not create, delete or change Student, TeamMember, invitation or identity data. Labels remain internal Task classification data; no Task HTTP API or Jira task creation API is introduced.
 
 Tests cover matching/conflicts/status/idempotency, competitive bind, multi-course role preservation, import rollback/dedup, outbox template/dedup, concurrent claims, stale recovery, retry and delivery failure. `CourseTeamMembershipGuardIntegrationTest` also covers same-Team idempotency/role preservation, same-Course conflict 409, independent roles in different Courses, HTTP conflict and two independent competing transactions with a fresh final query. `MyCourseTeamMembersIntegrationTest` covers Student self-scope, no membership/legacy data, project nullable, privacy, pagination and OpenAPI. Kết quả `./mvnw.cmd test` tại working tree hiện tại là **70 suites / 299 tests / 0 failures / 0 errors / 0 skipped**.
+
+## Global admin pre-provisioning M7 — 2026-08-09
+
+`POST /api/admin/users/import` độc lập với Course import. ADMIN gửi CSRF-protected
+multipart `role=STUDENT` và XLSX một sheet header exact `studentCode,email,fullName`.
+`StudentIdentityNormalizer` trim/upper code, trim/lower email. New Student PENDING có
+`cognitoSub = null`; không có Course/Team/membership/invitation. First login chỉ bind khi
+email và code cùng trỏ record, sau đó PENDING thành ACTIVE.
+
+Toàn bộ workbook parse/validate/preflight trước write: header, required field, formula,
+duplicate normalized row, partial identity và cross-profile email đều bị chặn; invalid file
+400, local identity conflict 409, không partial success. Không thay parser/semantics Course
+import; invitation chỉ do Course/Team flow tạo và không phải enrollment.

@@ -173,3 +173,9 @@ Quy ước: `OAS` là response được khai báo trực tiếp trong OpenAPI; `
 | Method | Route | Success | Failure controlled | Ghi chú |
 |---|---|---|---|---|
 | GET | `/api/admin/reports/courses/{courseId}/export` | 200 XLSX attachment | 401 anonymous, 403 Lecturer/Student, 404 missing/tombstone | no-store, local-only, không phải grade |
+
+## Admin global user import M7
+
+| Method | Route | Success | Failure controlled | Ghi chú |
+|---|---|---|---|---|
+| POST | `/api/admin/users/import` | 200 `AdminUserImportResponse` | 400 file/header/required/formula/duplicate/role sai; 401 anonymous; 403 non-ADMIN hoặc CSRF; 409 cross-profile/partial identity | multipart `role=STUDENT|LECTURER`, `file`; summary không identity row; không side effect Course/Team/invitation/Cognito |
