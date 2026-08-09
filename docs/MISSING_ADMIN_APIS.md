@@ -34,3 +34,10 @@ Source/test integration xác nhận contract; browser E2E/deployed smoke là **T
 
 `ADMIN_CORE_BACKEND_STATUS = COMPLETE` cho capability core ở bảng IMPLEMENTED.
 `ADMIN_ADVANCED_SUPPORT_STATUS = DOCUMENTED_TBD_OR_BLOCKED`; đây không có nghĩa Admin 100% feature complete.
+
+## Cập nhật contract Admin users/audit — 2026-08-09
+
+| Capability | Trạng thái | Route | Ghi chú |
+|---|---|---|---|
+| Managed users | IMPLEMENTED | `GET /api/admin/users` | Chỉ Student/Lecturer, database-paged; Admin không xuất hiện trong content/count. `role=ADMIN` trả rỗng. |
+| Sanitized audit | IMPLEMENTED | `GET /api/admin/audit-logs` | `timestamp` là ISO-8601 UTC có `Z`; không trả actor/IP/raw payload; BSON Date lịch sử không cần backfill. |

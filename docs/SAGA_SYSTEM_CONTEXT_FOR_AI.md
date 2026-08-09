@@ -796,3 +796,9 @@ và reliability regression 20 tests đều pass.
 - **CONFIRMED_SOURCE/TEST:** CORS chỉ nhận explicit `FRONTEND_ORIGINS`, reject wildcard, cho credentials, `Content-Type`, `X-XSRF-TOKEN` và `Idempotency-Key`; MockMvc xác nhận preflight và CSRF/logout/account-status regressions. Đây không xác nhận browser third-party-cookie behavior.
 - **CONFIRMED_SOURCE:** `server.forward-headers-strategy=framework`; `IntegrationPublicUrlValidator` fail startup với public URL/callback không hợp lệ và yêu cầu HTTPS ngoài local/test. Railway build dùng `mvn clean package -DskipTests`, healthcheck `/actuator/health`, restart ON_FAILURE.
 - **PARTIAL/TBD_RUNTIME:** không có Spring Session/Redis/JDBC/Hazelcast. Session và OAuth state là in-memory HttpSession: one replica là điều kiện vận hành, restart làm mất session; multi-instance cần sticky session hoặc shared store. Chưa có evidence browser Cognito flow, Set-Cookie, cross-site cookie hay Railway proxy header thật.
+
+## Admin managed users and audit timestamp contract — 2026-08-09
+
+- **CONFIRMED:** `GET /api/admin/users` chỉ là danh sách tài khoản được quản lý: `STUDENT` và `LECTURER`; `ADMIN` bị loại ở union cơ sở dữ liệu trước cả phân trang nội dung và đếm `totalElements`. `role=ADMIN` vẫn hợp lệ theo enum parser hiện hữu và trả trang rỗng.
+- **CONFIRMED:** `GET /api/admin/system-stats` là chỉ số profile toàn cục riêng, vẫn đếm Admin + Lecturer + Student.
+- **CONFIRMED:** `SystemAuditLog.timestamp` là `Instant`, được ghi bằng `Instant.now()`, lưu Mongo BSON Date theo epoch-milliseconds và `GET /api/admin/audit-logs` trả ISO-8601 UTC có `Z`. BSON Date lịch sử đọc lại cùng instant; không backfill Mongo hay diễn giải lại timezone.

@@ -543,3 +543,9 @@ BASE HEAD của snapshot cũ: `0bc30be`. HEAD audit hiện hành là `4f3dee9`; 
 - **CONFIRMED_SOURCE:** prod default cookie Secure=true, SameSite=none, session HttpOnly=true; CSRF path `/`, HttpOnly=false và mirror Secure/SameSite. Cookie Domain, session Path, max-age và session timeout không explicit.
 - **PARTIAL:** Railway/source yêu cầu đúng một replica nhưng không có Spring Session/shared store. Restart/redeploy làm mất HttpSession; nhiều replica không an toàn nếu không sticky session hoặc shared store.
 - **TBD_RUNTIME:** Cognito login thật, browser cross-site cookie, proxy forwarded header, logout redirect và Railway deploy chưa được quan sát runtime.
+
+## Admin managed users và audit timestamp — 2026-08-09
+
+- **CONFIRMED:** `GET /api/admin/users` đã supersede contract cũ: chỉ `STUDENT` + `LECTURER`; `ADMIN` không có `AccountStatus` lifecycle nên bị loại trong SQL union trước pagination/count. `role=ADMIN` giữ parser enum tương thích nhưng trả page rỗng.
+- **CONFIRMED:** Audit mới dùng `Instant` → BSON Date → JSON UTC `Z`; tài liệu BSON Date cũ đọc đúng same instant, không migration/backfill. FE phải parse timestamp ISO bằng `Date`/`Intl` và format `Asia/Ho_Chi_Minh`, không cộng cứng +7.
+- **CONFIRMED:** System stats không đổi, vẫn là count profile toàn cục Admin + Lecturer + Student.

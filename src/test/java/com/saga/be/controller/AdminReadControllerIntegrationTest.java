@@ -42,6 +42,7 @@ import com.saga.be.repository.TeamRepository;
 import com.saga.be.repository.WebhookReceiptRepository;
 import com.saga.be.security.ApplicationRole;
 import com.saga.be.security.SagaPrincipal;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
@@ -121,8 +122,9 @@ class AdminReadControllerIntegrationTest {
     void usersAreDatabasePagedFilteredAndSanitized() throws Exception {
         Admin admin = adminRepository.saveAndFlush(Admin.builder().cognitoSub("secret-admin-sub")
                 .email("admin@example.test").fullName("Admin Alpha").build());
-        lecturerRepository.saveAndFlush(Lecturer.builder().cognitoSub("secret-lecturer-sub")
-                .email("lecturer@example.test").fullName("Lecturer Bravo").build());
+        Lecturer lecturer = lecturerRepository.saveAndFlush(Lecturer.builder().cognitoSub("secret-lecturer-sub")
+                .email("lecturer@example.test").fullName("Lecturer Alpha")
+                .accountStatus(AccountStatus.ACTIVE).build());
         Student student = studentRepository.saveAndFlush(Student.builder().cognitoSub("secret-student-sub")
                 .studentCode("SE-01").email("student@example.test").fullName("Student Alpha")
                 .accountStatus(AccountStatus.ACTIVE).build());
@@ -132,17 +134,38 @@ class AdminReadControllerIntegrationTest {
                         .with(authentication(authenticationFor(ApplicationRole.ADMIN))))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(2))
                 .andExpect(jsonPath("$.content.length()").value(1))
-                .andExpect(jsonPath("$.content[0].localProfileId").value(admin.getId().toString()))
+                .andExpect(jsonPath("$.content[0].localProfileId").value(lecturer.getId().toString()))
                 .andReturn().getResponse().getContentAsString();
         assertFalse(response.contains("secret-admin-sub"));
         assertFalse(response.contains("secret-lecturer-sub"));
         assertFalse(response.contains("secret-student-sub"));
+
+        mockMvc.perform(get("/api/admin/users").param("keyword", "alpha")
+                        .param("page", "1").param("size", "1")
+                        .with(authentication(authenticationFor(ApplicationRole.ADMIN))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].localProfileId").value(student.getId().toString()));
+
+        String allManagedUsers = mockMvc.perform(get("/api/admin/users").param("size", "20")
+                        .with(authentication(authenticationFor(ApplicationRole.ADMIN))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(jsonPath("$.content.length()").value(2))
+                .andReturn().getResponse().getContentAsString();
+        assertFalse(allManagedUsers.contains(admin.getId().toString()));
 
         mockMvc.perform(get("/api/admin/users").param("role", "STUDENT").param("accountStatus", "ACTIVE")
                         .with(authentication(authenticationFor(ApplicationRole.ADMIN))))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(1))
                 .andExpect(jsonPath("$.content[0].localProfileId").value(student.getId().toString()))
                 .andExpect(jsonPath("$.content[0].studentCode").value("SE-01"));
+        mockMvc.perform(get("/api/admin/users").param("role", "LECTURER").param("accountStatus", "ACTIVE")
+                        .with(authentication(authenticationFor(ApplicationRole.ADMIN))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].localProfileId").value(lecturer.getId().toString()));
+        mockMvc.perform(get("/api/admin/users").param("role", "ADMIN")
+                        .with(authentication(authenticationFor(ApplicationRole.ADMIN))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(0));
         mockMvc.perform(get("/api/admin/users").param("size", "101")
                         .with(authentication(authenticationFor(ApplicationRole.ADMIN))))
                 .andExpect(status().isBadRequest());
@@ -150,8 +173,8 @@ class AdminReadControllerIntegrationTest {
 
     @Test
     void auditLogsAreNewestFirstAndDoNotExposeRawOrSensitiveFields() throws Exception {
-        SystemAuditLog newer = audit("new", LocalDateTime.of(2026, 8, 9, 10, 0));
-        SystemAuditLog older = audit("old", LocalDateTime.of(2026, 8, 8, 10, 0));
+        SystemAuditLog newer = audit("new", Instant.parse("2026-08-09T10:00:00Z"));
+        SystemAuditLog older = audit("old", Instant.parse("2026-08-08T10:00:00Z"));
         when(systemAuditLogRepository.findAll(any(org.springframework.data.domain.Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(newer, older)));
 
@@ -159,6 +182,7 @@ class AdminReadControllerIntegrationTest {
                         .with(authentication(authenticationFor(ApplicationRole.ADMIN))))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.content[0].id").value("new"))
                 .andExpect(jsonPath("$.content[0].action").value("LOGIN"))
+                .andExpect(jsonPath("$.content[0].timestamp").value("2026-08-09T10:00:00Z"))
                 .andReturn().getResponse().getContentAsString();
         assertFalse(response.contains("raw-old-payload"));
         assertFalse(response.contains("raw-new-payload"));
@@ -280,7 +304,7 @@ class AdminReadControllerIntegrationTest {
                 .andExpect(jsonPath("$.gitHub.webhookReceiptStatuses.length()").value(4));
     }
 
-    private SystemAuditLog audit(String id, LocalDateTime timestamp) {
+    private SystemAuditLog audit(String id, Instant timestamp) {
         SystemAuditLog log = new SystemAuditLog();
         log.setId(id);
         log.setAction("LOGIN");

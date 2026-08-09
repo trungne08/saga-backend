@@ -15,15 +15,13 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Repository;
 
 /**
- * A database-paged union over the three independent local profile tables.
+ * A database-paged union over managed local profile tables.
  * It never reads Cognito subject identifiers and never materializes all profiles in memory.
  */
 @Repository
 public class AdminUserReadRepository {
 
     private static final String UNION = """
-            select id, 'ADMIN' as application_role, full_name, email, null as account_status, null as student_code from admin
-            union all
             select id, 'LECTURER' as application_role, full_name, email, account_status, null as student_code from lecturer
             union all
             select id, 'STUDENT' as application_role, full_name, email, account_status, student_code from student

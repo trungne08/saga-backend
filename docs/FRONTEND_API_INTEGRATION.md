@@ -1340,3 +1340,9 @@ Success vẫn là plain text `Import danh sách sinh viên thành công!` (200),
 FE giữ `credentials: "include"`, không Bearer. Sau khi Cognito redirect hoàn tất, dùng `GET /api/auth/me` để đọc safe session identity; lấy token hiện hành qua `GET /api/auth/csrf`, rồi gửi `X-XSRF-TOKEN` cho POST/PUT/PATCH/DELETE cùng cookies. Không dùng `/auth/callback` để bắt đầu login và không giả định FE phải đọc cookie cross-origin bằng `document.cookie`.
 
 Backend chỉ cho origin explicit từ `FRONTEND_ORIGINS`; credentials=true, CORS cho `Content-Type`, `X-XSRF-TOKEN` và `Idempotency-Key`, không wildcard. `POST /api/auth/logout` cần CSRF, xóa local session/cookies rồi redirect Cognito; không có GET logout. Browser/Cognito/Railway E2E vẫn TBD: FE cần smoke test thật sau deploy cho login, `/me`, `/csrf`, mutation và logout.
+
+## Admin managed users và audit time — 2026-08-09
+
+`GET /api/admin/users` chỉ trả `STUDENT` và `LECTURER`; FE không tự lọc Admin. `role=ADMIN` hiện trả page rỗng. System stats là metric độc lập nên total profile vẫn có Admin.
+
+`GET /api/admin/audit-logs` trả `timestamp` theo ISO-8601 UTC, ví dụ `2026-08-09T16:30:00Z`. FE phải parse bằng `new Date(timestamp)` rồi format bằng `Intl.DateTimeFormat`; khuyến nghị `timeZone: "Asia/Ho_Chi_Minh"`. Không cắt chuỗi timestamp hoặc cộng `+7` thủ công.

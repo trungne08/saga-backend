@@ -767,3 +767,9 @@ chặn nullable repair.
 - `TASK_CREATE` chỉ ghi `COMPLETED` sau Jira POST đã được đánh dấu `REMOTE_SUCCEEDED`, canonical Jira GET/upsert hoàn tất và `TaskRepository.findByProjectIdAndExternalId(projectId, remoteResourceId)` xác nhận Task local để trả response. Upsert dùng transaction mới và `saveAndFlush`; lookup dùng `projectId + externalId`, không có điều kiện soft-delete.
 - Canonical fetch, upsert hoặc local confirmation fail sau remote success phải giữ `REMOTE_SUCCEEDED`, giữ remote id/key, trả `JIRA_WRITE_RECOVERY_REQUIRED` khi cần và không chuyển `FAILED`. Retry cùng `Idempotency-Key` chỉ canonical recovery; `COMPLETED` thiếu Task local fail-safe, không POST Jira.
 - Không thêm finalize từ reconciliation, hardcode Jira ID, Bearer, metadata policy, entity/schema/migration hay thay đổi authorization/session/CSRF. Runtime DEMO-8/DEMO-9 xác nhận final DB `COMPLETED`, Task local tồn tại, `safe_error_code=NULL`; WARN cũ xuất hiện sau `completed_at` do thứ tự confirmation cũ.
+
+## Ràng buộc Admin users/audit timestamp — 2026-08-09
+
+- `GET /api/admin/users` phải query và đếm chỉ trên Lecturer/Student; không được lấy page gồm Admin rồi lọc trong Java. Keyword, role `STUDENT|LECTURER` và accountStatus chạy trên cùng union. `role=ADMIN` hiện parse được và trả rỗng.
+- `GET /api/admin/system-stats` không bị đổi theo user-list contract; vẫn là tổng profile toàn cục.
+- `SystemAuditLog.timestamp` là absolute `Instant`; Mongo BSON Date là epoch-millis và Admin audit JSON phải là ISO UTC có `Z`. Không đổi JVM timezone, không cộng +7, không migration/backfill hay reinterpret historical document.
