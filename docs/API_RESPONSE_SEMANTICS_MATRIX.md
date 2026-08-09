@@ -33,10 +33,15 @@
 | GET | `/api/admin/users` | `200 Page`; empty `[]` | 401 anon, 403 non-ADMIN | none |
 | GET | `/api/admin/audit-logs` | `200 Page` newest-first; empty `[]` | 401 anon, 403 non-ADMIN | none |
 | GET | `/api/admin/system-stats` | `200`; counts may be zero | 401 anon, 403 non-ADMIN | none |
+| GET | `/api/admin/integrations/health` | `200`; local state/count có thể zero/null | 401 anon, 403 non-ADMIN | none |
 | GET | `/api/admin/teams` | `200 Page`; empty `[]` | 401 anon, 403 non-ADMIN | none |
 | GET | `/api/admin/projects` | `200 Page`; empty `[]` | 401 anon, 403 non-ADMIN | none |
 
 Query enum/page/size không hợp lệ trả `400 INVALID_REQUEST`; size là 1..100. DTO sanitize cognitoSub, token, Authorization, provider raw body, IP, raw audit values, repository URL và không có Project DELETE.
+
+`/api/admin/integrations/health` không là provider-live health: không probe Jira/GitHub và
+không trả credential, secret, webhook ID hoặc payload. `/api/admin/users/{id}/audit-logs`
+và impersonation không tồn tại do thiếu stable audit identity/session contract.
 
 Nguồn audit: OpenAPI sinh từ `/v3/api-docs` lúc chạy `GeneratedOpenApiDocumentationIntegrationTest` ngày 2026-08-07, đối chiếu controller/service/handler hiện hành. Có đúng **96 operations**; mỗi operation sinh ra có một dòng bên dưới.
 

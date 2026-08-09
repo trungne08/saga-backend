@@ -6,6 +6,43 @@
 
 **CONFIRMED:** Business request trong browser session dùng current local DB status mỗi request: ACTIVE cho phép; Student PENDING/INACTIVE/SUSPENDED và Lecturer INACTIVE/SUSPENDED bị 403. `/api/auth/me`, `/api/auth/csrf`, `/api/auth/logout` được miễn; `/me` trả current DB status. Status mutation không cascade Course, membership, Project hay provider/history.
 
+## Cập nhật 2026-08-09 — M9 Admin notification broadcast: BLOCKED sau audit
+
+**CONFIRMED:** `Notification` hiện chỉ là JPA entity cô lập với `recipientId`,
+`recipientRole`, `title`, `message`, `isRead` và các timestamp/id từ `BaseEntity`.
+Không có `NotificationRepository`, `NotificationType`, service, controller, route HTTP,
+producer, consumer, test, polling, WebSocket/SSE hay email delivery liên quan.
+
+**BLOCKED:** Flyway repository không có V1 legacy và không có migration V2–V24 nào tạo
+hoặc thay đổi `notification`; `ddl-auto=validate` không tạo schema. Vì vậy không thể
+xác nhận physical table, FK recipient, nullable/index/unique hay giới hạn title/message
+trong production. Ba profile `admin`, `lecturer`, `student` là bảng tách biệt; không có
+common user table để FK chung, còn `recipientRole` là String không có enum/constraint.
+
+**QUYẾT ĐỊNH:** Không tạo `POST /api/admin/notifications/broadcast`, không migration,
+fanout, delivery, provider call hay reuse invitation outbox. Persist-only không có consumer
+không phải capability hoàn chỉnh. Cần business contract riêng cho audience role, account
+status, plain-text bounds, read lifecycle và retention; sau đó thiết kế versioned schema
+riêng (khuyến nghị broadcast master + per-recipient receipt nếu cần read/unread từng user).
+
+**M8B:** `GENERIC_SYSTEM_SETTINGS = TBD_NOT_IMPLEMENTED_NO_CONFIRMED_GLOBAL_SETTINGS`;
+không dùng generic settings để thay thế notification domain.
+
+## Cập nhật 2026-08-09 — M10 Support & Diagnostics
+
+**CONFIRMED:** `GET /api/admin/integrations/health` là ADMIN-only local diagnostic.
+Nó trả enabled flag, linked-project count, raw count theo `IntegrationStatus`, Jira
+stored-webhook-id count, GitHub installation status count, latest persisted `lastSyncedAt`
+và webhook-receipt status count. Endpoint không inject/gọi Jira/GitHub provider và không
+trả token, credential mã hóa, secret, webhook ID, payload, URL hay Cognito subject. Đây
+không phải provider-live health và không tự tạo score HEALTHY/UNHEALTHY.
+
+**BLOCKED:** `GET /api/admin/users/{id}/audit-logs` chưa có. Mongo audit chỉ có
+`actorId` string (Cognito subject) và `localProfileId` không đồng nhất trong payload của
+một số producer; không có durable local-profile field hay matching rule cho mọi log.
+Không query/viết lại historical record để ép mapping. Impersonation, role mutation,
+password reset và manual Course add/remove cũng chưa có contract/session/governance riêng.
+
 ## Cập nhật 2026-08-09 — Audit AccountStatus M3A
 
 **CONFIRMED:** Chỉ `Student` sở hữu `AccountStatus` (`ACTIVE`, `INACTIVE`, `SUSPENDED`, `PENDING`); Admin/Lecturer không có field này. Principal trong JSESSIONID mang snapshot status từ login; không có DB status check theo request, SessionRegistry hay thu hồi session khi status DB thay đổi. First-login imported Student chỉ PENDING -> ACTIVE; ACTIVE giữ nguyên; INACTIVE/SUSPENDED bị từ chối bind/activate.
@@ -209,7 +246,7 @@ Evidence: `pom.xml`; `src/main/resources/application*.properties`; `railway.json
 | Master data Class/Course/Subject/Semester | CONFIRMED, API đơn giản |
 | Team project và authorization theo team | CONFIRMED |
 | Jira/GitHub OAuth, webhook, sync/backfill | CONFIRMED, có feature flag/config bắt buộc |
-| Đánh giá/AI/risk/meeting/notification domain | PARTIAL: entity/repository tồn tại nhưng không có controller/service API tương ứng trong source audit |
+| Đánh giá/AI/risk/meeting/notification domain | PARTIAL: entity tồn tại nhưng thiếu application flow; riêng `Notification` không có repository, controller hay service trong source audit hiện hành |
 | Import Excel sinh viên | PARTIAL: authorization course scope, transaction rollback, identity bind an toàn và invitation outbox đã có; parser/preview/error DTO/DB uniqueness vẫn chưa hoàn chỉnh |
 | Frontend application | TBD: không nằm trong repository này |
 

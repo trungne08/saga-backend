@@ -44,6 +44,11 @@ public interface JiraBoardRepository extends JpaRepository<JiraBoard, UUID> {
 
     long countByConnectionStatus(IntegrationStatus connectionStatus);
 
+    long countByWebhookIdIsNotNull();
+
+    @Query("select max(board.lastSyncedAt) from JiraBoard board")
+    LocalDateTime findLatestLastSyncedAt();
+
     List<JiraBoard> findByWebhookExpiresAtBeforeAndConnectionStatusNot(
             LocalDateTime expiresBefore,
             IntegrationStatus excludedStatus

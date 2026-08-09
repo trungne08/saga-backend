@@ -16,4 +16,6 @@ public interface GitHubInstallationRepository
     List<GitHubInstallation> findByInstallationStatus(
             GitHubInstallationStatus status
     );
+
+    long countByInstallationStatus(GitHubInstallationStatus status);
 }

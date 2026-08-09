@@ -21,6 +21,11 @@ public interface WebhookReceiptRepository
             String deliveryId
     );
 
+    long countByProviderAndReceiptStatus(
+            IntegrationProvider provider,
+            WebhookReceiptStatus receiptStatus
+    );
+
     List<WebhookReceipt> findTop100ByReceiptStatusInOrderByCreatedAtAsc(
             List<WebhookReceiptStatus> statuses
     );

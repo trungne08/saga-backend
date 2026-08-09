@@ -105,6 +105,7 @@ class GeneratedOpenApiDocumentationIntegrationTest {
         assertTrue(root.at("/paths/~1api~1admin~1settings~1active-semester/put").isObject());
         assertTrue(root.path("paths").has("/api/admin/audit-logs"));
         assertTrue(root.path("paths").has("/api/admin/system-stats"));
+        assertTrue(root.at("/paths/~1api~1admin~1integrations~1health/get").isObject());
         assertTrue(root.path("paths").has("/api/admin/teams"));
         assertTrue(root.path("paths").has("/api/admin/projects"));
         assertTrue(root.at("/paths/~1api~1admin~1reports~1courses~1{courseId}~1export/get").isObject());
@@ -120,6 +121,9 @@ class GeneratedOpenApiDocumentationIntegrationTest {
         assertFalse(adminAuditProperties.has("newValues"));
         assertFalse(adminAuditProperties.has("ipAddress"));
         assertFalse(adminProjectProperties.has("repositoryUrl"));
+        JsonNode integrationHealthProperties = root.at("/components/schemas/AdminIntegrationHealthResponse/properties");
+        assertTrue(integrationHealthProperties.has("jira"));
+        assertTrue(integrationHealthProperties.has("gitHub"));
         assertTrue(root.at("/paths/~1api~1v1~1semesters~1{id}/put").isObject());
         assertTrue(root.at("/paths/~1api~1v1~1semesters~1{id}/delete").isObject());
         assertTrue(root.at("/paths/~1api~1v1~1courses~1{id}/put").isObject());

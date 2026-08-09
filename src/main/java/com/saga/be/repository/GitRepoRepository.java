@@ -52,4 +52,10 @@ public interface GitRepoRepository extends JpaRepository<GitRepo, UUID> {
     List<GitRepo> findByProjectIdIn(List<UUID> projectIds);
 
     long countByConnectionStatus(IntegrationStatus connectionStatus);
+
+    @Query("select count(distinct repository.project.id) from GitRepo repository")
+    long countDistinctLinkedProjectId();
+
+    @Query("select max(repository.lastSyncedAt) from GitRepo repository")
+    java.time.LocalDateTime findLatestLastSyncedAt();
 }

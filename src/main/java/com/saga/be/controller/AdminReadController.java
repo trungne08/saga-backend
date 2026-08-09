@@ -2,6 +2,7 @@ package com.saga.be.controller;
 
 import com.saga.be.dto.response.AdminAuditLogResponse;
 import com.saga.be.dto.response.AdminCourseProgressOverviewResponse;
+import com.saga.be.dto.response.AdminIntegrationHealthResponse;
 import com.saga.be.dto.response.AdminProjectReadResponse;
 import com.saga.be.dto.response.AdminSystemStatsResponse;
 import com.saga.be.dto.response.AdminTeamReadResponse;
@@ -70,6 +71,12 @@ public class AdminReadController {
     @Operation(summary = "Thống kê hệ thống", description = "Đếm dữ liệu local và trạng thái integration đã lưu; không gọi Jira hoặc GitHub.")
     public ResponseEntity<AdminSystemStatsResponse> systemStats() {
         return ResponseEntity.ok(adminReadService.systemStats());
+    }
+
+    @GetMapping("/integrations/health")
+    @Operation(summary = "Trạng thái integration local", description = "Đọc trạng thái và count Jira/GitHub đã lưu tại local; không gọi provider, không trả credential, secret hay payload webhook.")
+    public ResponseEntity<AdminIntegrationHealthResponse> integrationHealth() {
+        return ResponseEntity.ok(adminReadService.integrationHealth());
     }
 
     @GetMapping("/teams")

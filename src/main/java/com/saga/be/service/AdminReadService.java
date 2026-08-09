@@ -3,6 +3,7 @@ package com.saga.be.service;
 import com.saga.be.dto.response.AdminAuditLogResponse;
 import com.saga.be.dto.response.AdminCourseProgressOverviewResponse;
 import com.saga.be.dto.response.AdminCourseProgressOverviewRow;
+import com.saga.be.dto.response.AdminIntegrationHealthResponse;
 import com.saga.be.dto.response.AdminProjectReadResponse;
 import com.saga.be.dto.response.AdminSystemStatsResponse;
 import com.saga.be.dto.response.AdminTeamReadResponse;
@@ -13,17 +14,23 @@ import com.saga.be.entity.JiraBoard;
 import com.saga.be.entity.Project;
 import com.saga.be.entity.Team;
 import com.saga.be.entity.enums.AccountStatus;
+import com.saga.be.entity.enums.GitHubInstallationStatus;
 import com.saga.be.entity.enums.IntegrationStatus;
+import com.saga.be.entity.enums.IntegrationProvider;
+import com.saga.be.entity.enums.WebhookReceiptStatus;
+import com.saga.be.config.IntegrationAvailability;
 import com.saga.be.repository.AdminRepository;
 import com.saga.be.repository.AdminUserReadRepository;
 import com.saga.be.repository.CourseRepository;
 import com.saga.be.repository.GitRepoRepository;
+import com.saga.be.repository.GitHubInstallationRepository;
 import com.saga.be.repository.JiraBoardRepository;
 import com.saga.be.repository.LecturerRepository;
 import com.saga.be.repository.ProjectRepository;
 import com.saga.be.repository.StudentRepository;
 import com.saga.be.repository.SystemAuditLogRepository;
 import com.saga.be.repository.TeamRepository;
+import com.saga.be.repository.WebhookReceiptRepository;
 import com.saga.be.security.ApplicationRole;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -58,6 +65,9 @@ public class AdminReadService {
     private final ProjectRepository projectRepository;
     private final JiraBoardRepository jiraBoardRepository;
     private final GitRepoRepository gitRepoRepository;
+    private final GitHubInstallationRepository gitHubInstallationRepository;
+    private final WebhookReceiptRepository webhookReceiptRepository;
+    private final IntegrationAvailability integrationAvailability;
 
     @Transactional(readOnly = true)
     public Page<AdminUserReadResponse> users(String keyword, ApplicationRole role,
@@ -79,6 +89,29 @@ public class AdminReadService {
         return new AdminSystemStatsResponse(profiles, courseRepository.count(), teamRepository.count(),
                 projectRepository.count(), jiraBoardRepository.countByConnectionStatus(IntegrationStatus.ACTIVE),
                 gitRepoRepository.countByConnectionStatus(IntegrationStatus.ACTIVE), OffsetDateTime.now(ZoneOffset.UTC));
+    }
+
+    /** Reads only persisted integration snapshots and safe enabled flags; never calls providers. */
+    @Transactional(readOnly = true)
+    public AdminIntegrationHealthResponse integrationHealth() {
+        return new AdminIntegrationHealthResponse(
+                new AdminIntegrationHealthResponse.JiraLocalState(
+                        integrationAvailability.jiraEnabled(),
+                        jiraBoardRepository.count(),
+                        connectionStatusCounts(jiraBoardRepository::countByConnectionStatus),
+                        jiraBoardRepository.countByWebhookIdIsNotNull(),
+                        jiraBoardRepository.findLatestLastSyncedAt(),
+                        webhookReceiptStatusCounts(IntegrationProvider.JIRA)
+                ),
+                new AdminIntegrationHealthResponse.GitHubLocalState(
+                        integrationAvailability.gitHubEnabled(),
+                        gitRepoRepository.countDistinctLinkedProjectId(),
+                        connectionStatusCounts(gitRepoRepository::countByConnectionStatus),
+                        installationStatusCounts(),
+                        gitRepoRepository.findLatestLastSyncedAt(),
+                        webhookReceiptStatusCounts(IntegrationProvider.GITHUB)
+                )
+        );
     }
 
     @Transactional(readOnly = true)
@@ -115,6 +148,31 @@ public class AdminReadService {
     private PageRequest pageRequest(int page, int size) {
         validatePage(page, size);
         return PageRequest.of(page, size, Sort.by(Sort.Order.asc("name"), Sort.Order.asc("id")));
+    }
+
+    private List<AdminIntegrationHealthResponse.ConnectionStatusCount> connectionStatusCounts(
+            java.util.function.ToLongFunction<IntegrationStatus> counter
+    ) {
+        return java.util.Arrays.stream(IntegrationStatus.values())
+                .map(status -> new AdminIntegrationHealthResponse.ConnectionStatusCount(
+                        status, counter.applyAsLong(status)))
+                .toList();
+    }
+
+    private List<AdminIntegrationHealthResponse.InstallationStatusCount> installationStatusCounts() {
+        return java.util.Arrays.stream(GitHubInstallationStatus.values())
+                .map(status -> new AdminIntegrationHealthResponse.InstallationStatusCount(
+                        status, gitHubInstallationRepository.countByInstallationStatus(status)))
+                .toList();
+    }
+
+    private List<AdminIntegrationHealthResponse.WebhookReceiptStatusCount> webhookReceiptStatusCounts(
+            IntegrationProvider provider
+    ) {
+        return java.util.Arrays.stream(WebhookReceiptStatus.values())
+                .map(status -> new AdminIntegrationHealthResponse.WebhookReceiptStatusCount(
+                        status, webhookReceiptRepository.countByProviderAndReceiptStatus(provider, status)))
+                .toList();
     }
 
     private void validatePage(int page, int size) {

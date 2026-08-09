@@ -23,6 +23,7 @@ V21 thêm `lecturer.account_status` non-null default ACTIVE; Admin không có c�
 | `GET /api/admin/users` | ADMIN | MySQL | local safe fields, DB-paged union |
 | `GET /api/admin/audit-logs` | ADMIN | Mongo | no actor/IP/raw old-new payload |
 | `GET /api/admin/system-stats` | ADMIN | MySQL | local counts and generatedAt only |
+| `GET /api/admin/integrations/health` | ADMIN | MySQL | local integration snapshot; no provider call/secret |
 | `GET /api/admin/teams` | ADMIN | MySQL | Team/Course/nullable Project summaries |
 | `GET /api/admin/projects` | ADMIN | MySQL | Project/Course/Jira local/GitHub aggregate |
 
@@ -57,7 +58,7 @@ SAGA là backend Spring Boot quản lý dữ liệu học phần/lớp/học k�
 | Trạng thái | Module thực tế |
 | --- | --- |
 | **ĐÃ TRIỂN KHAI** | Cognito OIDC session login/profile provisioning; Subject/Class/Semester/Course Create+Read; course student-import authorization; personal identity mapping; review mapping; tạo team project; Jira/GitHub project integration; webhook có xác thực; backfill, reconciliation, sync job và audit log. |
-| **PARTIAL** | Entity cho assessment, rubric, CAM, AI log, document, meeting, notification, peer review, sprint/task đã có nhưng không tìm thấy controller/service HTTP hoàn chỉnh cho các module này. Master data chưa có Update/Delete. |
+| **PARTIAL** | Entity cho assessment, rubric, CAM, AI log, document, meeting, notification, peer review, sprint/task đã có nhưng không tìm thấy controller/service HTTP hoàn chỉnh cho các module này; riêng `Notification` còn không có repository. Master data chưa có Update/Delete. |
 | **CHƯA TRIỂN KHAI / TBD** | Không có code Lambda gán role Cognito. README Lambda chỉ nhắc một Pre Token Generation Lambda khác; không được coi là đã triển khai trong repository. |
 
 Bằng chứng: `pom.xml:L10-L177`; `src/main/java/com/saga/be/controller/*`; `src/main/java/com/saga/be/integration/*`; `infra/lambda/cognito-account-linking/README.md:L1-L5`.
@@ -688,3 +689,35 @@ chặn nullable repair.
 - Không có Semester status/active field, current-date inference hoặc generic settings model. V24 thêm đúng một bảng typed `active_semester_setting`; singleton id `1`, reference Semester nullable, PK/check/FK bảo vệ cardinality và integrity.
 - `GET`/`PUT /api/admin/settings/active-semester` là ADMIN browser session. PUT yêu cầu CSRF, request tối thiểu `semesterId`; Semester missing/tombstone là 404. Same Semester được phép lặp deterministic. Không public setting/non-admin và không Bearer.
 - Setting không đổi Semester, Course hoặc Course filter. Delete Semester có thêm dependency guard setting và fail closed 409; không cascade/clear. Không provider call, AccountStatus, Rubric, Import, Contribution hay Analytics change.
+
+## Ràng buộc M9 notification broadcast — 2026-08-09
+
+- Không có contract notification hoàn chỉnh: `Notification` mapping JPA không có repository,
+  service/controller, HTTP API, producer/consumer, read API, realtime hoặc email delivery.
+  `recipientRole` là String; `recipientId` không có association/FK JPA. Không dùng invitation
+  outbox cho broadcast.
+- Source không chứng minh policy audience `ALL`/role, target account status, lifecycle read/unread,
+  retention, rich content hay content-length. Không được tự lọc account, gửi provider/Cognito,
+  hay thêm HTML/WebSocket/SSE/email semantics.
+- Flyway V1 legacy không nằm trong repository và V2–V24 không quản lý table notification;
+  `ddl-auto=validate` không thay schema. Mọi physical-schema/FK production là **TBD**.
+- Do đó `POST /api/admin/notifications/broadcast` là **BLOCKED**; migration và entity diff
+  bằng 0 trong audit này. Chỉ sau business contract + schema versioned được phê duyệt mới đánh giá
+  fanout; nếu cần read state theo user, khuyến nghị master broadcast + receipt per recipient.
+- `GENERIC_SYSTEM_SETTINGS = TBD_NOT_IMPLEMENTED_NO_CONFIRMED_GLOBAL_SETTINGS`; không dùng
+  key-value/JSON setting cho notification.
+
+## Ràng buộc M10 Support & Diagnostics — 2026-08-09
+
+- Integration health chỉ đọc local MySQL qua repository: enabled flag, count/link/state
+  Jira/GitHub, Jira stored webhook-id presence, GitHub installation state, receipt state và
+  latest persisted sync timestamp. Không dùng token/credential/property secret để xác nhận
+  “configured”, không provider network probe và không trả synthetic health score.
+- User-scoped audit bị chặn: `SystemAuditLog` lưu `actorId` string là Cognito subject;
+  `localProfileId` không phải field durable và chỉ xuất hiện trong payload của một số audit.
+  Không nhận subject từ FE, không invent mapping/heuristic hay rewrite Mongo history.
+- Không có switch-user/delegated-session/restore/audit contract. Authentication giữ Cognito
+  OIDC + browser JSESSIONID + server-side `SagaPrincipal`; không thêm JWT/Bearer/token issue.
+- Course không có enrollment entity; relation Student–Course thực tế là
+  `Student -> TeamMember -> Team -> Course`. Không thêm/remove Student khi Team, role,
+  Project và historical retention chưa được quyết định.

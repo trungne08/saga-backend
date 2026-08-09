@@ -638,3 +638,34 @@ Không có secret hoặc thông tin đăng nhập thật trong decision log này
 - Quyết định: dùng `active_semester_setting` singleton id `1`, với `semester_id` nullable FK. V24 tạo bảng additive và seed setting unset; không dùng JSON/generic system settings, không hardcode Semester ID và không thêm field vào `semester`.
 - ADMIN quản lý qua `GET`/`PUT /api/admin/settings/active-semester`; PUT chỉ nhận `semesterId`, cần browser session + CSRF. Default không được suy từ date; Semester selected phải active. GET cùng route được thêm vì FE cần đọc default filter hint, vẫn ADMIN-only.
 - Retention: `SemesterService.softDeleteSemester` có guard explicit khi setting đang reference Semester, trả 409. Không clear setting âm thầm, không cascade/hard-delete và không mutate Course. Active Semester chỉ là hint; backend không áp global Course filter.
+
+## DEC-056 — Không mở Admin notification broadcast khi notification chưa có consumer/schema contract
+
+- Ngày: 2026-08-09; trạng thái: ACCEPTED (audit-only, BLOCKED implementation).
+- Evidence: `Notification` chỉ có mapping JPA `recipientId`, `recipientRole`, `title`,
+  `message`, `isRead`; không có repository, type enum, service/controller, route, producer,
+  consumer hoặc test. Không có read endpoint, polling, WebSocket/SSE/email delivery. Invitation
+  outbox chỉ phục vụ course invitation, không là transport notification.
+- Schema: V1 là legacy baseline không có trong repository; V2–V24 không tạo/thay đổi
+  `notification` và Hibernate chỉ validate. Không khẳng định được production FK, constraint,
+  index, nullable hoặc giới hạn nội dung. `admin`/`lecturer`/`student` là profile tables riêng,
+  không có common user table hay FK đa hình an toàn.
+- Quyết định: không tạo `POST /api/admin/notifications/broadcast`, migration, generic
+  `system_setting`, delivery/provider call hay fanout chỉ để insert. Contract tiếp theo phải
+  chốt audience enum/role hỗ trợ, policy PENDING/INACTIVE/SUSPENDED, text bounds, read lifecycle,
+  retention và audit metadata. Nếu cần state đọc theo user, đề xuất broadcast master + receipt
+  per recipient trong schema versioned riêng.
+
+## DEC-057 — Integration health Admin chỉ là snapshot local, audit theo user fail-closed
+
+- Ngày: 2026-08-09; trạng thái: ACCEPTED.
+- Quyết định: thêm `GET /api/admin/integrations/health` cho ADMIN session, không CSRF.
+  Contract trả enabled flag và state/count đã lưu: JiraBoard/GitRepo connection status,
+  linked project, Jira webhook-id presence, GitHub installation status, webhook receipt
+  status và latest persisted sync timestamp. Không gọi provider, không diễn giải thành
+  provider-live health và không trả credential, secret, webhook ID, raw payload, URL hay subject.
+- Quyết định: không thêm `GET /api/admin/users/{id}/audit-logs`. `SystemAuditLog.actorId`
+  là Cognito subject; `localProfileId` chỉ nằm không đồng nhất trong `newValues` của một
+  phần producer, nên không có mapping stable/local-profile semantics cho mọi historical log.
+- Hệ quả: không triển khai impersonation, token/Bearer/JWT, role mutation, password reset
+  hoặc manual Course student add/remove trong M10. Các capability này cần contract riêng.

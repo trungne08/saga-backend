@@ -467,3 +467,33 @@ BASE HEAD của snapshot cũ: `0bc30be`. HEAD audit hiện hành là `4f3dee9`; 
 - **Đã hoàn thành / CONFIRMED:** default Semester toàn hệ thống là lựa chọn explicit của ADMIN, không suy từ `startDate`/`endDate` và không thêm status/active field vào Semester. `GET`/`PUT /api/admin/settings/active-semester` là ADMIN session; PUT CSRF-protected, body `{ "semesterId": "uuid" }`.
 - **Đã hoàn thành / CONFIRMED:** V24 thêm bảng typed singleton có FK Semester và seed singleton unset. Một setting tối đa; missing/tombstone 404, repeated PUT idempotent/deterministic. Response trả current setting, kể cả unset với field Semester null.
 - **Đã hoàn thành / CONFIRMED:** selecting không đổi Course/Semester hay ép filter Course. DELETE Semester active trả 409; không clear/cascade. Targeted M8A + Semester/migration/OpenAPI/Admin M1–M7 pass.
+
+## M9 Admin notification broadcast — BLOCKED sau audit 2026-08-09
+
+- **CONFIRMED:** `Notification` là entity JPA không được sử dụng với `recipientId`,
+  `recipientRole`, `title`, `message`, `isRead`; không có repository, enum type, service,
+  controller, route HTTP, producer, consumer hay test. Không có GET user notification,
+  polling, WebSocket/SSE hoặc email delivery; invitation outbox không phải notification transport.
+- **BLOCKED:** baseline Flyway V1 legacy không có trong repository và V2–V24 không chứa
+  migration notification, nên physical schema production (FK/nullable/index/unique/length)
+  không được xác nhận. Ba bảng profile local độc lập cũng không cung cấp common recipient FK.
+- **QUYẾT ĐỊNH:** chưa triển khai `POST /api/admin/notifications/broadcast`; insert DB không
+  có consumer là không hữu ích. Không thêm migration/model/read API/fanout khi audience,
+  policy status, retention và read lifecycle chưa có business decision.
+- **RECOMMENDED:** nếu được phê duyệt, dùng contract plain-text bounded, audience typed và
+  versioned broadcast master + receipt per recipient khi cần read/unread; không trả recipient list,
+  không gọi Cognito/provider và không reuse invitation outbox.
+- **M8B:** `GENERIC_SYSTEM_SETTINGS = TBD_NOT_IMPLEMENTED_NO_CONFIRMED_GLOBAL_SETTINGS`.
+
+## M10 Support & Diagnostics — 2026-08-09
+
+- **Đã hoàn thành / CONFIRMED:** `GET /api/admin/integrations/health` là ADMIN browser
+  session GET local-only. Response chỉ có enabled flag, linked-project count, raw
+  connection/installation/webhook-receipt status counts, Jira stored-webhook-id count và
+  latest persisted sync timestamp. Không provider call, health score synthetic, token,
+  secret, encrypted credential, webhook ID, payload, URL hoặc Cognito subject.
+- **BLOCKED:** audit Mongo không có stable `localProfileId` trên mọi event; `actorId` là
+  Cognito subject nên `GET /api/admin/users/{id}/audit-logs` không được thêm. Không có
+  impersonation/delegated session/restore/audit model; không thêm token/JWT/Bearer.
+- **TBD/BLOCKED:** role mutation và password reset cần Cognito/governance contract; Student
+  thuộc Course qua TeamMember nên manual add/remove Course không rõ Team/Project/history.

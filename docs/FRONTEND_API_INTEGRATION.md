@@ -25,10 +25,22 @@ Các API sau yêu cầu session browser `ADMIN`, gọi `credentials: "include"`;
 | `GET /api/admin/users` | keyword, role, accountStatus, page=0, size=20 (1..100) | Page local profile an toàn |
 | `GET /api/admin/audit-logs` | page=0, size=20 (1..100) | Page newest-first, không raw payload/IP/actor |
 | `GET /api/admin/system-stats` | — | local counts, active integration count, generatedAt |
+| `GET /api/admin/integrations/health` | — | Jira/GitHub local state/count; không provider-live health |
 | `GET /api/admin/teams` | page=0, size=20 (1..100) | Team/Course/nullable Project summary |
 | `GET /api/admin/projects` | page=0, size=20 (1..100) | Project/Course/Jira local/GitHub aggregate |
 
 Không phụ thuộc hay render Cognito sub, token, raw provider response, raw audit JSON, IP, repository URL hoặc secret. accountStatus chỉ có semantic cho Student.
+
+## M10 Integration health — 2026-08-09
+
+FE ADMIN gọi `GET /api/admin/integrations/health` với `credentials: "include"`; GET không
+cần CSRF hoặc Bearer. Anonymous nhận 401, Lecturer/Student 403. Chỉ render raw local state:
+`enabled`, linked-project count, status count, latest persisted sync timestamp và receipt
+count. Không coi response là ping/live availability Jira/GitHub và không hiển thị credential,
+secret, webhook ID, payload, URL hay Cognito subject.
+
+Không có route per-user audit log hoặc impersonation. FE không gửi Cognito subject/token để
+tìm audit và không có token tạm thời/Bearer flow.
 
 ## Jira Task Create metadata — 2026-08-09
 
