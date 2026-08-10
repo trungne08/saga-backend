@@ -1,3 +1,9 @@
+## J1I Estimation response contract — 2026-08-10
+
+FE vẫn gửi `{ "value": <integer không âm> }`; không đổi sang string dù Jira có thể biểu diễn estimation bằng decimal string. Backend xem canonical Task snapshot là nguồn truth và chỉ trả `200` khi `storyPoint` integer canonical đúng request.
+
+Nếu canonical provider response invalid sau Jira đã xác nhận mutation, FE giữ cùng body và `Idempotency-Key` để retry recovery; không tạo key mới, không gửi PUT lần hai. Lỗi giữ taxonomy `JIRA_RESPONSE_INVALID`/502 hiện hữu.
+
 ## J1H Jira Task Estimation recovery — 2026-08-10
 
 Với `PUT /api/v1/projects/{projectId}/tasks/{taskId}/estimation`, gửi `{ "value": <integer không âm> }` và giữ nguyên `Idempotency-Key` khi retry cùng intent. Sau remote success, backend chỉ fetch/upsert Jira canonical và trả `200` khi `storyPoint` canonical đúng value đã gửi; không gửi PUT estimation lần hai.

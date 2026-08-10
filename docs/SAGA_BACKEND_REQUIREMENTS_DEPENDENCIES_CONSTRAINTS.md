@@ -1,3 +1,9 @@
+## Ràng buộc J1I canonical Story Point parser — 2026-08-10
+
+- PUT estimation 2xx xác nhận mutation remote và không cần parse response body để finalize; canonical Jira issue GET với estimation field đã discovery là nguồn xác nhận cuối cùng.
+- Parser canonical chỉ normalise string/number decimal whole không âm bằng `BigDecimal` + exact integer conversion. Chấp nhận `0`, `0.0`, `5`, `5.0`; từ chối fractional, negative, blank, non-numeric, missing/null, object/array và overflow với `JIRA_RESPONSE_INVALID`.
+- `JIRA_RESPONSE_INVALID` sau remote success không được chuyển operation sang `FAILED`; giữ `REMOTE_SUCCEEDED`, không provider retry mù, rồi same-key recovery canonical. Public request integer, discovery field, state-machine J1H, schema/migration, isolation và auth không đổi.
+
 ## Ràng buộc J1H TASK_ESTIMATION finalization — 2026-08-10
 
 - `TASK_ESTIMATION` chỉ `COMPLETED` sau Jira Agile estimation mutation đã `REMOTE_SUCCEEDED`, canonical GET có field estimation discovery theo board, upsert và fresh `JiraCanonicalTaskReadService` xác nhận `storyPoint` bằng request integer không âm.

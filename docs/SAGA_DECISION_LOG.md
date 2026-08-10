@@ -1,3 +1,10 @@
+## DEC-065 — J1I canonical decimal normalization cho TASK_ESTIMATION
+
+- Ngày: 2026-08-10; trạng thái: ACCEPTED.
+- Evidence: tài liệu Jira Software Cloud mô tả Estimate issue for board trả `200` với `fieldId` và `value` string, ví dụ `"8.0"`. Source PUT hiện hữu không parse body; canonical issue GET cũ chỉ chấp nhận JSON integer cho discovered estimation field.
+- Quyết định: không tạo PUT-response DTO hay dùng response value làm source of truth. Chuẩn hoá riêng canonical Story Point bằng `BigDecimal`, chỉ nhận decimal whole không âm nằm trong `Integer`; sau đó giữ fresh canonical target verification J1H.
+- Hệ quả: 200 body malformed không quyết định completion; canonical GET mới quyết định. Canonical invalid sau remote success giữ `REMOTE_SUCCEEDED`, không `FAILED` và không replay PUT. Không hardcode customfield/Jira ID, không migration hay đổi isolation.
+
 ## DEC-064 — J1H finalization TASK_ESTIMATION theo target-aware canonical recovery
 
 - Ngày: 2026-08-10; trạng thái: ACCEPTED.

@@ -21,6 +21,7 @@ import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
@@ -1046,6 +1047,41 @@ class JiraProviderClientImplTest {
     }
 
     @Test
+    void estimationPutAcceptsDocumented200BodiesWithoutUsingThemAsCanonicalTruth() {
+        for (String providerValue : List.of("\"5\"", "\"5.0\"", "\"0\"", "\"0.0\"")) {
+            Fixture fixture = fixture();
+            fixture.server.expect(request -> {
+                assertEquals("/ex/jira/" + CLOUD_ID + "/rest/agile/1.0/issue/10452/estimation",
+                        request.getURI().getPath());
+                assertThat(request.getURI().getQuery()).contains("boardId=35");
+            }).andExpect(method(HttpMethod.PUT))
+                    .andExpect(content().json("{\"value\":5}"))
+                    .andRespond(json("{\"fieldId\":\"customfield_example\",\"value\":" + providerValue + "}"));
+
+            fixture.client.estimateIssue("ACCESS_TOKEN_SECRET", CLOUD_ID, "35", "10452", 5);
+
+            fixture.server.verify();
+        }
+    }
+
+    @Test
+    void normalizesWholeCanonicalEstimationValuesWithoutFloatingPointComparison() {
+        assertEquals(5, canonicalEstimation("\"5\"").storyPoints());
+        assertEquals(5, canonicalEstimation("\"5.0\"").storyPoints());
+        assertEquals(0, canonicalEstimation("\"0\"").storyPoints());
+        assertEquals(0, canonicalEstimation("\"0.0\"").storyPoints());
+        assertEquals(5, canonicalEstimation("5.0").storyPoints());
+    }
+
+    @Test
+    void rejectsNonWholeOrMissingCanonicalEstimationValues() {
+        for (String value : Arrays.asList("\"5.5\"", "\"abc\"", "\"\"", "-1", "{}", "[]", null)) {
+            assertEquals("JIRA_RESPONSE_INVALID", assertThrows(IntegrationException.class,
+                    () -> canonicalEstimation(value)).getCode());
+        }
+    }
+
+    @Test
     void mapsProviderHttpFailuresWithoutExposingProviderBody() {
         assertProviderFailure(org.springframework.http.HttpStatus.BAD_REQUEST,
                 "JIRA_REQUEST_REJECTED", 1);
@@ -1374,6 +1410,24 @@ class JiraProviderClientImplTest {
 
     private Fixture fixture() {
         return fixture("UTC");
+    }
+
+    private JiraIssueSnapshot canonicalEstimation(String value) {
+        Fixture fixture = fixture();
+        String field = value == null ? "" : ",\"customfield_example\":" + value;
+        fixture.server.expect(request -> {
+            String query = URLDecoder.decode(request.getURI().getRawQuery(), StandardCharsets.UTF_8);
+            assertThat(query).contains("customfield_example");
+        }).andRespond(json("""
+                {"id":"10452","key":"SDP-42","fields":{
+                  "summary":"Canonical issue","updated":"2026-07-31T00:30:57.360+0700"%s
+                }}
+                """.formatted(field)));
+        try {
+            return fixture.client.getIssue("ACCESS_TOKEN_SECRET", CLOUD_ID, "SDP-42", "customfield_example");
+        } finally {
+            fixture.server.verify();
+        }
     }
 
     private Fixture fixture(String jiraTimeZone) {

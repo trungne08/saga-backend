@@ -8,6 +8,7 @@ import com.saga.be.config.JiraIntegrationProperties;
 import com.saga.be.config.JiraTimeZoneProperties;
 import com.saga.be.exception.IntegrationException;
 import com.saga.be.integration.sync.JiraSyncWindow;
+import java.math.BigDecimal;
 import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
@@ -1824,7 +1825,7 @@ public class JiraProviderClientImpl implements JiraProviderClient {
                 nestedText(fields, "issuetype", "name"),
                 nestedText(fields, "status", "name"),
                 nestedText(fields, "priority", "name"),
-                estimationFieldId == null ? null : integer(fields.path(estimationFieldId)),
+                estimationFieldId == null ? null : estimationValue(fields.path(estimationFieldId)),
                 nestedText(fields, "assignee", "accountId"),
                 nestedText(fields, "reporter", "accountId"),
                 parseDateOrDateTime(text(fields, "duedate")),
@@ -1841,14 +1842,24 @@ public class JiraProviderClientImpl implements JiraProviderClient {
         );
     }
 
-    private Integer integer(JsonNode node) {
-        if (node == null || node.isMissingNode() || node.isNull()) {
-            return null;
-        }
-        if (!node.isInt()) {
+    private Integer estimationValue(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()
+                || (!node.isTextual() && !node.isNumber())) {
             throw providerResponseInvalid();
         }
-        return node.asInt();
+        String raw = node.asText();
+        if (raw == null || raw.isBlank()) {
+            throw providerResponseInvalid();
+        }
+        try {
+            BigDecimal value = new BigDecimal(raw.trim());
+            if (value.signum() < 0 || value.stripTrailingZeros().scale() > 0) {
+                throw providerResponseInvalid();
+            }
+            return value.intValueExact();
+        } catch (NumberFormatException | ArithmeticException exception) {
+            throw providerResponseInvalid();
+        }
     }
 
     private List<String> labels(JsonNode node) {

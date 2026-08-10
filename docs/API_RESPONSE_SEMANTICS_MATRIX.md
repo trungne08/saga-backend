@@ -1,3 +1,9 @@
+## J1I — Jira Estimation 200 và canonical decimal value (2026-08-10)
+
+| Method | Path | Success | Provider/canonical invalid | Idempotency / safety |
+| --- | --- | --- | --- | --- |
+| PUT | `/api/v1/projects/{projectId}/tasks/{taskId}/estimation` | 200 chỉ sau fresh canonical integer Story Point khớp request | Canonical value fractional, âm, blank, non-numeric, missing, object/array hoặc overflow → 502 `JIRA_RESPONSE_INVALID` | Jira PUT 2xx đã là remote success; operation giữ `REMOTE_SUCCEEDED`, same key chỉ canonical recovery và không PUT lại |
+
 ## J1H — Jira Task Estimation canonical finalization (2026-08-10)
 
 | Method | Path | Success | Client error | Recovery / safety |

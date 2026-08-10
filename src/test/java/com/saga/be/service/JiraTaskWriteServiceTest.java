@@ -699,6 +699,28 @@ class JiraTaskWriteServiceTest {
     }
 
     @Test
+    void invalidCanonicalEstimationResponseAfterPutKeepsRemoteSucceededAndDoesNotReplayPut() {
+        EstimationFixture fixture = estimationFixture(5);
+        when(fixture.provider.getIssue("token", "cloud", "101", "customfield_10016"))
+                .thenThrow(IntegrationException.unavailable("JIRA_RESPONSE_INVALID"));
+
+        assertEquals("JIRA_RESPONSE_INVALID", assertThrows(IntegrationException.class,
+                () -> fixture.service.estimate(fixture.principal, fixture.projectId, fixture.task.getId(), "key",
+                        new JiraTaskEstimationRequest(5))).getCode());
+
+        assertEquals(JiraWriteOperationStatus.REMOTE_SUCCEEDED, fixture.operation.getStatus());
+        verify(fixture.operations, never()).failed(fixture.operation.getId(), "JIRA_RESPONSE_INVALID");
+        verify(fixture.operations, never()).complete(fixture.operation.getId());
+
+        doReturn(fixture.snapshot).when(fixture.provider).getIssue("token", "cloud", "101", "customfield_10016");
+        fixture.service.estimate(fixture.principal, fixture.projectId, fixture.task.getId(), "key",
+                new JiraTaskEstimationRequest(5));
+
+        verify(fixture.provider, times(1)).estimateIssue("token", "cloud", "7", "101", 5);
+        verify(fixture.operations).complete(fixture.operation.getId());
+    }
+
+    @Test
     void estimationTargetMismatchRetainsRemoteSucceededWithoutCompleting() {
         EstimationFixture fixture = estimationFixture(3);
         Task mismatch = Task.builder().project(fixture.project).externalId("101").externalKey("P-1")

@@ -1,3 +1,9 @@
+## J1I Jira Estimation canonical decimal normalization — 2026-08-10
+
+- **CONFIRMED_SOURCE:** `estimateIssue` nhận HTTP 2xx bằng bodiless response, không parse PUT body. `JIRA_RESPONSE_INVALID` của incident phát sinh sau `markRemoteSucceeded`, tại canonical `GET /rest/api/3/issue` khi Story Point discovery field bị parser cũ từ chối vì không phải JSON integer.
+- **Đã hoàn thành:** canonical Story Point nhận JSON string hoặc number biểu diễn integer không âm, gồm `"0"`, `"0.0"`, `"5"`, `"5.0"`; chuẩn hoá bằng `BigDecimal` và `intValueExact`, không so sánh `double`. Phân số, âm, blank, non-numeric, missing/null, object/array hoặc ngoài `Integer` fail-safe `JIRA_RESPONSE_INVALID`.
+- **Không đổi:** public request vẫn integer không âm; PUT body không phải canonical truth. HTTP 200 đã xác nhận remote success, sau đó chỉ GET/upsert/fresh confirmation đúng target mới complete; lỗi canonical giữ `REMOTE_SUCCEEDED`, retry cùng key không PUT lại.
+
 ## J1H Jira Task Estimation remote-success finalization — 2026-08-10
 
 - **CONFIRMED_SOURCE/FIX:** `TASK_ESTIMATION` đồng bộ remote id/key/status vào object orchestration ngay sau `markRemoteSucceeded` commit riêng, trước canonical reconciliation. Flow discovery estimation field theo board, Jira GET có field đã discover, upsert và `JiraCanonicalTaskReadService` fresh `REQUIRES_NEW` read-only; chỉ `complete` khi `storyPoint` canonical đúng `request.value`.

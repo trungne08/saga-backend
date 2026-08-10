@@ -1,3 +1,9 @@
+## J1I Jira Estimation 200 response / canonical parser — 2026-08-10
+
+- **CONFIRMED_SOURCE:** provider PUT estimation không deserialize response body. Sau J1H, remote success đã được mark trước canonical GET; lỗi `JIRA_RESPONSE_INVALID` 502 phù hợp với parser local cũ chỉ nhận `JsonNode.isInt()` cho field Story Point đã discovery.
+- **Đã hoàn thành:** parser canonical nhận decimal-string/số whole không âm và trả integer SAGA chính xác; Jira value hợp lệ như `"5.0"` không còn bị map 502. Invalid value vẫn fail-safe, operation giữ `REMOTE_SUCCEEDED` và replay cùng key không mutation lại.
+- **Không đổi:** không hardcode field ID, không đổi state-machine J1H, scope, auth/session/CSRF, entity hay migration.
+
 ## J1H Jira Task Estimation remote-success finalization — 2026-08-10
 
 - **CONFIRMED_SOURCE:** lỗi 409 `JIRA_WRITE_OPERATION_IN_PROGRESS` xảy ra sau Jira estimation thành công khi `markRemoteSucceeded` đã ghi DB bằng transaction riêng nhưng object request vẫn thiếu `remoteResourceId`; `reconcile` chặn object cũ trước canonical GET/upsert.
