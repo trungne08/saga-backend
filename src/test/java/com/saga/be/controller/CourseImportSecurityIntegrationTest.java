@@ -446,7 +446,7 @@ class CourseImportSecurityIntegrationTest {
             var sheet = workbook.getSheetAt(0);
             var header = sheet.getRow(0);
             assertEquals("Class", header.getCell(0).getStringCellValue());
-            assertEquals("RollNumber", header.getCell(1).getStringCellValue());
+            assertEquals("StudentCode", header.getCell(1).getStringCellValue());
             assertEquals("Email", header.getCell(2).getStringCellValue());
             assertEquals("MemberCode", header.getCell(3).getStringCellValue());
             assertEquals("FullName", header.getCell(4).getStringCellValue());
@@ -651,7 +651,7 @@ class CourseImportSecurityIntegrationTest {
              ByteArrayOutputStream output = new ByteArrayOutputStream()) {
             var sheet = workbook.createSheet("Danh_Sach_SV");
             var header = sheet.createRow(0);
-            String[] columns = {"Class", "RollNumber", "Email", "MemberCode", "FullName", "Group", "Leader"};
+            String[] columns = {"Class", "StudentCode", "Email", "MemberCode", "FullName", "Group", "Leader"};
             for (int index = 0; index < columns.length; index++) {
                 header.createCell(index).setCellValue(columns[index]);
             }
@@ -699,7 +699,7 @@ class CourseImportSecurityIntegrationTest {
              ByteArrayOutputStream output = new ByteArrayOutputStream()) {
             var sheet = workbook.createSheet("Danh_Sach_SV");
             var header = sheet.createRow(0);
-            String[] columns = {"Class", "RollNumber", "Email", "MemberCode", "FullName"};
+            String[] columns = {"Class", "StudentCode", "Email", "MemberCode", "FullName"};
             for (int index = 0; index < columns.length; index++) {
                 header.createCell(index).setCellValue(columns[index]);
             }

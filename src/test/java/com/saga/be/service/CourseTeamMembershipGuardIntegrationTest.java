@@ -177,7 +177,7 @@ class CourseTeamMembershipGuardIntegrationTest {
         Authentication admin = authenticationFor(ApplicationRole.ADMIN, UUID.randomUUID());
 
         mockMvc.perform(multipart(IMPORT_PATH, course.getId()).file(workbookWithHeader(
-                        new String[] {"Class", "RollNumber", "Email", "MemberCode", "FullName", "Unexpected", "Leader"},
+                        new String[] {"Class", "StudentCode", "Email", "MemberCode", "FullName", "Unexpected", "Leader"},
                         new String[] {"SE", "SE100002", "header@example.test", "m", "Header", "A", ""}))
                         .with(authentication(admin)).with(csrf()))
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.error").value("INVALID_HEADER"));
@@ -415,7 +415,7 @@ class CourseTeamMembershipGuardIntegrationTest {
         try (XSSFWorkbook workbook = new XSSFWorkbook(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
             var sheet = workbook.createSheet("Danh_Sach_SV");
             var header = sheet.createRow(0);
-            String[] columns = {"Class", "RollNumber", "Email", "MemberCode", "FullName", "Group", "Leader"};
+            String[] columns = {"Class", "StudentCode", "Email", "MemberCode", "FullName", "Group", "Leader"};
             for (int index = 0; index < columns.length; index++) {
                 header.createCell(index).setCellValue(columns[index]);
             }
@@ -460,7 +460,7 @@ class CourseTeamMembershipGuardIntegrationTest {
     private MockMultipartFile workbookWithFormula() throws Exception {
         try (XSSFWorkbook workbook = new XSSFWorkbook(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
             var sheet = workbook.createSheet("Danh_Sach_SV");
-            String[] columns = {"Class", "RollNumber", "Email", "MemberCode", "FullName", "Group", "Leader"};
+            String[] columns = {"Class", "StudentCode", "Email", "MemberCode", "FullName", "Group", "Leader"};
             var header = sheet.createRow(0);
             for (int index = 0; index < columns.length; index++) {
                 header.createCell(index).setCellValue(columns[index]);

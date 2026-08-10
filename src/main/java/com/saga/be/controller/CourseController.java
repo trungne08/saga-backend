@@ -164,7 +164,7 @@ public class CourseController {
     @PostMapping(value = "/{courseId}/admin-import-students-template", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @PreAuthorize("hasRole('ADMIN')")
     @Operation(summary = "Admin import danh sách sinh viên vào course",
-            description = "Nhập file XLSX template 5 cột (Class, RollNumber, Email, MemberCode, FullName) để gắn danh sách sinh viên vào course.")
+            description = "Nhập file XLSX template 5 cột (Class, StudentCode, Email, MemberCode, FullName) để gắn danh sách sinh viên vào course.")
     public ResponseEntity<CourseStudentImportResponse> importStudentsByAdminTemplate(
             @AuthenticationPrincipal SagaPrincipal principal,
             @PathVariable UUID courseId,

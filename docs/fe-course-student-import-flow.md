@@ -9,7 +9,7 @@ Luồng hiện tại tách thành 4 bước:
 3. **Giảng viên tải template phân nhóm** đã có sẵn danh sách sinh viên thuộc course.
 4. **Giảng viên import lại template đã điền Group/Leader** để tạo Team membership.
 
-> Ghi chú: Hệ thống luôn chuẩn hóa identity theo `RollNumber` + `Email` để chống trùng/đụng dữ liệu.
+> Ghi chú: Hệ thống luôn chuẩn hóa identity theo `StudentCode` + `Email` để chống trùng/đụng dữ liệu.
 
 ---
 
@@ -28,7 +28,7 @@ Luồng hiện tại tách thành 4 bước:
 ### Header trong template admin
 
 1. `Class`
-2. `RollNumber`
+2. `StudentCode`
 3. `Email`
 4. `MemberCode`
 5. `FullName`
@@ -47,7 +47,7 @@ Luồng hiện tại tách thành 4 bước:
 ### Template bắt buộc (đúng thứ tự, đúng tên cột)
 
 1. `Class`
-2. `RollNumber`
+2. `StudentCode`
 3. `Email`
 4. `MemberCode`
 5. `FullName`
@@ -84,7 +84,7 @@ Luồng hiện tại tách thành 4 bước:
 ### Cột trong template giảng viên
 
 1. `Class`
-2. `RollNumber`
+2. `StudentCode`
 3. `Email`
 4. `MemberCode`
 5. `FullName`
@@ -143,7 +143,7 @@ Các `error` FE cần xử lý chính:
 - `DUPLICATE_IN_FILE`: trùng identity trong cùng file.
 - `INVALID_ROW`: thiếu dữ liệu bắt buộc / có dữ liệu cột thừa.
 - `FORMULA_NOT_ALLOWED`: có ô công thức.
-- `IDENTITY_CONFLICT`: RollNumber/Email xung đột profile đang có.
+- `IDENTITY_CONFLICT`: StudentCode/Email xung đột profile đang có.
 - `COURSE_TEAM_MEMBERSHIP_CONFLICT`: sinh viên đã thuộc team khác trong course.
 - `ACCESS_DENIED`: không đúng quyền.
 - `RESOURCE_NOT_FOUND`: course không tồn tại.
