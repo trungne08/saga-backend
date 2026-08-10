@@ -30,6 +30,7 @@
     <properties>
         <java.version>17</java.version>
         <flyway.version>12.4.0</flyway.version>
+        <firebase-admin.version>9.10.0</firebase-admin.version>
     </properties>
 
     <dependencies>
@@ -64,6 +65,11 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-mail</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.google.firebase</groupId>
+            <artifactId>firebase-admin</artifactId>
+            <version>${firebase-admin.version}</version>
         </dependency>
 
         <!-- 3. Security & OAuth2 (Cognito is the backend OIDC client) -->

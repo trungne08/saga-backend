@@ -65,6 +65,7 @@ public class ExcelImportService {
     private final TeamMemberRepository teamMemberRepository;
     private final StudentIdentityNormalizer identityNormalizer;
     private final StudentInvitationOutboxService invitationOutboxService;
+    private final CourseMembershipNotificationProducer membershipNotificationProducer;
 
     @Transactional
     public CourseStudentImportSummary importStudentsToCourse(SagaPrincipal principal, UUID courseId, MultipartFile file) {
@@ -308,6 +309,7 @@ public class ExcelImportService {
                     teamMemberRepository.save(membership);
                     membershipsByStudent.put(student.getId(), List.of(membership));
                     membershipsCreated++;
+                    membershipNotificationProducer.notifyMembershipAdded(student, course, team);
                 } else if (memberships.size() == 1 && memberships.get(0).getTeam().getId().equals(team.getId())) {
                     // Same Student + Team is idempotent and intentionally preserves the existing role.
                 } else {

@@ -1391,3 +1391,14 @@ Khi `POST` Task trả `409 JIRA_WRITE_RECOVERY_REQUIRED`, FE không tự động
 Không có endpoint/request/response/session/CSRF mới cho FE. Backend gửi email sau Course import/manual membership flow qua outbox hiện hữu. CTA của linked Student là `Đăng nhập SAGA`; unlinked Student là `Đăng ký / Kích hoạt tài khoản SAGA`; cả hai trỏ tới deployment URL cấu hình bởi `STUDENT_INVITATION_LOGIN_URL`. FE không dựng OAuth callback từ email, không nhận invite token/password/provider credential và không suy đoán Google là phương thức đăng nhập bắt buộc.
 
 Source/test đã xác nhận template và outbox state machine; delivery Gmail production vẫn **TBD_DEPLOYMENT_SMOKE**. Khi smoke, FE chỉ cần xác nhận CTA mở đúng entry URL và browser session/login flow hiện hữu tiếp tục hoạt động.
+## Notification Bell and Firebase Installation API — 2026-08-11
+
+All calls use the existing browser OIDC session. Do not send Bearer tokens or owner/profile/role fields. Send the existing CSRF header/cookie on POST, PATCH, and DELETE.
+
+- `GET /api/me/notifications?page=0&size=20` — newest-first owned page; `size` is 1..100. Each item has `id`, `type`, `title`, `message`, nullable `actionUrl`, `read`, nullable `readAt`, and `createdAt`.
+- `GET /api/me/notifications/unread-count` — returns `{ "unreadCount": 0 }`.
+- `PATCH /api/me/notifications/{notificationId}/read` — idempotently marks an owned notification read; a foreign/missing ID returns 404.
+- `POST /api/me/firebase-installations` with `{ "firebaseInstallationId": "<browser-fid>" }` — registers or reactivates the current browser FID. Same-owner replay is idempotent; a FID owned by another principal returns 409.
+- `DELETE /api/me/firebase-installations/{installationId}` — idempotently revokes an owned installation; foreign/missing IDs return 404.
+
+The client must obtain a Firebase Installation ID, not an FCM registration token. Register after authenticated session establishment and revoke the returned installation UUID on logout/device opt-out when practical. Notification list/read state always comes from SAGA APIs; FCM only prompts immediate refresh/display. Admin broadcast has no endpoint and remains BLOCKED.

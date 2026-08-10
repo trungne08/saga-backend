@@ -77,8 +77,8 @@ class RubricMigrationContractTest {
                     .toList();
         }
 
-        assertTrue(versions.containsAll(List.of(10, 13, 21, 22, 23, 24)));
-        assertEquals(24, versions.stream().mapToInt(Integer::intValue).max().orElseThrow());
+        assertTrue(versions.containsAll(List.of(10, 13, 21, 22, 23, 24, 25)));
+        assertEquals(25, versions.stream().mapToInt(Integer::intValue).max().orElseThrow());
     }
 
     private String read(String migrationName) throws IOException {

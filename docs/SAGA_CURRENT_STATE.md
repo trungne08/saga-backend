@@ -596,3 +596,11 @@ BASE HEAD của snapshot cũ: `0bc30be`. HEAD audit hiện hành là `4f3dee9`; 
 - **SECURITY:** linked/unlinked template không chứa password, token, UUID, Cognito subject hay provider-specific promise; log không chứa recipient/body/secret/identity.
 - **VERIFICATION:** targeted invitation/import 37/37. Full clean chạy **116 suites / 753 tests / 1 failure / 0 errors / 0 skipped**; failure duy nhất là pre-existing `CourseService#getCourseRoster` vi phạm contract DEC-023, không thuộc Gmail delivery.
 - **TBD_DEPLOYMENT_SMOKE:** Gmail production delivery, inbox/spam và outbox transition trên deployment thật chưa được xác nhận.
+## Notification Bell / Firebase FID — 2026-08-11
+
+- **CONFIRMED_SOURCE_TEST:** user-owned notification persistence/read state, unread count, FID registration/revocation, FCM adapter, and durable per-installation delivery/retry are implemented. The backend starts with an unavailable delivery adapter when Firebase credentials are missing/invalid, so DB/API notification behavior remains available.
+- **API:** `GET /api/me/notifications`, `GET /api/me/notifications/unread-count`, `PATCH /api/me/notifications/{id}/read`, `POST /api/me/firebase-installations`, `DELETE /api/me/firebase-installations/{id}`. Existing OIDC session + CSRF contract applies; there is no Bearer auth.
+- **PRODUCER:** only a newly-created grouped-import `TeamMember` produces `COURSE_MEMBERSHIP_ADDED`. No notification is emitted for invitation-only, ungrouped, or idempotent membership rows.
+- **UNCHANGED:** Course roster/enrollment, grouping, DEC-023, Cognito provisioning, session/CSRF, and Admin broadcast. DEC-056 is superseded only for user-owned infrastructure; broadcast remains BLOCKED.
+- **VERIFICATION:** targeted Notification/Firebase **16/16 PASS**. Full suite: **122 suites / 769 tests / 1 failure / 0 errors / 0 skipped**; sole failure is **PREEXISTING_BASELINE_SOURCE_CONFLICT_WITH_DEC_023** in `CourseRosterAndLecturerOptionsIntegrationTest`, unchanged.
+- **TBD_DEPLOYMENT_SMOKE:** Railway migration, real Firebase credential initialization, FID send/receive, and retry transitions have not yet been observed in production.
