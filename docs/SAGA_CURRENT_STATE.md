@@ -1,3 +1,11 @@
+## J1J Jira Task provider-ID ownership / Update Priority business resolution — 2026-08-10
+
+- **CONFIRMED_SOURCE/TEST:** Update Task có thêm field business `priority`; normal FE không cần Jira numeric/provider ID. Backend resolve từ `editmeta.priority.allowedValues` bằng đúng policy exact-name-first/dedup/fail-closed dùng chung với Create. Chỉ sau unique resolution mới PUT `{ "fields": { "priority": { "id": "<resolved-provider-id>" } } }`, rồi canonical GET/upsert/fresh-read mới complete.
+- **CONFIRMED_SOURCE/TEST:** `priorityId` giữ backward-compatible advanced override và validation stale hiện hữu. `priority` + `priorityId` trả local `400 JIRA_PRIORITY_INVALID`; field không editable trả `JIRA_EDIT_FIELD_NOT_ALLOWED`; zero/multiple business candidate trả `JIRA_PRIORITY_RESOLUTION_NOT_FOUND`/`JIRA_PRIORITY_RESOLUTION_AMBIGUOUS`; không provider PUT khi local fail.
+- **CONFIRMED_SOURCE/TEST:** fingerprint chứa cả hai representation theo raw request intent; replay cùng business body giữ recovery semantics, priority khác hoặc business-vs-explicit đi qua conflict `JIRA_IDEMPOTENCY_KEY_REUSED` của state machine. Sparse fields khác, J1H/J1I, session/CSRF và authorization không đổi.
+- **AUDIT:** Components vẫn dùng Jira provider IDs và chưa có public options contract; Transition dùng provider ID do GET transitions cấp theo issue; Assignee/Sprint/Delete dùng local SAGA IDs; Estimation dùng integer với metadata discovery. Issue Type Update là `CONFIRMED_NOT_IMPLEMENTED`.
+- **TBD_DEPLOYMENT_SMOKE:** Source/test không phải bằng chứng production; cần deploy và smoke với metadata priority thực tế.
+
 ## J1I Jira Estimation 200 response / canonical parser — 2026-08-10
 
 - **CONFIRMED_SOURCE:** provider PUT estimation không deserialize response body. Sau J1H, remote success đã được mark trước canonical GET; lỗi `JIRA_RESPONSE_INVALID` 502 phù hợp với parser local cũ chỉ nhận `JsonNode.isInt()` cho field Story Point đã discovery.

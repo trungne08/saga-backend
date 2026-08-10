@@ -110,8 +110,9 @@ public class JiraTaskWriteService {
     @Transactional
     public TaskReadResponse update(SagaPrincipal principal, UUID projectId, UUID taskId,
             String key, JiraTaskUpdateRequest request) {
+        validatePriorityRequest(request);
         return mutate(principal, projectId, taskId, key, JiraWriteOperationType.TASK_UPDATE,
-                fingerprint(request), JiraWriteScope.CLASSIC_WRITE_SCOPE, (token, board, task) -> {
+                updateFingerprint(request), JiraWriteScope.CLASSIC_WRITE_SCOPE, (token, board, task) -> {
                     List<JiraCreateField> editMetadata = jiraClient.getEditMetadata(
                             token, board.getCloudId(), external(task));
                     Set<String> allowed = editMetadata.stream().map(JiraCreateField::key)
@@ -305,8 +306,11 @@ public class JiraTaskWriteService {
         if (request.description() != null) {
             fields.put("description", requireEditable(allowed, "description", "description", adf(request.description())));
         }
-        if (request.priorityId() != null && !samePriority(task, request.priorityId(), editMetadata)) {
-            fields.put("priority", requireEditable(allowed, "priority", "priorityId", Map.of("id", request.priorityId())));
+        if ((request.priority() != null || request.priorityId() != null)
+                && !samePriority(task, request, editMetadata)) {
+            requireEditable(allowed, "priority",
+                    request.priority() == null ? "priorityId" : "priority", null);
+            fields.put("priority", Map.of("id", resolveUpdatePriority(request, editMetadata)));
         }
         if (request.dueDate() != null && (task.getDueDate() == null
                 || !request.dueDate().equals(task.getDueDate().toLocalDate()))) {
@@ -323,14 +327,56 @@ public class JiraTaskWriteService {
         return fields;
     }
 
-    private boolean samePriority(Task task, String requestedPriorityId, List<JiraCreateField> editMetadata) {
+    private boolean samePriority(Task task, JiraTaskUpdateRequest request, List<JiraCreateField> editMetadata) {
+        if (request.priority() != null) {
+            return request.priority() == task.getPriority();
+        }
         return editMetadata.stream()
                 .filter(field -> "priority".equals(field.key()))
                 .flatMap(field -> field.allowedValues().stream())
-                .filter(value -> requestedPriorityId.equals(value.id()) && value.name() != null)
+                .filter(value -> request.priorityId().equals(value.id()) && value.name() != null)
                 .map(JiraCreateFieldAllowedValue::name)
                 .map(this::priority)
                 .anyMatch(resolved -> resolved == task.getPriority());
+    }
+
+    private String resolveUpdatePriority(JiraTaskUpdateRequest request, List<JiraCreateField> editMetadata) {
+        JiraCreateField priorityField = editMetadata.stream()
+                .filter(field -> "priority".equals(field.key()))
+                .findFirst()
+                .orElseThrow(() -> IntegrationException.invalid(
+                        "JIRA_EDIT_FIELD_NOT_ALLOWED",
+                        "The Jira edit metadata does not allow the requested field"));
+        if (request.priorityId() != null) {
+            return allowedPriority(request.priorityId(), priorityField);
+        }
+        return resolveBusinessPriority(
+                priorityField.allowedValues(),
+                request.priority(),
+                "The Jira priority could not be resolved uniquely for this task"
+        );
+    }
+
+    private String allowedPriority(String requestedPriorityId, JiraCreateField priorityField) {
+        boolean allowed = priorityField.allowedValues().stream()
+                .anyMatch(value -> requestedPriorityId.equals(value.id()));
+        if (!allowed) {
+            log.warn("jira_task_update_edit_metadata operation=TASK_UPDATE stage=EDIT_METADATA_VALIDATION "
+                            + "fieldKey=priority businessField=priorityId upstreamHttpStatus=200 "
+                            + "errorCategory=JIRA_PRIORITY_INVALID writeOperationStatus=PENDING");
+            throw IntegrationException.invalid("JIRA_PRIORITY_INVALID",
+                    "The selected Jira priority is not available for this task");
+        }
+        return requestedPriorityId;
+    }
+
+    private void validatePriorityRequest(JiraTaskUpdateRequest request) {
+        if (request.priority() != null && request.priorityId() != null) {
+            throw IntegrationException.invalid(
+                    "JIRA_PRIORITY_INVALID",
+                    "Provide either priority or priorityId"
+            );
+        }
     }
 
     private Object requireEditable(Set<String> allowed, String field, String businessField, Object value) {
@@ -609,16 +655,28 @@ public class JiraTaskWriteService {
                             "JIRA_PRIORITY_INVALID", "The Jira priority is not available for this project"));
         }
         if (request.priority() == null) return null;
+        return resolveBusinessPriority(
+                priority.allowedValues(),
+                request.priority(),
+                "The Jira priority could not be resolved uniquely for this project"
+        );
+    }
+
+    private String resolveBusinessPriority(
+            List<JiraCreateFieldAllowedValue> allowedValues,
+            Priority requestedPriority,
+            String message
+    ) {
         return resolveSpecificCandidate(
-                priority.allowedValues().stream()
-                        .filter(value -> priority(value.name()) == request.priority())
+                allowedValues.stream()
+                        .filter(value -> priority(value.name()) == requestedPriority)
                         .toList(),
                 JiraCreateFieldAllowedValue::id,
                 JiraCreateFieldAllowedValue::name,
-                request.priority().name(),
+                requestedPriority.name(),
                 "JIRA_PRIORITY_RESOLUTION_NOT_FOUND",
                 "JIRA_PRIORITY_RESOLUTION_AMBIGUOUS",
-                "The Jira priority could not be resolved uniquely for this project"
+                message
         );
     }
 
@@ -823,9 +881,9 @@ public class JiraTaskWriteService {
                 String.valueOf(request.componentIds()), String.valueOf(request.assigneeId()));
     }
 
-    private String fingerprint(JiraTaskUpdateRequest request) {
+    static String updateFingerprint(JiraTaskUpdateRequest request) {
         return String.join("|", String.valueOf(request.title()), String.valueOf(request.description()),
-                String.valueOf(request.priorityId()), String.valueOf(request.dueDate()),
+                String.valueOf(request.priority()), String.valueOf(request.priorityId()), String.valueOf(request.dueDate()),
                 String.valueOf(request.labels()), String.valueOf(request.componentIds()));
     }
 }

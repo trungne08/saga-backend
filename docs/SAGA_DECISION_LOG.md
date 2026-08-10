@@ -1,3 +1,18 @@
+## DEC-067 — Normal Update Priority dùng business enum, backend sở hữu provider-ID resolution
+
+- Ngày: 2026-08-10; trạng thái: ACCEPTED / CONFIRMED_SOURCE_TEST.
+- Context: DEC-066 đã chặn `priorityId` stale nhưng normal FE không có public contract để lấy provider ID. Create Task đã xác lập ownership đúng: FE gửi business enum, backend resolve metadata; Update cần cùng boundary.
+- Quyết định: bổ sung optional `priority` (`LOW|MEDIUM|HIGH|CRITICAL`) vào sparse Update. Backend lấy `editmeta` đúng issue và dùng chung resolver J1C: dedup ID, unique exact canonical name thắng, unique semantic fallback chỉ khi không có exact; zero/multiple fail closed. `priorityId` giữ advanced override; gửi cả hai fail `JIRA_PRIORITY_INVALID` trước claim/provider call.
+- Idempotency: fingerprint ghi riêng `priority` và `priorityId` theo raw request intent; không persist resolved ID, payload hoặc metadata. Canonical reconciliation/state machine không đổi.
+- Boundary: không tạo editmeta API, không đổi components contract, không implement Issue Type change, không hardcode Jira ID/customfield, không Bearer/migration/isolation change. Runtime là `TBD_DEPLOYMENT_SMOKE`.
+
+## DEC-066 — Update priority phải validate theo editmeta issue hiện tại
+
+- Ngày: 2026-08-10; trạng thái: ACCEPTED.
+- Evidence: update đã đọc `GET /rest/api/3/issue/{issueIdOrKey}/editmeta` nhưng trước đây chỉ kiểm tra key `priority`, rồi forward `priorityId` bất kỳ vào Jira PUT. Điều này giải thích 400 `JIRA_REQUEST_REJECTED` khi client gửi ID stale hoặc không được phép.
+- Quyết định: `priorityId` update là provider ID scoped theo edit metadata của issue; khi có mutation, field phải editable và ID phải xuất hiện trong `priority.allowedValues`. Không tái dùng create resolution vì create metadata và editmeta là authority khác nhau.
+- Hệ quả: invalid trả local `400 JIRA_PRIORITY_INVALID` trước provider mutation; valid giữ payload Jira `{ "fields": { "priority": { "id": "..." } } }` và canonical reconciliation hiện hữu. Issue Type update vẫn TBD/NOT_IMPLEMENTED; không hardcode ID, thêm endpoint, migration, Bearer hay thay đổi session/CSRF.
+
 ## DEC-065 — J1I canonical decimal normalization cho TASK_ESTIMATION
 
 - Ngày: 2026-08-10; trạng thái: ACCEPTED.

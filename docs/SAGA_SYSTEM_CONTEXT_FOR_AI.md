@@ -1,3 +1,11 @@
+## J1J Jira Task provider-ID ownership / Update Priority business resolution — 2026-08-10
+
+- **CONFIRMED_SOURCE/TEST:** normal `PUT /api/v1/projects/{projectId}/tasks/{taskId}` nhận `priority` theo enum SAGA `LOW|MEDIUM|HIGH|CRITICAL`. Backend đọc `editmeta` của đúng issue, yêu cầu field editable, rồi dùng chung resolver J1C với Create: dedup provider ID, ưu tiên đúng một canonical exact-name, chỉ dùng semantic fallback khi còn đúng một ID; zero/multiple distinct candidate fail closed bằng `JIRA_PRIORITY_RESOLUTION_NOT_FOUND`/`JIRA_PRIORITY_RESOLUTION_AMBIGUOUS` trước Jira PUT.
+- **BACKWARD COMPATIBILITY:** `priorityId` vẫn là Jira provider ID override nâng cao và phải thuộc `priority.allowedValues`; stale trả `400 JIRA_PRIORITY_INVALID`. Gửi đồng thời `priority` và `priorityId` cũng trả `400 JIRA_PRIORITY_INVALID` trước claim/provider call. Payload provider vẫn là `{"fields":{"priority":{"id":"<resolved-provider-id>"}}}`; canonical GET/upsert/fresh confirmation và remote-success recovery J1G giữ nguyên.
+- **IDEMPOTENCY:** Task Update fingerprint chứa riêng business `priority` và explicit `priorityId`; cùng raw intent tạo cùng fingerprint, priority khác hoặc business-vs-explicit không bị coi là cùng request. Không persist provider payload/metadata và không đổi schema.
+- **PROVIDER-ID AUDIT:** Create `issueTypeId`/`priorityId` là override nâng cao; Assignee dùng SAGA Student UUID rồi resolve `IdentityMap ACTIVE`; Sprint dùng SAGA Sprint UUID rồi resolve external ID; Estimation chỉ nhận integer và discovery field; Delete dùng SAGA Task UUID. Transition ID vẫn là provider ID nhưng được backend trả theo từng issue qua GET transitions để FE round-trip. `componentIds` của Create/Update vẫn là Jira component IDs và chưa có public options endpoint được chứng minh: đây là gap chỉ ghi nhận, không sửa trong J1J.
+- **CONFIRMED_NOT_IMPLEMENTED:** main Update không có `type`/`issueTypeId`; không có flow đổi Issue Type. **TBD_DEPLOYMENT_SMOKE:** chưa xác nhận production sau deploy. Không hardcode ID/customfield, không thêm Bearer, migration hay đổi session/CSRF/authorization.
+
 ## J1I Jira Estimation canonical decimal normalization — 2026-08-10
 
 - **CONFIRMED_SOURCE:** `estimateIssue` nhận HTTP 2xx bằng bodiless response, không parse PUT body. `JIRA_RESPONSE_INVALID` của incident phát sinh sau `markRemoteSucceeded`, tại canonical `GET /rest/api/3/issue` khi Story Point discovery field bị parser cũ từ chối vì không phải JSON integer.
@@ -12,7 +20,7 @@
 
 ## J1G Jira Task update edit-metadata correctness — 2026-08-10
 
-- `PUT /api/v1/projects/{projectId}/tasks/{taskId}` chỉ nhận `title`, `description`, `priorityId`, `dueDate`, `labels`, `componentIds`; type/assignee/Sprint/estimation/status dùng endpoint riêng.
+- `PUT /api/v1/projects/{projectId}/tasks/{taskId}` chỉ nhận `title`, `description`, normal business `priority`, advanced `priorityId`, `dueDate`, `labels`, `componentIds`; type/assignee/Sprint/estimation/status dùng endpoint riêng. J1J supersede mô tả priority cũ của J1G.
 - Backend dùng `GET /rest/api/3/issue/{issueIdOrKey}/editmeta`; chỉ suppress field bằng canonical local khi an toàn (title, priority có metadata name, dueDate theo ngày, labels, component IDs). Description non-null vẫn requested vì ADF bị flatten.
 - Metadata không cho field còn phải gửi: `400 JIRA_EDIT_FIELD_NOT_ALLOWED` và WARN an toàn không có value/secret. Provider PUT 400 vẫn là `JIRA_REQUEST_REJECTED`.
 

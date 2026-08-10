@@ -1,6 +1,7 @@
 package com.saga.be.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -813,8 +814,150 @@ class JiraTaskWriteServiceTest {
     }
 
     @Test
+    void updateResolvesBusinessPriorityThenCanonicalizesAndCompletes() {
+        UpdateFixture fixture = updateFixture();
+        fixture.task.setPriority(Priority.LOW);
+
+        TaskReadResponse response = fixture.service.update(fixture.principal, fixture.projectId,
+                fixture.task.getId(), "key",
+                new JiraTaskUpdateRequest(null, null, Priority.HIGH, null, null, null, null));
+
+        assertEquals(Priority.HIGH, response.priority());
+        verify(fixture.provider).updateIssue("token", "cloud", "101", Map.of("priority", Map.of("id", "1")));
+        verify(fixture.provider).getIssue("token", "cloud", "101");
+        verify(fixture.upserts).upsert(eq(fixture.board.getId()), any(JiraIssueSnapshot.class));
+        verify(fixture.canonicalReads).findResponse(fixture.projectId, "101");
+        verify(fixture.operations).markRemoteSucceeded(fixture.operation.getId(), "101", "P-1");
+        verify(fixture.operations).complete(fixture.operation.getId());
+    }
+
+    @Test
+    void updateBusinessPriorityPrefersUniqueExactNameAfterProviderIdDeduplication() {
+        UpdateFixture fixture = updateFixture();
+        fixture.task.setPriority(Priority.LOW);
+        when(fixture.provider.getEditMetadata("token", "cloud", "101")).thenReturn(List.of(
+                new JiraCreateField("priority", "Priority", false, "priority", null, List.of(
+                        new JiraCreateFieldAllowedValue("exact", null, "High"),
+                        new JiraCreateFieldAllowedValue("exact", null, "High"),
+                        new JiraCreateFieldAllowedValue("fallback", null, "Higher")
+                ))
+        ));
+
+        fixture.service.update(fixture.principal, fixture.projectId, fixture.task.getId(), "key",
+                new JiraTaskUpdateRequest(null, null, Priority.HIGH, null, null, null, null));
+
+        verify(fixture.provider).updateIssue("token", "cloud", "101",
+                Map.of("priority", Map.of("id", "exact")));
+    }
+
+    @Test
+    void updateBusinessPriorityFailsClosedWhenSemanticCandidatesRemainAmbiguous() {
+        UpdateFixture fixture = updateFixture();
+        when(fixture.provider.getEditMetadata("token", "cloud", "101")).thenReturn(List.of(
+                new JiraCreateField("priority", "Priority", false, "priority", null, List.of(
+                        new JiraCreateFieldAllowedValue("1", null, "Highest"),
+                        new JiraCreateFieldAllowedValue("2", null, "Critical fallback")
+                ))
+        ));
+
+        assertEquals("JIRA_PRIORITY_RESOLUTION_AMBIGUOUS", assertThrows(IntegrationException.class,
+                () -> fixture.service.update(fixture.principal, fixture.projectId, fixture.task.getId(), "key",
+                        new JiraTaskUpdateRequest(null, null, Priority.CRITICAL, null, null, null, null))).getCode());
+
+        verify(fixture.provider, never()).updateIssue(any(), any(), any(), any());
+        verify(fixture.operations).failed(fixture.operation.getId(), "JIRA_PRIORITY_RESOLUTION_AMBIGUOUS");
+    }
+
+    @Test
+    void updateBusinessPriorityFailsClosedWhenNoCandidateExists() {
+        UpdateFixture fixture = updateFixture();
+        when(fixture.provider.getEditMetadata("token", "cloud", "101")).thenReturn(List.of(
+                new JiraCreateField("priority", "Priority", false, "priority", null,
+                        List.of(new JiraCreateFieldAllowedValue("1", null, "High")))
+        ));
+
+        assertEquals("JIRA_PRIORITY_RESOLUTION_NOT_FOUND", assertThrows(IntegrationException.class,
+                () -> fixture.service.update(fixture.principal, fixture.projectId, fixture.task.getId(), "key",
+                        new JiraTaskUpdateRequest(null, null, Priority.LOW, null, null, null, null))).getCode());
+
+        verify(fixture.provider, never()).updateIssue(any(), any(), any(), any());
+        verify(fixture.operations).failed(fixture.operation.getId(), "JIRA_PRIORITY_RESOLUTION_NOT_FOUND");
+    }
+
+    @Test
+    void updateBusinessPriorityRequiresEditablePriorityField() {
+        UpdateFixture fixture = updateFixture();
+        when(fixture.provider.getEditMetadata("token", "cloud", "101")).thenReturn(List.of());
+
+        assertEquals("JIRA_EDIT_FIELD_NOT_ALLOWED", assertThrows(IntegrationException.class,
+                () -> fixture.service.update(fixture.principal, fixture.projectId, fixture.task.getId(), "key",
+                        new JiraTaskUpdateRequest(null, null, Priority.LOW, null, null, null, null))).getCode());
+
+        verify(fixture.provider, never()).updateIssue(any(), any(), any(), any());
+    }
+
+    @Test
+    void updateRejectsBusinessPriorityTogetherWithProviderOverrideBeforeClaimOrProviderCall() {
+        UpdateFixture fixture = updateFixture();
+
+        assertEquals("JIRA_PRIORITY_INVALID", assertThrows(IntegrationException.class,
+                () -> fixture.service.update(fixture.principal, fixture.projectId, fixture.task.getId(), "key",
+                        new JiraTaskUpdateRequest(null, null, Priority.HIGH, "1", null, null, null))).getCode());
+
+        verify(fixture.operations, never()).claim(any(), any(), any(), any(), any());
+        verify(fixture.provider, never()).getEditMetadata(any(), any(), any());
+        verify(fixture.provider, never()).updateIssue(any(), any(), any(), any());
+    }
+
+    @Test
+    void updateFingerprintPreservesBusinessIntentAndDistinguishesProviderOverride() {
+        JiraTaskUpdateRequest businessHigh = new JiraTaskUpdateRequest(
+                null, null, Priority.HIGH, null, null, null, null);
+
+        assertEquals(
+                JiraTaskWriteService.updateFingerprint(businessHigh),
+                JiraTaskWriteService.updateFingerprint(new JiraTaskUpdateRequest(
+                        null, null, Priority.HIGH, null, null, null, null))
+        );
+        assertNotEquals(
+                JiraTaskWriteService.updateFingerprint(businessHigh),
+                JiraTaskWriteService.updateFingerprint(new JiraTaskUpdateRequest(
+                        null, null, Priority.LOW, null, null, null, null))
+        );
+        assertNotEquals(
+                JiraTaskWriteService.updateFingerprint(businessHigh),
+                JiraTaskWriteService.updateFingerprint(new JiraTaskUpdateRequest(
+                        null, null, null, "1", null, null, null))
+        );
+    }
+
+    @Test
     void updateSendsOnlyChangedPriority() {
-        assertUpdateSendsOnly("priority", new JiraTaskUpdateRequest(null, null, "2", null, null, null));
+        UpdateFixture fixture = updateFixture();
+
+        assertEquals(fixture.response.id(), fixture.service.update(fixture.principal, fixture.projectId,
+                fixture.task.getId(), "key", new JiraTaskUpdateRequest(null, null, "2", null, null, null)).id());
+
+        verify(fixture.provider).updateIssue("token", "cloud", "101", Map.of("priority", Map.of("id", "2")));
+        verify(fixture.provider).getIssue("token", "cloud", "101");
+        verify(fixture.operations).markRemoteSucceeded(fixture.operation.getId(), "101", "P-1");
+        verify(fixture.operations).complete(fixture.operation.getId());
+    }
+
+    @Test
+    void updateRejectsPriorityOutsideCurrentEditMetadataBeforeProviderMutation() {
+        UpdateFixture fixture = updateFixture();
+
+        String logged = captureUpdateFailure(() -> assertEquals("JIRA_PRIORITY_INVALID", assertThrows(
+                IntegrationException.class, () -> fixture.service.update(fixture.principal, fixture.projectId,
+                        fixture.task.getId(), "key",
+                        new JiraTaskUpdateRequest(null, null, "stale-priority", null, null, null))).getCode()));
+
+        verify(fixture.provider, never()).updateIssue(any(), any(), any(), any());
+        verify(fixture.operations).failed(fixture.operation.getId(), "JIRA_PRIORITY_INVALID");
+        assertTrue(logged.contains("fieldKey=priority"));
+        assertTrue(logged.contains("errorCategory=JIRA_PRIORITY_INVALID"));
+        assertTrue(!logged.contains("stale-priority"));
     }
 
     @Test
@@ -884,14 +1027,16 @@ class JiraTaskWriteServiceTest {
     }
 
     @Test
-    void remoteSucceededUpdateReplaysCanonicalRecoveryWithoutAnotherProviderUpdate() {
+    void remoteSucceededBusinessPriorityUpdateReplaysCanonicalRecoveryWithoutAnotherProviderUpdate() {
         UpdateFixture fixture = updateFixture();
+        fixture.task.setPriority(Priority.LOW);
         fixture.operation.setStatus(JiraWriteOperationStatus.REMOTE_SUCCEEDED);
         fixture.operation.setRemoteResourceId("101");
         fixture.operation.setRemoteResourceKey("P-1");
 
         assertEquals(fixture.response.id(), fixture.service.update(fixture.principal, fixture.projectId,
-                fixture.task.getId(), "key", new JiraTaskUpdateRequest("Changed", null, null, null, null, null)).id());
+                fixture.task.getId(), "key",
+                new JiraTaskUpdateRequest(null, null, Priority.HIGH, null, null, null, null)).id());
 
         verify(fixture.provider, never()).getEditMetadata(any(), any(), any());
         verify(fixture.provider, never()).updateIssue(any(), any(), any(), any());
@@ -1085,7 +1230,8 @@ class JiraTaskWriteServiceTest {
         JiraTaskWriteService service = new JiraTaskWriteService(authorization, boards, credentials, provider, upserts,
                 operations, canonicalReads, mock(JiraTaskSprintFinalizationService.class), tasks,
                 mock(IdentityMapRepository.class), mock(SprintRepository.class), mock(JiraSprintUpsertService.class));
-        return new UpdateFixture(service, provider, operations, projectId, task, operation, principal, response);
+        return new UpdateFixture(service, provider, upserts, operations, canonicalReads, board,
+                projectId, task, operation, principal, response);
     }
 
     private EstimationFixture estimationFixture(int storyPoint) {
@@ -1178,7 +1324,10 @@ class JiraTaskWriteServiceTest {
     private record UpdateFixture(
             JiraTaskWriteService service,
             JiraProviderClient provider,
+            JiraIssueUpsertService upserts,
             JiraWriteOperationService operations,
+            JiraCanonicalTaskReadService canonicalReads,
+            JiraBoard board,
             UUID projectId,
             Task task,
             JiraWriteOperation operation,

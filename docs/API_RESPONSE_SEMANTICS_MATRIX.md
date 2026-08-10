@@ -1,3 +1,11 @@
+## J1J — Jira Task Update Priority business resolution (2026-08-10)
+
+| Method | Path | Normal input | Success | Local failure trước provider | Compatibility / idempotency |
+| --- | --- | --- | --- | --- | --- |
+| PUT | `/api/v1/projects/{projectId}/tasks/{taskId}` | `priority: LOW|MEDIUM|HIGH|CRITICAL` | 200 canonical Task sau unique editmeta resolution → Jira PUT → GET/upsert/fresh confirmation | 400 `JIRA_PRIORITY_INVALID` khi gửi cả `priority` + `priorityId` hoặc explicit ID stale; 400 `JIRA_EDIT_FIELD_NOT_ALLOWED`; 409 `JIRA_PRIORITY_RESOLUTION_NOT_FOUND`/`JIRA_PRIORITY_RESOLUTION_AMBIGUOUS`; không Jira PUT | `priorityId` chỉ advanced override; fingerprint phân biệt business/explicit và priority khác; same-key remote-success chỉ canonical recovery |
+
+`JIRA_REQUEST_REJECTED` vẫn chỉ biểu diễn Jira PUT HTTP 400 thực sự. Source/test đã xác nhận; runtime là `TBD_DEPLOYMENT_SMOKE`.
+
 ## J1I — Jira Estimation 200 và canonical decimal value (2026-08-10)
 
 | Method | Path | Success | Provider/canonical invalid | Idempotency / safety |
@@ -14,7 +22,7 @@
 
 | Method | Path | Success | Client error | Provider failure | Idempotency / safety |
 | --- | --- | --- | --- | --- | --- |
-| PUT | `/api/v1/projects/{projectId}/tasks/{taskId}` | 200 canonical Task sau Jira PUT, GET/upsert/fresh confirmation | 400 `INVALID_REQUEST` thiếu `Idempotency-Key`; 400 `JIRA_TASK_UPDATE_EMPTY`; 400 `JIRA_EDIT_FIELD_NOT_ALLOWED` | Jira PUT: 400 `JIRA_REQUEST_REJECTED`; 401→409 `JIRA_ACCESS_REVOKED`; 403 `JIRA_ACCESS_FORBIDDEN`; 404→409 `JIRA_RESOURCE_NOT_FOUND`; 429 `JIRA_RATE_LIMITED`; khác 503 | same-key `REMOTE_SUCCEEDED` chỉ canonical recovery, không PUT lại; diagnostic không value/secret |
+| PUT | `/api/v1/projects/{projectId}/tasks/{taskId}` | 200 canonical Task sau Jira PUT, GET/upsert/fresh confirmation | 400 `INVALID_REQUEST` thiếu `Idempotency-Key`; 400 `JIRA_TASK_UPDATE_EMPTY`; 400 `JIRA_EDIT_FIELD_NOT_ALLOWED`; 400 `JIRA_PRIORITY_INVALID` khi ID không thuộc `editmeta.priority.allowedValues` | Jira PUT: 400 `JIRA_REQUEST_REJECTED`; 401→409 `JIRA_ACCESS_REVOKED`; 403 `JIRA_ACCESS_FORBIDDEN`; 404→409 `JIRA_RESOURCE_NOT_FOUND`; 429 `JIRA_RATE_LIMITED`; khác 503 | same-key `REMOTE_SUCCEEDED` chỉ canonical recovery, không PUT lại; diagnostic không value/secret |
 
 # Ma trận semantics response API
 

@@ -23,6 +23,7 @@ import java.time.LocalDateTime;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
@@ -994,6 +995,46 @@ class JiraProviderClientImplTest {
     }
 
     @Test
+    void mapsEditMetadataPriorityAllowedValuesAndSendsResolvedProviderId() {
+        Fixture fixture = fixture();
+        String issueUrl = BASE + "/ex/jira/" + CLOUD_ID + "/rest/api/3/issue/10452";
+        fixture.server.expect(requestTo(issueUrl + "/editmeta"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(json("""
+                        {"fields":{"priority":{
+                          "name":"Priority","required":false,
+                          "schema":{"type":"priority"},
+                          "allowedValues":[
+                            {"id":"priority-high","name":"High","ignored":"raw"},
+                            {"id":"priority-low","name":"Low"}
+                          ]
+                        }}}
+                        """));
+        fixture.server.expect(requestTo(issueUrl))
+                .andExpect(method(HttpMethod.PUT))
+                .andExpect(content().json("""
+                        {"fields":{"priority":{"id":"priority-high"}}}
+                        """))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.NO_CONTENT));
+
+        assertThat(fixture.client.getEditMetadata(
+                "ACCESS_TOKEN_SECRET", CLOUD_ID, "10452"
+        )).containsExactly(new JiraCreateField(
+                "priority", "Priority", false, "priority", null,
+                List.of(
+                        new JiraCreateFieldAllowedValue("priority-high", null, "High"),
+                        new JiraCreateFieldAllowedValue("priority-low", null, "Low")
+                )
+        ));
+        fixture.client.updateIssue(
+                "ACCESS_TOKEN_SECRET", CLOUD_ID, "10452",
+                Map.of("priority", Map.of("id", "priority-high"))
+        );
+
+        fixture.server.verify();
+    }
+
+    @Test
     void acceptsEmptyCreateMetadata() {
         Fixture fixture = fixture();
         fixture.server.expect(request -> { }).andRespond(json(
@@ -1075,7 +1116,7 @@ class JiraProviderClientImplTest {
 
     @Test
     void rejectsNonWholeOrMissingCanonicalEstimationValues() {
-        for (String value : Arrays.asList("\"5.5\"", "\"abc\"", "\"\"", "-1", "{}", "[]", null)) {
+        for (String value : Arrays.asList("\"5.5\"", "\"abc\"", "\"\"", "-1", "2147483648", "{}", "[]", null)) {
             assertEquals("JIRA_RESPONSE_INVALID", assertThrows(IntegrationException.class,
                     () -> canonicalEstimation(value)).getCode());
         }

@@ -1,3 +1,15 @@
+## J1J Update Priority business contract — 2026-08-10
+
+Normal FE cập nhật priority bằng business enum, không lấy hoặc hardcode Jira numeric/provider ID:
+
+```json
+{ "priority": "HIGH" }
+```
+
+`priorityId` vẫn được backend nhận để tương thích consumer nâng cao cũ nhưng normal FE không dùng. Không gửi đồng thời `priority` và `priorityId`; backend trả `400 JIRA_PRIORITY_INVALID`. `JIRA_PRIORITY_RESOLUTION_NOT_FOUND` hoặc `JIRA_PRIORITY_RESOLUTION_AMBIGUOUS` nghĩa metadata Jira không thể map duy nhất; FE giữ input và hiển thị lỗi, không yêu cầu người dùng nhập Jira ID. `JIRA_EDIT_FIELD_NOT_ALLOWED` nghĩa Jira không cho sửa field. Runtime production vẫn `TBD_DEPLOYMENT_SMOKE`.
+
+`componentIds` vẫn là Jira component IDs; source hiện chưa chứng minh public options endpoint. FE không tự hardcode component ID; gap này chưa được giải quyết trong J1J. Transition là ngoại lệ provider-ID round-trip: FE lấy `transitionId` từ `GET /tasks/{taskId}/transitions` của đúng task rồi gửi lại POST, không suy từ status name.
+
 ## J1I Estimation response contract — 2026-08-10
 
 FE vẫn gửi `{ "value": <integer không âm> }`; không đổi sang string dù Jira có thể biểu diễn estimation bằng decimal string. Backend xem canonical Task snapshot là nguồn truth và chỉ trả `200` khi `storyPoint` integer canonical đúng request.
@@ -12,7 +24,7 @@ Nếu nhận lỗi recovery sau sự cố canonical, FE không tạo key mới v
 
 ## J1G Jira Task Update contract — 2026-08-10
 
-`PUT /api/v1/projects/{projectId}/tasks/{taskId}` chỉ dùng field optional `title`, `description`, `priorityId`, `dueDate` (`YYYY-MM-DD`), `labels`, `componentIds`. Omit/null là không đổi; `labels: []`/`componentIds: []` replace-all rỗng. Không gửi type, assignee, sprintId, estimation hay status vào body này.
+`PUT /api/v1/projects/{projectId}/tasks/{taskId}` chỉ dùng field optional `title`, `description`, `priority`, advanced `priorityId`, `dueDate` (`YYYY-MM-DD`), `labels`, `componentIds`. Omit/null là không đổi; `labels: []`/`componentIds: []` replace-all rỗng. J1J supersede phần priority cũ của J1G. Không gửi type, assignee, sprintId, estimation hay status vào body này.
 
 | Ý định | Endpoint | Body tối thiểu |
 | --- | --- | --- |
@@ -22,7 +34,7 @@ Nếu nhận lỗi recovery sau sự cố canonical, FE không tạo key mới v
 | Estimation | `PUT /tasks/{taskId}/estimation` | `value` |
 | Status | `POST /tasks/{taskId}/transitions` | `transitionId` |
 
-FE gửi sparse body. `description` non-null luôn requested vì ADF canonicalization không giữ formatting. `400 JIRA_EDIT_FIELD_NOT_ALLOWED` giữ input và hiển thị lỗi. CSRF + `Idempotency-Key` vẫn bắt buộc; thiếu header là `400 INVALID_REQUEST`.
+FE gửi sparse body. `description` non-null luôn requested vì ADF canonicalization không giữ formatting. Normal priority dùng `priority` business enum; `priorityId` chỉ là override nâng cao tương thích ngược. `400 JIRA_EDIT_FIELD_NOT_ALLOWED` giữ input và hiển thị lỗi. CSRF + `Idempotency-Key` vẫn bắt buộc; thiếu header là `400 INVALID_REQUEST`.
 
 # SAGA Frontend API Integration Guide
 

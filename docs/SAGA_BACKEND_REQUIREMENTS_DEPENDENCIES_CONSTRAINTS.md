@@ -1,3 +1,11 @@
+## Ràng buộc J1J Jira Task provider-ID ownership — 2026-08-10
+
+- Normal Update Priority nhận duy nhất business `priority`; `priorityId` chỉ là backward-compatible advanced Jira provider override. Hai field cùng có mặt là `400 JIRA_PRIORITY_INVALID` trước write-operation claim và provider I/O.
+- Update phải lấy `GET /rest/api/3/issue/{issueIdOrKey}/editmeta` cho từng issue/request. Nếu cần mutate: field `priority` phải editable; business resolution phải dedup provider ID, chọn unique exact canonical name trước semantic fallback, zero/multiple fail closed; explicit ID phải thuộc `allowedValues`. Không sort/pick-first, cache cross-project hoặc fallback stale ID.
+- Create và Update phải gọi chung thuật toán priority resolution; chúng vẫn dùng authority metadata riêng (`createmeta` và `editmeta`). Provider payload chỉ được tạo sau resolution thành công. Diagnostic cấm request value, ID, token, Authorization, credential, Idempotency-Key, cookie/CSRF và raw response.
+- Fingerprint Update chứa raw `priority` và `priorityId` riêng; không chứa resolved provider ID/metadata. Canonical reconciliation, remote-success recovery, sparse update khác, session/CSRF/authorization và schema giữ nguyên.
+- `componentIds` vẫn là Jira component IDs và public option source chưa được chứng minh; chỉ ghi gap. Transition provider ID phải đến từ GET transitions đúng issue. Issue Type Update là `CONFIRMED_NOT_IMPLEMENTED`; không mở rộng trong J1J.
+
 ## Ràng buộc J1I canonical Story Point parser — 2026-08-10
 
 - PUT estimation 2xx xác nhận mutation remote và không cần parse response body để finalize; canonical Jira issue GET với estimation field đã discovery là nguồn xác nhận cuối cùng.
