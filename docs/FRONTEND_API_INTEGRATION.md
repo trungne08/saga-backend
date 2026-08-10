@@ -14,6 +14,12 @@ FE gửi sparse body. `description` non-null luôn requested vì ADF canonicaliz
 
 # SAGA Frontend API Integration Guide
 
+## A13 — Admin advanced capability boundary, 2026-08-10
+
+Không có API Admin mới trong A13. FE reuse shared route khi ADMIN đã được source cho phép: `/api/v1/courses/**` (bao gồm roster), Team roster, Task/Sprint, analytics, Peer Review và Contribution theo exact route hiện hữu. Không gọi `/api/admin/courses/**` vì không tồn tại.
+
+Các capability chưa có endpoint: per-user audit history, đổi role, reset password, add/remove Course membership, notification broadcast và generic evaluation settings. FE không dựng request giả, không gửi `actorId`/`adminId`, không dùng Bearer hay Cognito Admin flow. Dashboard anomaly/graph-processing chart không thuộc A13.
+
 ## A12 — Bàn giao Admin cho FE, 2026-08-09
 
 | Feature | Endpoint | Method | Role | CSRF | Request / response | Status | FE action |
@@ -26,8 +32,6 @@ FE gửi sparse body. `description` non-null luôn requested vì ADF canonicaliz
 | Course progress | `/api/admin/course-progress-overview` | GET | ADMIN | Không | paged current counts | CONFIRMED | Không diễn giải final grade. |
 | Course export | `/api/admin/reports/courses/{courseId}/export` | GET | ADMIN | Không | XLSX attachment | CONFIRMED | Tải file, không coi là bảng điểm. |
 | Active Semester | `/api/admin/settings/active-semester` | GET/PUT | ADMIN | PUT có | typed Semester setting | CONFIRMED | Không dùng generic settings UI. |
-| Global rubric | `/api/admin/peer-review-rubrics` | POST | ADMIN | Có | criterion/weight/description → rubric | CONFIRMED | Chỉ global active. |
-| Global rubric | `/api/admin/peer-review-rubrics/{id}` | PUT/DELETE | ADMIN | Có | update / soft-disable | CONFIRMED | Không sửa Subject rubric/history. |
 | Subject/Class/Semester/Course | `/api/v1/subjects`, `/classes`, `/semesters`, `/courses` | POST/PUT/DELETE | ADMIN | Có | request domain → entity/204 | CONFIRMED | DELETE là soft-delete có dependency guard. |
 | Course instructors | `/api/v1/courses/instructors` | GET | ADMIN | Không | paged lecturer options | CONFIRMED | Dùng khi gán Course. |
 
@@ -1184,19 +1188,6 @@ type SprintListResponse = {
 | GET | `/api/v1/peer-review-rubrics/default` | Không có annotation riêng | Mọi authenticated session; global rubric được ưu tiên, Subject rubric chỉ dùng khi không có global | `200 PeerReviewDefaultRubricResponse` |
 | GET | `/api/v1/teams/{teamId}/peer-review-rubric` | Không có annotation riêng | ADMIN; LECTURER là Course instructor; STUDENT thuộc Team | `200 PeerReviewRubricResponse` |
 
-### Admin global rubric M4B
-
-| Method | Route | Quyền | Request | Kết quả |
-|---|---|---|---|---|
-| POST | `/api/admin/peer-review-rubrics` | ADMIN, session + CSRF | `criteriaName`, `weight`, `description` | `201`; tạo global rubric active |
-| PUT | `/api/admin/peer-review-rubrics/{id}` | ADMIN, session + CSRF | ba field như POST | `200`; chỉ global active |
-| DELETE | `/api/admin/peer-review-rubrics/{id}` | ADMIN, session + CSRF | không body | `204`; soft-delete |
-
-FE không gửi `subjectId`, id, actor hay `deletedAt`. `criteriaName` bị trim;
-weight là required. Tối đa bốn global rubric active; không có rule total weight
-hoặc uniqueness. Missing/tombstone là 404; rubric Subject không nằm trong scope
-admin global. Default/Team form chỉ nhận rubric active; FE phải tiếp tục xử lý
-`criteria: []` khi không có global active và không có fallback Subject.
 
 ## Admin Course progress overview M5
 

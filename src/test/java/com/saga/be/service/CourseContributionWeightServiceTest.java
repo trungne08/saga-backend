@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
-import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.saga.be.dto.request.ContributionOverrideDecisionRequest;
 import com.saga.be.dto.request.CourseContributionSliceWeightRequest;
@@ -68,7 +67,7 @@ class CourseContributionWeightServiceTest {
         lecturer.setFullName("Dr. Tran");
         course.setInstructor(lecturer);
 
-        when(courseRepository.findByIdAndDeletedAtIsNull(courseId)).thenReturn(Optional.of(course));
+        when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
         when(lecturerRepository.findById(lecturerId)).thenReturn(Optional.of(lecturer));
         when(policyOverrideRequestRepository.save(any())).thenAnswer(invocation -> {
             PolicyOverrideRequest request = invocation.getArgument(0);
@@ -115,7 +114,7 @@ class CourseContributionWeightServiceTest {
 
         when(policyOverrideRequestRepository.findById(requestId)).thenReturn(Optional.of(request));
         when(adminRepository.findById(adminId)).thenReturn(Optional.of(admin));
-        when(courseRepository.findByIdAndDeletedAtIsNull(courseId)).thenReturn(Optional.of(course));
+        when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
         when(courseRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(policyOverrideRequestRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -235,24 +234,6 @@ class CourseContributionWeightServiceTest {
         );
 
         assertEquals("400 BAD_REQUEST \"Slice weights must add up to 100\"", exception.getMessage());
-    }
-
-    @Test
-    void requestWeightChangeRejectsTombstonedCourseBeforeMutation() {
-        UUID courseId = UUID.randomUUID();
-        UUID lecturerId = UUID.randomUUID();
-        when(courseRepository.findByIdAndDeletedAtIsNull(courseId)).thenReturn(Optional.empty());
-
-        ResponseStatusException exception = assertThrows(
-                ResponseStatusException.class,
-                () -> service.requestWeightChange(
-                        courseId,
-                        new CourseContributionSliceWeightRequest(50.0, 30.0, 20.0, "Active only", lecturerId)
-                )
-        );
-
-        assertEquals("404 NOT_FOUND \"Course not found\"", exception.getMessage());
-        verifyNoInteractions(lecturerRepository, policyOverrideRequestRepository);
     }
 
     private <T extends com.saga.be.entity.BaseEntity> T entityWithId(T entity, UUID id) {

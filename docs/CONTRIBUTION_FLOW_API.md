@@ -560,16 +560,7 @@ Các điểm dưới đây là behavior/risk hiện tại, chưa được mô t�
   `char(36)` và rubric row count vẫn 0. Không seed global/default rubric; FE tiếp tục
   xử lý `criteria: []` và không hard-code ID.
 
-## Cập nhật 2026-08-09 — active rubric và Admin global management M4B
-
-- Resolver cho default GET, Team GET và detailed submit chỉ dùng rubric
-  `deleted_at IS NULL`: global active non-empty ưu tiên; nếu global active rỗng thì
-  fallback rubric Subject active. Khi cả hai rỗng, default có thể `[]` và detailed
-  submit giữ lỗi 400 hiện hữu; starRating-only không đổi.
-- Admin chỉ CRUD global active qua ba route `/api/admin/peer-review-rubrics`;
-  DELETE tạo tombstone, không hard-delete. History `PeerReviewDetail` và `Assessment`
-  không bị cascade/rewrite và vẫn dereference rubric tombstone.
-- Tối đa 4 global active do `criteriaRatings @Size(max=4)`; không yêu cầu bốn
-  rubric, total weight 100 hoặc criteriaName unique. Scoring và Contribution không đổi.
-- V23 chỉ thêm `rubric_template.deleted_at DATETIME(6) NULL`; runtime production V23
-  đã **CONFIRMED** thành công.
+**Scope rollback 2026-08-10:** code/API/behavior M4B về rubric Peer Review đã được
+gỡ. V23 vẫn giữ nguyên vì đã chạy production, nhưng application không dùng
+`rubric_template.deleted_at`; không seed, không thêm resolver active-only và không có
+Admin rubric CRUD.

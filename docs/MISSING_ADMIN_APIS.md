@@ -12,7 +12,7 @@ Các ghi chú milestone cũ được supersede khi mâu thuẫn với bảng nà
 | Semester | IMPLEMENTED | `POST/PUT/DELETE /api/v1/semesters` | Soft-delete; chặn Course và active-semester reference. |
 | Course | IMPLEMENTED | `POST/PUT/DELETE /api/v1/courses` | Soft-delete; chặn Team/Project/invitation/weight config. |
 | Active Semester | IMPLEMENTED | `GET/PUT /api/admin/settings/active-semester` | Typed singleton setting, không generic key/value. |
-| Global rubric | IMPLEMENTED | `POST/PUT/DELETE /api/admin/peer-review-rubrics` | Chỉ global active; soft-delete, không sửa Subject rubric/history. |
+| Global rubric | ROLLED_BACK_BY_SCOPE_OWNERSHIP | Không có route Admin rubric | M4B CRUD Peer Review/Rubric đã được gỡ; không suy diễn API thay thế. |
 | Course progress | IMPLEMENTED | `GET /api/admin/course-progress-overview` | Current local counts, không final grade/Assessment. |
 | Course XLSX export | IMPLEMENTED | `GET /api/admin/reports/courses/{courseId}/export` | Local snapshot, không official grade/Cognito/provider data. |
 | Global audit/statistics/health | IMPLEMENTED | `/api/admin/audit-logs`, `/system-stats`, `/integrations/health` | Sanitized/local-only; health không gọi provider. |
@@ -23,6 +23,12 @@ Các ghi chú milestone cũ được supersede khi mâu thuẫn với bảng nà
 | Impersonation, role mutation, password reset | BLOCKED | Không có endpoint/contract | Không temporary token, Bearer hay Cognito Admin API. |
 | Manual Course membership | BLOCKED | Không có Admin mutation | Team/Project/retention contract chưa đủ. |
 | Generic system settings | BLOCKED | Không có generic endpoint/model | Active Semester là typed setting riêng; không gom rubric/contribution domain config. |
+| Per-user audit history | BLOCKED | `SystemAuditLog.actorLocalProfileId`/`actorRole` chỉ forward-only; repository chỉ global audit read | Chưa có complete-history coverage, index, retention hoặc endpoint safe. |
+| Role mutation | BLOCKED | `ApplicationRole` đến từ Cognito group rồi synchronize profile local | Thiếu transition matrix, profile migration, Cognito ownership và session refresh governance. |
+| Password reset | BLOCKED | Hosted UI/OIDC; không có Cognito Admin SDK/IAM/reset controller | Federated/native semantics và email delivery chưa có contract. |
+| Manual Course membership | BLOCKED | Course import là write path TeamMember duy nhất | Add cần Team selection; remove thiếu historical retention contract. |
+| Notification broadcast | BLOCKED | `Notification` không có repository/service/controller/schema/consumer evidence | Thiếu audience, lifecycle, retention, idempotency và delivery contract. |
+| Generic evaluation settings | BLOCKED | Chỉ có typed/domain config riêng | Không có confirmed global editable setting contract. |
 
 ## Browser boundary
 
@@ -34,6 +40,18 @@ Source/test integration xác nhận contract; browser E2E/deployed smoke là **T
 
 `ADMIN_CORE_BACKEND_STATUS = COMPLETE` cho capability core ở bảng IMPLEMENTED.
 `ADMIN_ADVANCED_SUPPORT_STATUS = DOCUMENTED_TBD_OR_BLOCKED`; đây không có nghĩa Admin 100% feature complete.
+
+## A13 cross-access và duplicate route audit — 2026-08-10
+
+| Domain shared | ADMIN status | Quyết định A13 |
+| --- | --- | --- |
+| Course master data, detail/list, roster | Allowed theo controller/service | Reuse `/api/v1/courses/**` |
+| Team roster | Allowed | Reuse `/api/v1/courses/{courseId}/teams/{teamId}/members` |
+| Task/Sprint, Project integration | Allowed qua authorization manager | Reuse shared route; provider/write semantics không đổi |
+| Lecturer analytics | Allowed | Reuse `/api/v1/courses/{courseId}/...` |
+| Peer Review, Contribution | Allowed ở route đã khai báo | Reuse exact route; không suy diễn route khác |
+
+`ADMIN_COURSE_DUPLICATE_ROUTES_NEEDED = false`: namespace đẹp không đủ lý do duplicate; shared Course contract đã có ADMIN authorization. Charts anomaly/graph-processing không thuộc A13.
 
 ## Cập nhật contract Admin users/audit — 2026-08-09
 

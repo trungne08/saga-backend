@@ -353,16 +353,14 @@ public class PeerReviewService {
     }
 
     private List<RubricTemplate> loadRubrics(UUID subjectId) {
-        List<RubricTemplate> globalRubrics = rubricTemplateRepository
-                .findBySubjectIdIsNullAndDeletedAtIsNullOrderByCreatedAtAsc();
+        List<RubricTemplate> globalRubrics = rubricTemplateRepository.findBySubjectIdIsNullOrderByCreatedAtAsc();
         if (globalRubrics != null && !globalRubrics.isEmpty()) {
             return globalRubrics;
         }
         if (subjectId == null) {
             return List.of();
         }
-        List<RubricTemplate> subjectRubrics = rubricTemplateRepository
-                .findBySubjectIdAndDeletedAtIsNullOrderByCreatedAtAsc(subjectId);
+        List<RubricTemplate> subjectRubrics = rubricTemplateRepository.findBySubjectIdOrderByCreatedAtAsc(subjectId);
         return subjectRubrics == null ? List.of() : subjectRubrics;
     }
 

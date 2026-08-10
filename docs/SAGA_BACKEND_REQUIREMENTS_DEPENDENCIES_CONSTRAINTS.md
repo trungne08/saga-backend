@@ -7,6 +7,13 @@
 
 # SAGA Backend — Yêu cầu, Dependency, Phân quyền và Ràng buộc
 
+## A13 Admin advanced closure constraints — 2026-08-10
+
+- Per-user audit chỉ có thể được mở khi quyết định rõ forward-only hay complete history, index, retention và privacy. Không parse old/new payload, Cognito subject hay backfill Mongo để suy đoán actor local.
+- Role mutation cần transition matrix, cross-profile migration, Cognito group ownership và session refresh policy. Password reset cần authority cho native/federated user, AWS Cognito Admin dependency/IAM/email contract. Không được tự thêm chúng.
+- Course membership vẫn là `Student -> TeamMember -> Team -> Course`; add cần Team selection, remove cần retention cho Project/Task/PeerReview/Contribution. Notification cần versioned schema, consumer, audience/read/retention/idempotency. Generic settings không được gom domain config khác scope.
+- ADMIN access là per-endpoint explicit: shared endpoint đã support ADMIN thì reuse; endpoint không support ADMIN không được tự nới quyền. Không tạo `/api/admin/courses/**` duplicate.
+
 ## A12 Admin closure constraints — 2026-08-09
 
 - `/api/admin/**` cần `ROLE_ADMIN`; unsafe request chịu CSRF global, chỉ webhook provider được
@@ -657,18 +664,14 @@ SELECT COUNT(*) FROM rubric_template;
 nullable `char(36)`, 0 row. Duplicate FK vẫn tồn tại, không được cleanup và không
 chặn nullable repair.
 
-## Cập nhật 2026-08-09 — ràng buộc Admin global rubric M4B
+## Scope rollback M4B — 2026-08-10
 
-- `rubric_template.deleted_at` do V23 bổ sung nullable; row cũ mặc định active.
-  Migration additive, không seed, cleanup FK hay thay migration cũ; production V23 **CONFIRMED**.
-- Mutation admin chỉ cho global active rubric. Missing/tombstone trả 404;
-  subject-specific bị từ chối có kiểm soát và không mutate; fifth active global
-  bị conflict. Security là `ROLE_ADMIN` + session/CSRF, không bearer.
-- Current-form resolver loại tombstone cho cả global và Subject; global active
-  non-empty có precedence. Entity không có global filter nên historical
-  `PeerReviewDetail`/`Assessment` vẫn giữ reference rubric tombstone.
-- Không thay đổi `PeerReviewRequest @Size(max=4)`, scoring, Contribution, AccountStatus,
-  Course, Import, Jira/GitHub hay authorization Peer Review.
+- V23 đã chạy production nên giữ nguyên, bất biến và không tái sử dụng version. Schema
+  additive `rubric_template.deleted_at` được phép tồn tại nhưng không còn được code ứng
+  dụng sử dụng.
+- M4B Admin rubric CRUD, resolver active-only và thay đổi Peer Review/Rubric liên quan
+  đã bị gỡ theo ownership. Không thêm reverse migration, không thay scoring, Contribution,
+  authorization hay historical data.
 
 ## Cập nhật 2026-08-09 — giới hạn Admin Course progress overview M5
 

@@ -11,9 +11,7 @@ import com.saga.be.entity.Course;
 import com.saga.be.entity.JiraBoard;
 import com.saga.be.entity.Lecturer;
 import com.saga.be.entity.PeerReview;
-import com.saga.be.entity.PeerReviewDetail;
 import com.saga.be.entity.Project;
-import com.saga.be.entity.RubricTemplate;
 import com.saga.be.entity.Semester;
 import com.saga.be.entity.Sprint;
 import com.saga.be.entity.Student;
@@ -27,7 +25,6 @@ import com.saga.be.repository.CourseRepository;
 import com.saga.be.repository.JiraBoardRepository;
 import com.saga.be.repository.LecturerRepository;
 import com.saga.be.repository.PeerReviewRepository;
-import com.saga.be.repository.RubricTemplateRepository;
 import com.saga.be.repository.SemesterRepository;
 import com.saga.be.repository.SprintRepository;
 import com.saga.be.repository.StudentRepository;
@@ -36,7 +33,6 @@ import com.saga.be.repository.TeamRepository;
 import com.saga.be.repository.ProjectRepository;
 import com.saga.be.security.ApplicationRole;
 import com.saga.be.security.SagaPrincipal;
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
@@ -73,7 +69,6 @@ class AdminCourseProgressOverviewIntegrationTest {
     @Autowired private JiraBoardRepository jiraBoardRepository;
     @Autowired private SprintRepository sprintRepository;
     @Autowired private PeerReviewRepository peerReviewRepository;
-    @Autowired private RubricTemplateRepository rubricTemplateRepository;
     @MockitoBean private JiraProviderClient jiraProviderClient;
     @MockitoBean private GitHubProviderClient gitHubProviderClient;
 
@@ -186,12 +181,6 @@ class AdminCourseProgressOverviewIntegrationTest {
                 .reviewer(firstStudent).reviewee(secondStudent).starRating(4).build());
         peerReviewRepository.saveAndFlush(PeerReview.builder().sprint(secondActive)
                 .reviewer(secondStudent).reviewee(firstStudent).starRating(5).build());
-        RubricTemplate tombstonedRubric = rubricTemplateRepository.saveAndFlush(RubricTemplate.builder()
-                .criteriaName("Retained history").weight(BigDecimal.ONE).build());
-        entityManager.persist(PeerReviewDetail.builder().peerReview(firstReview).rubricTemplate(tombstonedRubric)
-                .criteriaName("Retained history").criteriaOrder(0).starRating(4).build());
-        tombstonedRubric.setDeletedAt(LocalDateTime.now());
-        rubricTemplateRepository.saveAndFlush(tombstonedRubric);
         entityManager.flush();
         return new Fixture(alpha, alphaSemester, alphaLecturer, gammaLecturer);
     }

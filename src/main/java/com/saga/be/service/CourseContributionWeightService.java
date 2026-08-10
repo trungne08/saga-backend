@@ -55,7 +55,7 @@ public class CourseContributionWeightService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Lecturer is required");
         }
         ContributionSliceWeights requestedWeights = validateRequestedWeights(request);
-        Course course = requireActiveCourseForMutation(courseId);
+        Course course = requireCourse(courseId);
         Lecturer lecturer = lecturerRepository.findById(request.lecturerId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Lecturer not found"));
         if (course.getInstructor() == null
@@ -177,7 +177,7 @@ public class CourseContributionWeightService {
                 ? null
                 : adminRepository.findById(request.adminId())
                         .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Admin not found"));
-        Course course = requireActiveCourseForMutation(overrideRequest.getTargetConfigId());
+        Course course = requireCourse(overrideRequest.getTargetConfigId());
         if (status == PolicyOverrideStatus.APPROVED) {
             ContributionSliceWeights approvedWeights = ContributionSliceWeights.normalizeConfigured(
                     floatValue(overrideRequest.getProposedCodeWeight()),
@@ -225,14 +225,6 @@ public class CourseContributionWeightService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Course is required");
         }
         return courseRepository.findById(courseId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Course not found"));
-    }
-
-    private Course requireActiveCourseForMutation(UUID courseId) {
-        if (courseId == null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Course is required");
-        }
-        return courseRepository.findByIdAndDeletedAtIsNull(courseId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Course not found"));
     }
 

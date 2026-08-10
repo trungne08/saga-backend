@@ -8,10 +8,18 @@
 
 # SAGA — Nhật ký quyết định kỹ thuật
 
+## DEC-063 — A13 không mở API Admin advanced khi capability chưa khép kín (2026-08-10)
+
+**Status: ACCEPTED.**
+
+- Không thêm endpoint per-user audit: local actor ID chỉ forward-only, không đủ complete historical semantics/index/retention policy.
+- Không thêm role/password/Course membership/notification/generic settings: thiếu lần lượt transition governance, Cognito Admin reset contract, TeamMember retention contract, notification schema-consumer lifecycle và global typed-setting contract.
+- Admin cross-access giữ authorization explicit theo shared endpoint; không duplicate `/api/admin/courses/**`, không thêm dashboard charts, migration, Mongo backfill, Bearer hoặc Cognito Admin API.
+
 ## DEC-059 — A12 Admin closure boundary (2026-08-09)
 
 **Status: ACCEPTED.** Admin core được đóng theo source/test hiện có: user list/status/import,
-master-data CRUD có retention guard, typed active Semester, global rubric, progress/export và
+master-data CRUD có retention guard, typed active Semester, progress/export và
 operational reads. Các gap còn lại là governance/business-contract blocker, không phải feature
 được ngầm phê duyệt. Không thêm per-user audit, broadcast, impersonation, role/password mutation,
 generic settings, membership mutation, Project DELETE, Bearer hoặc Cognito Admin API.
@@ -26,7 +34,7 @@ Student và Lecturer sở hữu `AccountStatus`; Admin không có status trong m
 
 **Status: ACCEPTED / CONFIRMED bởi source và test.**
 
-Course dùng tombstone `deletedAt` qua V20. Create/update phải resolve Subject, Class, Semester active trước khi ghi. DELETE chỉ đặt tombstone khi không có Team, Project, StudentCourseInvitation hay TaskWeightConfig trỏ tới Course; bất kỳ dependency nào trả 409 generic. Không hard-delete, cascade, detach hay sửa membership/import delivery. Course tombstone không xuất hiện active read và courseCode không được tái dùng. Import và Contribution mutation resolve Course active-only; resolver raw read trong analytics/roster/contribution cần audit retention riêng.
+Course dùng tombstone `deletedAt` qua V20. Create/update phải resolve Subject, Class, Semester active trước khi ghi. DELETE chỉ đặt tombstone khi không có Team, Project, StudentCourseInvitation hay TaskWeightConfig trỏ tới Course; bất kỳ dependency nào trả 409 generic. Không hard-delete, cascade, detach hay sửa membership/import delivery. Course tombstone không xuất hiện active read và courseCode không được tái dùng. Import resolve Course active-only; Contribution mutation và resolver analytics/roster/Contribution giữ behavior baseline, cần audit retention riêng.
 
 ## DEC-047 — Semester Update và Soft Delete có dependency guard
 
@@ -610,19 +618,16 @@ Không có secret hoặc thông tin đăng nhập thật trong decision log này
   state production khớp V19–V22 và duplicate FK không chặn V22. Không cleanup FK,
   seed rubric hoặc mở CRUD từ fact này.
 
-## DEC-051 — Admin chỉ quản lý global rubric active qua soft-delete
+## DEC-051 — Admin global rubric M4B
 
-- Quyết định: thêm CRUD ADMIN cho `/api/admin/peer-review-rubrics`, chỉ áp dụng
-  `subject_id = NULL` và `deleted_at IS NULL`; không có batch hay subject-specific
-  CRUD. POST/PUT/DELETE dùng session browser + CSRF.
-- Ràng buộc: criteriaName trim/non-blank, weight bắt buộc, description nullable;
-  active global không quá 4 do `PeerReviewRequest.criteriaRatings @Size(max=4)`.
-  Cho phép zero active; không enforce 100%, uniqueness hoặc rebalance.
-- Retention: V23 thêm `deleted_at` nullable và DELETE set timestamp; không hard-delete,
-  cascade hoặc rewrite `PeerReviewDetail`/`Assessment`. Lookup cấu hình mới active-only,
-  lookup reference history vẫn cho phép tombstone.
-- Evidence: `AdminPeerReviewRubricIntegrationTest`, `PeerReviewServiceTest`,
-  `RubricMigrationContractTest` và OpenAPI test pass. Runtime production V23: **CONFIRMED**.
+**Status: SUPERSEDED / ROLLED_BACK_BY_SCOPE_OWNERSHIP (2026-08-10).**
+
+- Quyết định M4B về CRUD `/api/admin/peer-review-rubrics`, soft-delete và resolver
+  active-only không còn thuộc backend ownership hiện tại; code, API, test behavior và
+  tài liệu contract đã được rollback về baseline trước M4B.
+- V23 đã áp dụng production nên không bị xóa, đổi, rename hoặc tái sử dụng. Cột additive
+  `rubric_template.deleted_at` vẫn tồn tại nhưng code baseline không dùng nó; không tạo
+  reverse migration hoặc thay đổi dữ liệu historical.
 
 ## DEC-052 — Tổng quan tiến độ Admin chỉ công bố local current counts theo Course
 

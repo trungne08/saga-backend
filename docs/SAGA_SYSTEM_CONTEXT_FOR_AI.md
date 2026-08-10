@@ -6,10 +6,16 @@
 
 # SAGA — Context kỹ thuật hệ thống hiện tại
 
+## A13 — Admin advanced gap closure, 2026-08-10
+
+- **CONFIRMED:** capability Admin core A12 và shared-domain cross-access có evidence không cần namespace `/api/admin` mới: Course master data/roster, Team roster, Task/Sprint, analytics, Peer Review và Contribution đều có authorization riêng theo endpoint; ADMIN chỉ được phép ở các endpoint source đã nêu rõ.
+- **BLOCKED:** per-user audit không hứa complete history vì `actorLocalProfileId`/`actorRole` chỉ forward-only và repository chỉ có global pageable read. Role mutation thiếu transition/profile/Cognito/session governance; password reset thiếu Cognito Admin contract; Course membership thiếu team-selection/retention; notification thiếu schema evidence/consumer; generic evaluation setting thiếu global typed contract.
+- **RECOMMENDED:** product quyết định riêng cho từng blocker trước khi mở API. Không suy diễn ADMIN bypass toàn hệ thống, không duplicate `/api/admin/courses/**`, không thêm chart, Bearer, Cognito Admin API, migration hoặc Mongo backfill.
+
 ## A12 — Admin backend closure, 2026-08-09
 
 **CONFIRMED:** Admin core gồm user list/status/import, CRUD master data, active Semester,
-global rubric, progress/export, global audit/stats/integration health và global team/project read.
+progress/export, global audit/stats/integration health và global team/project read.
 Toàn bộ dùng browser session; unsafe mutation cần CSRF, không Bearer/Cognito Admin API.
 
 **PARTIAL/BLOCKED:** A11A chỉ ghi durable local actor cho event audit mới. Per-user audit history,
@@ -727,21 +733,13 @@ và reliability regression 20 tests đều pass.
   Không suy diễn rằng FK đã được cleanup; không có seed rubric, Admin CRUD hay thay
   đổi Peer Review.
 
-## Cập nhật 2026-08-09 — Admin global rubric M4B
+## Scope rollback M4B — 2026-08-10
 
-- **CONFIRMED:** `RubricTemplate` có `deletedAt`; V23 chỉ bổ sung
-  `rubric_template.deleted_at DATETIME(6) NULL`. Không sửa V10/V13/V22, không
-  seed, không drop duplicate FK. Runtime production V23 đã **CONFIRMED** thành công.
-- **CONFIRMED:** ADMIN qua browser session + CSRF có `POST`, `PUT`, `DELETE`
-  `/api/admin/peer-review-rubrics`; chỉ quản lý rubric global active
-  (`subject_id = NULL`). Không có bearer, batch API hay CRUD subject-specific.
-- **CONFIRMED:** criteriaName được trim và non-blank; weight bắt buộc;
-  description nullable. Tối đa 4 global rubric active, cho phép 0; không
-  enforce tổng weight = 100 hay uniqueness criteriaName.
-- **CONFIRMED:** DELETE chỉ set tombstone, không hard-delete/cascade. Resolver
-  cấu hình hiện tại chỉ lấy active global rồi fallback active Subject; reference history
-  vẫn dereference được tombstone. `PeerReviewRequest` `@Size(max = 4)`, scoring
-  và Contribution không đổi.
+- **CONFIRMED:** M4B Admin rubric CRUD và toàn bộ behavior Peer Review/Rubric đi kèm
+  đã được rollback theo ownership; các route `/api/admin/peer-review-rubrics` không tồn tại.
+- **CONFIRMED:** V23 đã áp dụng production nên phải giữ nguyên file migration và schema
+  additive `rubric_template.deleted_at`. Entity, repository và resolver baseline không
+  dùng cột này; không có reverse migration hay sửa dữ liệu lịch sử.
 
 ## Cập nhật 2026-08-09 — Admin Course progress overview M5
 

@@ -6,10 +6,16 @@
 
 # SAGA — Trạng thái hiện tại
 
+## A13 — Admin advanced gap closure, 2026-08-10
+
+- **IMPLEMENTED trong A13:** không có API mới; audit xác nhận reuse các route shared đã hỗ trợ ADMIN là contract đúng.
+- **CONFIRMED:** Course detail/list/CRUD và roster; Team roster; Task/Sprint; Lecturer analytics; Peer Review; Contribution có ADMIN access theo từng controller/service tương ứng. Đây không phải nguyên tắc ADMIN bypass.
+- **BLOCKED:** per-user audit history, role mutation, password reset, manual Course membership, notification broadcast và generic evaluation settings. Dashboard charts anomaly/graph-processing nằm ngoài A13.
+
 ## A12 — Admin closure, 2026-08-09
 
 - **CONFIRMED:** Core Admin source/test có user management, master-data retention CRUD, typed
-  active Semester, global rubric, Course progress/XLSX export, local operational reads và global
+  active Semester, Course progress/XLSX export, local operational reads và global
   team/project visibility.
 - **PARTIAL:** A11A durable audit identity chỉ forward cho producer có exact local actor; không
   làm historical coverage complete.
@@ -33,7 +39,8 @@
 - **CONFIRMED:** `PUT`/`DELETE /api/v1/courses/{id}` đã có, ADMIN-only; PUT dùng `CourseRequest`, DELETE trả 204 khi Course không còn dependency.
 - **CONFIRMED:** V20 thêm `course.deleted_at`; active read ẩn tombstone, code tombstone vẫn unique. Create/update từ chối Subject/Class/Semester tombstone bằng 404.
 - **CONFIRMED:** Guard xóa kiểm tra Team, Project, StudentCourseInvitation, TaskWeightConfig và trả 409; không có cascade/hard delete.
-- **PARTIAL:** import và Contribution mutation đã resolve Course active-only; các read resolver analytics/roster/Contribution còn raw theo phạm vi cũ, chưa refactor trong M2B.
+- **PARTIAL:** import resolve Course active-only. Contribution mutation và các resolver
+  analytics/roster/Contribution giữ lookup baseline; không refactor chúng trong M2B.
 
 ## Cập nhật 2026-08-09 — Semester Update và Soft Delete
 
@@ -443,19 +450,13 @@ BASE HEAD của snapshot cũ: `0bc30be`. HEAD audit hiện hành là `4f3dee9`; 
 - **CONFIRMED:** duplicate FK rubric subject không chặn nullable repair, nhưng vẫn
   tồn tại. Không có cleanup FK, seed, Admin CRUD hoặc thay đổi Peer Review.
 
-## Cập nhật 2026-08-09 — Admin global rubric M4B
+## Scope rollback M4B — 2026-08-10
 
-- **CONFIRMED:** V23 additive thêm `rubric_template.deleted_at DATETIME(6) NULL`; runtime
-  production V23 đã thành công. V10/V13/V22 và duplicate FK không bị sửa.
-- **CONFIRMED:** ba mutation admin `/api/admin/peer-review-rubrics` chỉ thao tác
-  global active rubric. POST luôn tạo `subject=null`, `deletedAt=null`; PUT giữ
-  id/subject/deletedAt; DELETE soft-delete, delete lần hai/missing/tombstone là 404.
-- **CONFIRMED:** active global tối đa 4 do compatibility `criteriaRatings max=4`;
-  active count 0 được phép để default trả `[]` và Team fallback Subject.
-  Không có invariant 100%, uniqueness, rebalance, hard-delete hay rewrite history.
-- **Verification:** targeted 43 tests pass, bao gồm V23, CRUD/security/CSRF,
-  resolver active-only, retention PeerReviewDetail/Assessment, OpenAPI và regression
-  AccountStatus/Admin read/Contribution.
+- **CONFIRMED:** Admin rubric CRUD, `deletedAt` entity/repository lookup và resolver
+  active-only của Peer Review đã được trả về behavior baseline trước M4B.
+- **CONFIRMED:** V23 `rubric_template.deleted_at` đã chạy production nên còn nguyên,
+  bất biến và không được application sử dụng. Không có reverse migration, seed,
+  hard-delete hay sửa historical data.
 
 ## Cập nhật 2026-08-09 — Admin Course progress overview M5
 
