@@ -12,6 +12,7 @@ import com.saga.be.entity.Course;
 import com.saga.be.entity.Lecturer;
 import com.saga.be.entity.Semester;
 import com.saga.be.entity.Student;
+import com.saga.be.entity.StudentCourseInvitation;
 import com.saga.be.entity.Subject;
 import com.saga.be.entity.Team;
 import com.saga.be.entity.TeamMember;
@@ -208,10 +209,14 @@ public class CourseService {
                 studentIdsWithTeam.add(membership.getStudent().getId());
             }
         }
-        List<CourseStudentRosterItem> studentsWithoutTeam = studentCourseInvitationRepository
-                .findDistinctStudentsByCourseId(courseId)
-                .stream()
-                .filter(student -> !studentIdsWithTeam.contains(student.getId()))
+        java.util.LinkedHashMap<UUID, Student> studentsWithoutTeamById = new java.util.LinkedHashMap<>();
+        for (StudentCourseInvitation invitation : studentCourseInvitationRepository.findByCourseIdOrderByCreatedAtAsc(courseId)) {
+            Student student = invitation.getStudent();
+            if (student != null && !studentIdsWithTeam.contains(student.getId())) {
+                studentsWithoutTeamById.putIfAbsent(student.getId(), student);
+            }
+        }
+        List<CourseStudentRosterItem> studentsWithoutTeam = studentsWithoutTeamById.values().stream()
                 .filter(student -> matchesKeyword(student, keyword))
                 .map(student -> new CourseStudentRosterItem(
                         student.getId(),

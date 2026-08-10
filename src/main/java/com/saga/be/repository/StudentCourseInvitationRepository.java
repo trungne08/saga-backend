@@ -51,11 +51,5 @@ public interface StudentCourseInvitationRepository
             @Param("staleBefore") java.time.LocalDateTime staleBefore
     );
 
-    @Query("""
-            select distinct invitation.student
-            from StudentCourseInvitation invitation
-            where invitation.course.id = :courseId
-            order by lower(invitation.student.studentCode), invitation.student.id
-            """)
-    List<Student> findDistinctStudentsByCourseId(@Param("courseId") UUID courseId);
+    List<StudentCourseInvitation> findByCourseIdOrderByCreatedAtAsc(UUID courseId);
 }

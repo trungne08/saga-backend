@@ -2,6 +2,7 @@ package com.saga.be.service;
 
 import com.saga.be.entity.Course;
 import com.saga.be.entity.Student;
+import com.saga.be.entity.StudentCourseInvitation;
 import com.saga.be.entity.Team;
 import com.saga.be.entity.TeamMember;
 import com.saga.be.entity.enums.AccountStatus;
@@ -95,8 +96,11 @@ public class ExcelImportService {
                 : course.getClazz().getClassCode().trim();
 
         Map<UUID, Student> studentsById = new HashMap<>();
-        for (Student invitedStudent : studentCourseInvitationRepository.findDistinctStudentsByCourseId(courseId)) {
-            studentsById.put(invitedStudent.getId(), invitedStudent);
+        for (StudentCourseInvitation invitation : studentCourseInvitationRepository.findByCourseIdOrderByCreatedAtAsc(courseId)) {
+            Student invitedStudent = invitation.getStudent();
+            if (invitedStudent != null) {
+                studentsById.put(invitedStudent.getId(), invitedStudent);
+            }
         }
         for (TeamMember membership : teamMemberRepository.findByTeamCourseId(courseId)) {
             Student student = membership.getStudent();
