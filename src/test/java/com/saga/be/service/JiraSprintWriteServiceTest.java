@@ -25,6 +25,7 @@ import com.saga.be.entity.enums.AccountStatus;
 import com.saga.be.entity.enums.IntegrationStatus;
 import com.saga.be.entity.enums.JiraWriteOperationStatus;
 import com.saga.be.entity.enums.JiraWriteOperationType;
+import com.saga.be.entity.enums.NotificationType;
 import com.saga.be.exception.IntegrationException;
 import com.saga.be.integration.project.JiraCredentialService;
 import com.saga.be.integration.project.JiraBoardResolutionService;
@@ -87,6 +88,9 @@ class JiraSprintWriteServiceTest {
         order.verify(f.provider).getSprint("token", "cloud", "42");
         order.verify(f.upserts).upsert(f.board.getId(), snapshot);
         verify(f.operations).complete(op.getId());
+        verify(f.notifications).sprintCompleted(
+                op.getId(), NotificationType.SPRINT_CREATED, f.actor, "Sprint"
+        );
     }
 
     @Test
@@ -107,6 +111,9 @@ class JiraSprintWriteServiceTest {
         order.verify(f.upserts).upsert(f.board.getId(), snapshot);
         assertEquals(Map.of("name", "Renamed"), changes.getValue());
         verify(f.operations).complete(op.getId());
+        verify(f.notifications).sprintCompleted(
+                op.getId(), NotificationType.SPRINT_UPDATED, f.actor, existing.getName()
+        );
     }
 
     @Test
@@ -123,6 +130,28 @@ class JiraSprintWriteServiceTest {
         order.verify(f.provider).updateSprint("token", "cloud", "42", Map.of("state", "active"));
         order.verify(f.provider).getSprint("token", "cloud", "42");
         order.verify(f.upserts).upsert(f.board.getId(), snapshot);
+        verify(f.notifications).sprintCompleted(
+                op.getId(), NotificationType.SPRINT_STARTED, f.actor, existing.getName()
+        );
+    }
+
+    @Test
+    void startRemainsRemoteSucceededUntilCanonicalStateIsActive() {
+        Fixture f = new Fixture(); Sprint existing = f.sprint("future"); f.stubSprint(existing);
+        JiraWriteOperation op = f.operation(JiraWriteOperationType.SPRINT_START, JiraWriteOperationStatus.PENDING);
+        JiraSprintSnapshot snapshot = f.snapshot("future", "Sprint");
+        when(f.operations.claim(eq(f.project), eq(f.actor), eq(JiraWriteOperationType.SPRINT_START), eq("key"), eq("f")))
+                .thenReturn(op);
+        when(f.provider.getSprint("token", "cloud", "42")).thenReturn(snapshot);
+        when(f.upserts.upsert(f.board.getId(), snapshot)).thenReturn(existing);
+
+        assertEquals("JIRA_WRITE_RECOVERY_REQUIRED", assertThrows(
+                IntegrationException.class,
+                () -> f.service.start(f.actor, f.projectId, existing.getId(), "key")
+        ).getCode());
+
+        verify(f.operations, never()).complete(op.getId());
+        verifyNoInteractions(f.notifications);
     }
 
     @Test
@@ -145,6 +174,9 @@ class JiraSprintWriteServiceTest {
         assertEquals("closed", f.service.close(f.actor, f.projectId, existing.getId(), "key").state());
         verify(f.provider).updateSprint("token", "cloud", "42", Map.of("state", "closed"));
         verify(f.operations).complete(op.getId());
+        verify(f.notifications).sprintCompleted(
+                op.getId(), NotificationType.SPRINT_CLOSED, f.actor, existing.getName()
+        );
     }
 
     @Test
@@ -154,6 +186,7 @@ class JiraSprintWriteServiceTest {
                 .thenReturn(f.operation(JiraWriteOperationType.SPRINT_START, JiraWriteOperationStatus.COMPLETED));
         assertEquals(existing.getId(), f.service.start(f.actor, f.projectId, existing.getId(), "key").id());
         verifyNoInteractions(f.provider);
+        verifyNoInteractions(f.notifications);
     }
 
     @Test
@@ -174,6 +207,27 @@ class JiraSprintWriteServiceTest {
         assertNull(task.getSprint());
         assertNotNull(existing.getDeletedAt());
         verify(f.operations).complete(op.getId());
+        verify(f.notifications).sprintCompleted(
+                op.getId(), NotificationType.SPRINT_DELETED, f.actor, existing.getName()
+        );
+    }
+
+    @Test
+    void completedDeleteReplayDoesNotDeleteOrNotifyAgain() {
+        Fixture f = new Fixture(); Sprint existing = f.sprint("future"); f.stubSprint(existing);
+        JiraWriteOperation op = f.operation(JiraWriteOperationType.SPRINT_DELETE, JiraWriteOperationStatus.PENDING);
+        when(f.operations.claim(eq(f.project), eq(f.actor), eq(JiraWriteOperationType.SPRINT_DELETE), eq("key"), eq("f")))
+                .thenReturn(op);
+        when(f.tasks.findByProjectId(f.projectId)).thenReturn(List.of());
+
+        f.service.delete(f.actor, f.projectId, existing.getId(), "key");
+        op.setStatus(JiraWriteOperationStatus.COMPLETED);
+        f.service.delete(f.actor, f.projectId, existing.getId(), "key");
+
+        verify(f.provider, times(1)).deleteSprint("token", "cloud", "42");
+        verify(f.notifications, times(1)).sprintCompleted(
+                op.getId(), NotificationType.SPRINT_DELETED, f.actor, existing.getName()
+        );
     }
 
     @Test
@@ -188,6 +242,7 @@ class JiraSprintWriteServiceTest {
         assertNull(existing.getDeletedAt());
         verify(f.tasks, never()).flush();
         verify(f.sprints, never()).saveAndFlush(existing);
+        verifyNoInteractions(f.notifications);
     }
 
     @Test
@@ -357,6 +412,7 @@ class JiraSprintWriteServiceTest {
         final JiraWriteOperationService operations = mock(JiraWriteOperationService.class);
         final SprintRepository sprints = mock(SprintRepository.class);
         final TaskRepository tasks = mock(TaskRepository.class);
+        final JiraMutationNotificationProducer notifications = mock(JiraMutationNotificationProducer.class);
         final UUID projectId = UUID.randomUUID();
         final Project project = Project.builder().build();
         final JiraBoard board;
@@ -375,7 +431,18 @@ class JiraSprintWriteServiceTest {
             when(boards.findByProjectId(projectId)).thenReturn(Optional.of(board));
             when(credentials.validAccessToken(board)).thenReturn("token");
             when(boardResolver.resolve(board)).thenReturn("99");
-            service = new JiraSprintWriteService(authorization, boards, credentials, boardResolver, provider, upserts, operations, sprints, tasks);
+            service = new JiraSprintWriteService(
+                    authorization,
+                    boards,
+                    credentials,
+                    boardResolver,
+                    provider,
+                    upserts,
+                    operations,
+                    sprints,
+                    tasks,
+                    notifications
+            );
         }
 
         Sprint sprint(String state) {
@@ -387,6 +454,7 @@ class JiraSprintWriteServiceTest {
 
         void stubSprint(Sprint sprint) {
             when(sprints.findByIdAndBoardProjectIdAndDeletedAtIsNull(sprint.getId(), projectId)).thenReturn(Optional.of(sprint));
+            when(sprints.findByIdAndBoardProjectId(sprint.getId(), projectId)).thenReturn(Optional.of(sprint));
         }
 
         JiraWriteOperation operation(JiraWriteOperationType type, JiraWriteOperationStatus status) {

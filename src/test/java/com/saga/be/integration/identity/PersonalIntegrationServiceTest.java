@@ -25,6 +25,7 @@ import com.saga.be.integration.security.OAuthStateService;
 import com.saga.be.security.ApplicationRole;
 import com.saga.be.security.SagaPrincipal;
 import com.saga.be.service.AuthenticationAuditService;
+import com.saga.be.service.PersonalIntegrationNotificationProducer;
 import java.time.Instant;
 import java.util.List;
 import java.util.Set;
@@ -39,6 +40,7 @@ class PersonalIntegrationServiceTest {
     private OAuthStateService stateService;
     private JiraProviderClient jiraClient;
     private GitHubProviderClient gitHubClient;
+    private PersonalIntegrationNotificationProducer notificationProducer;
     private PersonalIntegrationService service;
     private SagaPrincipal principal;
     private MockHttpSession session;
@@ -49,6 +51,7 @@ class PersonalIntegrationServiceTest {
         stateService = mock(OAuthStateService.class);
         jiraClient = mock(JiraProviderClient.class);
         gitHubClient = mock(GitHubProviderClient.class);
+        notificationProducer = mock(PersonalIntegrationNotificationProducer.class);
         service = new PersonalIntegrationService(
                 mappingService,
                 stateService,
@@ -81,7 +84,8 @@ class PersonalIntegrationServiceTest {
                         "https://saga.example/api/webhooks/github"
                 ),
                 mock(IntegrationAttemptLimiter.class),
-                mock(AuthenticationAuditService.class)
+                mock(AuthenticationAuditService.class),
+                notificationProducer
         );
         principal = new SagaPrincipal(
                 "student-sub",
@@ -138,6 +142,7 @@ class PersonalIntegrationServiceTest {
                 "Mutable Display Name",
                 "jira@example.com"
         );
+        verify(notificationProducer).jiraLinked(eq(principal), any());
     }
 
     @Test
@@ -186,6 +191,7 @@ class PersonalIntegrationServiceTest {
                 "mutable-login",
                 "github@example.com"
         );
+        verify(notificationProducer).gitHubLinked(eq(principal), any());
     }
 
     private IdentityMap mapping(IntegrationProvider provider) {

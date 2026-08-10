@@ -183,6 +183,73 @@ class MyNotificationAndFirebaseInstallationIntegrationTest {
                 });
     }
 
+    @Test
+    void eventReplayCreatesOneBellNotificationAndOneDeliveryPerActiveFid() {
+        UUID ownerId = UUID.randomUUID();
+        installationRepository.save(FirebaseInstallation.builder()
+                .ownerProfileId(ownerId)
+                .ownerRole(ApplicationRole.STUDENT)
+                .firebaseInstallationId("fid-event-one")
+                .active(true)
+                .lastRegisteredAt(LocalDateTime.now())
+                .build());
+        installationRepository.save(FirebaseInstallation.builder()
+                .ownerProfileId(ownerId)
+                .ownerRole(ApplicationRole.STUDENT)
+                .firebaseInstallationId("fid-event-two")
+                .active(true)
+                .lastRegisteredAt(LocalDateTime.now())
+                .build());
+
+        notificationService.createOnceForEvent(
+                ownerId,
+                ApplicationRole.STUDENT,
+                NotificationType.SPRINT_STARTED,
+                "Sprint started",
+                "Sprint started safely",
+                "jira-write:operation-one:SPRINT_STARTED"
+        );
+        notificationService.createOnceForEvent(
+                ownerId,
+                ApplicationRole.STUDENT,
+                NotificationType.SPRINT_STARTED,
+                "Sprint started",
+                "Sprint started safely",
+                "jira-write:operation-one:SPRINT_STARTED"
+        );
+
+        org.assertj.core.api.Assertions.assertThat(notificationRepository.findAll())
+                .singleElement()
+                .satisfies(notification -> org.assertj.core.api.Assertions.assertThat(notification.getEventKey())
+                        .isEqualTo("jira-write:operation-one:SPRINT_STARTED"));
+        org.assertj.core.api.Assertions.assertThat(deliveryRepository.findAll()).hasSize(2);
+    }
+
+    @Test
+    void eventWithoutFidStillPersistsAndChangedDueRevisionCanNotifyAgain() {
+        UUID ownerId = UUID.randomUUID();
+
+        notificationService.createOnceForEvent(
+                ownerId,
+                ApplicationRole.STUDENT,
+                NotificationType.TASK_DUE_TODAY,
+                "Due today",
+                "Task is due today",
+                "task:one:due:2026-08-11:type:TASK_DUE_TODAY"
+        );
+        notificationService.createOnceForEvent(
+                ownerId,
+                ApplicationRole.STUDENT,
+                NotificationType.TASK_DUE_TODAY,
+                "Due today",
+                "Task is due today",
+                "task:one:due:2026-08-12:type:TASK_DUE_TODAY"
+        );
+
+        org.assertj.core.api.Assertions.assertThat(notificationRepository.findAll()).hasSize(2);
+        org.assertj.core.api.Assertions.assertThat(deliveryRepository.findAll()).isEmpty();
+    }
+
     private org.springframework.test.web.servlet.ResultActions register(Authentication owner, String body)
             throws Exception {
         return mockMvc.perform(post("/api/me/firebase-installations")

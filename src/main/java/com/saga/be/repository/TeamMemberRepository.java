@@ -74,4 +74,15 @@ public interface TeamMemberRepository extends JpaRepository<TeamMember, UUID> {
     Page<TeamMember> findByTeamId(UUID teamId, Pageable pageable);
 
     long countByTeamId(UUID teamId);
+
+    @Query("select distinct membership.student.id from TeamMember membership "
+            + "where membership.team.id = :teamId order by membership.student.id")
+    List<UUID> findDistinctStudentIdsByTeamId(@Param("teamId") UUID teamId);
+
+    @Query("select distinct membership.student.id from TeamMember membership "
+            + "where membership.team.course.id in :courseIds order by membership.student.id")
+    Page<UUID> findDistinctStudentIdsByTeamCourseIdIn(
+            @Param("courseIds") java.util.Collection<UUID> courseIds,
+            Pageable pageable
+    );
 }

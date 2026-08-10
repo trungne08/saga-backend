@@ -28,4 +28,18 @@ public interface NotificationRepository extends JpaRepository<Notification, UUID
             UUID recipientProfileId,
             ApplicationRole recipientRole
     );
+
+    Optional<Notification> findByBroadcastIdAndRecipientProfileIdAndRecipientRole(
+            UUID broadcastId,
+            UUID recipientProfileId,
+            ApplicationRole recipientRole
+    );
+
+    long countByBroadcastId(UUID broadcastId);
+
+    Optional<Notification> findByRecipientProfileIdAndRecipientRoleAndEventKey(
+            UUID recipientProfileId,
+            ApplicationRole recipientRole,
+            String eventKey
+    );
 }

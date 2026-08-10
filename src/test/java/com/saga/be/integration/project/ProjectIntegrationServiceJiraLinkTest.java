@@ -37,6 +37,7 @@ import com.saga.be.repository.SyncJobLogRepository;
 import com.saga.be.security.ApplicationRole;
 import com.saga.be.security.SagaPrincipal;
 import com.saga.be.service.AuthenticationAuditService;
+import com.saga.be.service.ProjectIntegrationNotificationProducer;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -418,7 +419,8 @@ class ProjectIntegrationServiceJiraLinkTest {
                 org.mockito.Mockito.mock(AutomaticSyncDispatcher.class),
                 event -> { },
                 org.mockito.Mockito.mock(IntegrationAttemptLimiter.class),
-                org.mockito.Mockito.mock(AuthenticationAuditService.class)
+                org.mockito.Mockito.mock(AuthenticationAuditService.class),
+                org.mockito.Mockito.mock(ProjectIntegrationNotificationProducer.class)
         );
         return new Fixture(
                 service, principal, projectId, session, jira, boardRepository,

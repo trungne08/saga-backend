@@ -32,6 +32,7 @@ import com.saga.be.entity.enums.IntegrationStatus;
 import com.saga.be.entity.enums.IdentityMappingStatus;
 import com.saga.be.entity.enums.JiraWriteOperationStatus;
 import com.saga.be.entity.enums.JiraWriteOperationType;
+import com.saga.be.entity.enums.NotificationType;
 import com.saga.be.entity.enums.Priority;
 import com.saga.be.entity.enums.TaskType;
 import com.saga.be.exception.IntegrationException;
@@ -569,6 +570,9 @@ class JiraTaskWriteServiceTest {
         verify(fixture.provider, times(1)).createIssue(eq("token"), eq("cloud"), any());
         verify(fixture.operations).complete(fixture.operation.getId());
         assertEquals(JiraWriteOperationStatus.COMPLETED, fixture.operation.getStatus());
+        verify(fixture.notifications).taskCompleted(
+                fixture.operation.getId(), NotificationType.TASK_CREATED, fixture.principal
+        );
     }
 
     @Test
@@ -607,6 +611,9 @@ class JiraTaskWriteServiceTest {
         ordered.verify(fixture.canonicalReads).findResponse(fixture.projectId, "101");
         ordered.verify(fixture.operations).complete(fixture.operation.getId());
         assertEquals(JiraWriteOperationStatus.COMPLETED, fixture.operation.getStatus());
+        verify(fixture.notifications).taskCompleted(
+                fixture.operation.getId(), NotificationType.TASK_SPRINT_CHANGED, fixture.principal
+        );
     }
 
     @Test
@@ -661,6 +668,9 @@ class JiraTaskWriteServiceTest {
         verify(fixture.operations).complete(fixture.operation.getId());
         assertEquals("101", fixture.operation.getRemoteResourceId());
         assertEquals(JiraWriteOperationStatus.COMPLETED, fixture.operation.getStatus());
+        verify(fixture.notifications).taskCompleted(
+                fixture.operation.getId(), NotificationType.TASK_ESTIMATION_CHANGED, fixture.principal
+        );
     }
 
     @Test
@@ -676,6 +686,9 @@ class JiraTaskWriteServiceTest {
         verify(fixture.provider, never()).estimateIssue(any(), any(), any(), any(), any());
         verify(fixture.provider).getIssue("token", "cloud", "101", "customfield_10016");
         verify(fixture.operations).complete(fixture.operation.getId());
+        verify(fixture.notifications).taskCompleted(
+                fixture.operation.getId(), NotificationType.TASK_ESTIMATION_CHANGED, fixture.principal
+        );
     }
 
     @Test
@@ -829,6 +842,9 @@ class JiraTaskWriteServiceTest {
         verify(fixture.canonicalReads).findResponse(fixture.projectId, "101");
         verify(fixture.operations).markRemoteSucceeded(fixture.operation.getId(), "101", "P-1");
         verify(fixture.operations).complete(fixture.operation.getId());
+        verify(fixture.notifications).taskCompleted(
+                fixture.operation.getId(), NotificationType.TASK_UPDATED, fixture.principal
+        );
     }
 
     @Test
@@ -1108,6 +1124,7 @@ class JiraTaskWriteServiceTest {
         JiraCanonicalTaskReadService canonicalReads = mock(JiraCanonicalTaskReadService.class);
         TaskRepository tasks = mock(TaskRepository.class);
         IdentityMapRepository identities = mock(IdentityMapRepository.class);
+        JiraMutationNotificationProducer notifications = mock(JiraMutationNotificationProducer.class);
         UUID projectId = UUID.randomUUID();
         Project project = Project.builder().name("Project").build(); project.setId(projectId);
         JiraBoard board = JiraBoard.builder().project(project).cloudId("cloud").jiraProjectId("10000")
@@ -1115,6 +1132,7 @@ class JiraTaskWriteServiceTest {
         UUID boardId = UUID.randomUUID();
         board.setId(boardId);
         JiraWriteOperation operation = JiraWriteOperation.builder().project(project)
+                .operationType(JiraWriteOperationType.TASK_CREATE)
                 .status(JiraWriteOperationStatus.PENDING).build(); operation.setId(UUID.randomUUID());
         SagaPrincipal principal = new SagaPrincipal("sub", "a@b.test", "User", ApplicationRole.ADMIN,
                 UUID.randomUUID(), AccountStatus.ACTIVE);
@@ -1132,7 +1150,7 @@ class JiraTaskWriteServiceTest {
                 new JiraCreateField("assignee", "Assignee", false, "string", null, List.of())
         ));
         return new CreateFixture(authorization, boards, credentials, provider, upserts, operations, canonicalReads, tasks,
-                identities, boardId, projectId, project, operation, principal);
+                identities, notifications, boardId, projectId, project, operation, principal);
     }
 
     private SprintFixture sprintFixture(boolean backlog) {
@@ -1146,6 +1164,7 @@ class JiraTaskWriteServiceTest {
         JiraTaskSprintFinalizationService finalizer = mock(JiraTaskSprintFinalizationService.class);
         TaskRepository tasks = mock(TaskRepository.class);
         SprintRepository sprints = mock(SprintRepository.class);
+        JiraMutationNotificationProducer notifications = mock(JiraMutationNotificationProducer.class);
         UUID projectId = UUID.randomUUID();
         Project project = Project.builder().name("Project").build(); project.setId(projectId);
         JiraBoard board = JiraBoard.builder().project(project).cloudId("cloud").jiraBoardId("7")
@@ -1179,8 +1198,8 @@ class JiraTaskWriteServiceTest {
         when(canonicalReads.findResponse(projectId, "101")).thenReturn(Optional.of(response));
         JiraTaskWriteService service = new JiraTaskWriteService(authorization, boards, credentials, provider, upserts,
                 operations, canonicalReads, finalizer, tasks, mock(IdentityMapRepository.class), sprints,
-                mock(JiraSprintUpsertService.class));
-        return new SprintFixture(service, provider, upserts, operations, canonicalReads, finalizer, projectId, project,
+                mock(JiraSprintUpsertService.class), notifications);
+        return new SprintFixture(service, provider, upserts, operations, canonicalReads, finalizer, notifications, projectId, project,
                 board, target, task, operation, principal, snapshot, response);
     }
 
@@ -1193,6 +1212,7 @@ class JiraTaskWriteServiceTest {
         JiraWriteOperationService operations = mock(JiraWriteOperationService.class);
         JiraCanonicalTaskReadService canonicalReads = mock(JiraCanonicalTaskReadService.class);
         TaskRepository tasks = mock(TaskRepository.class);
+        JiraMutationNotificationProducer notifications = mock(JiraMutationNotificationProducer.class);
         UUID projectId = UUID.randomUUID();
         Project project = Project.builder().name("Project").build(); project.setId(projectId);
         JiraBoard board = JiraBoard.builder().project(project).cloudId("cloud").jiraProjectId("10000")
@@ -1229,8 +1249,8 @@ class JiraTaskWriteServiceTest {
         when(canonicalReads.findResponse(projectId, "101")).thenReturn(Optional.of(response));
         JiraTaskWriteService service = new JiraTaskWriteService(authorization, boards, credentials, provider, upserts,
                 operations, canonicalReads, mock(JiraTaskSprintFinalizationService.class), tasks,
-                mock(IdentityMapRepository.class), mock(SprintRepository.class), mock(JiraSprintUpsertService.class));
-        return new UpdateFixture(service, provider, upserts, operations, canonicalReads, board,
+                mock(IdentityMapRepository.class), mock(SprintRepository.class), mock(JiraSprintUpsertService.class), notifications);
+        return new UpdateFixture(service, provider, upserts, operations, canonicalReads, notifications, board,
                 projectId, task, operation, principal, response);
     }
 
@@ -1243,6 +1263,7 @@ class JiraTaskWriteServiceTest {
         JiraWriteOperationService operations = mock(JiraWriteOperationService.class);
         JiraCanonicalTaskReadService canonicalReads = mock(JiraCanonicalTaskReadService.class);
         TaskRepository tasks = mock(TaskRepository.class);
+        JiraMutationNotificationProducer notifications = mock(JiraMutationNotificationProducer.class);
         UUID projectId = UUID.randomUUID();
         Project project = Project.builder().name("Project").build(); project.setId(projectId);
         JiraBoard board = JiraBoard.builder().project(project).cloudId("cloud").jiraBoardId("7")
@@ -1274,8 +1295,8 @@ class JiraTaskWriteServiceTest {
         when(canonicalReads.findResponse(projectId, "101")).thenReturn(Optional.of(TaskReadResponse.from(confirmed)));
         JiraTaskWriteService service = new JiraTaskWriteService(authorization, boards, credentials, provider, upserts,
                 operations, canonicalReads, mock(JiraTaskSprintFinalizationService.class), tasks,
-                mock(IdentityMapRepository.class), mock(SprintRepository.class), mock(JiraSprintUpsertService.class));
-        return new EstimationFixture(service, provider, upserts, operations, canonicalReads, projectId, project, board,
+                mock(IdentityMapRepository.class), mock(SprintRepository.class), mock(JiraSprintUpsertService.class), notifications);
+        return new EstimationFixture(service, provider, upserts, operations, canonicalReads, notifications, projectId, project, board,
                 task, operation, principal, snapshot);
     }
 
@@ -1289,6 +1310,7 @@ class JiraTaskWriteServiceTest {
             JiraCanonicalTaskReadService canonicalReads,
             TaskRepository tasks,
             IdentityMapRepository identities,
+            JiraMutationNotificationProducer notifications,
             UUID boardId,
             UUID projectId,
             Project project,
@@ -1298,7 +1320,7 @@ class JiraTaskWriteServiceTest {
         private JiraTaskWriteService service() {
             return new JiraTaskWriteService(authorization, boards, credentials, provider, upserts, operations, canonicalReads,
                     mock(JiraTaskSprintFinalizationService.class), tasks,
-                    identities, mock(SprintRepository.class), mock(JiraSprintUpsertService.class));
+                    identities, mock(SprintRepository.class), mock(JiraSprintUpsertService.class), notifications);
         }
     }
 
@@ -1309,6 +1331,7 @@ class JiraTaskWriteServiceTest {
             JiraWriteOperationService operations,
             JiraCanonicalTaskReadService canonicalReads,
             JiraTaskSprintFinalizationService finalizer,
+            JiraMutationNotificationProducer notifications,
             UUID projectId,
             Project project,
             JiraBoard board,
@@ -1327,6 +1350,7 @@ class JiraTaskWriteServiceTest {
             JiraIssueUpsertService upserts,
             JiraWriteOperationService operations,
             JiraCanonicalTaskReadService canonicalReads,
+            JiraMutationNotificationProducer notifications,
             JiraBoard board,
             UUID projectId,
             Task task,
@@ -1342,6 +1366,7 @@ class JiraTaskWriteServiceTest {
             JiraIssueUpsertService upserts,
             JiraWriteOperationService operations,
             JiraCanonicalTaskReadService canonicalReads,
+            JiraMutationNotificationProducer notifications,
             UUID projectId,
             Project project,
             JiraBoard board,

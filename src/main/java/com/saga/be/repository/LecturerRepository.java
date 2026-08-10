@@ -10,6 +10,8 @@ import java.util.List;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import java.util.UUID;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 @Repository
 public interface LecturerRepository extends JpaRepository<Lecturer, UUID>, JpaSpecificationExecutor<Lecturer> {
@@ -19,4 +21,7 @@ public interface LecturerRepository extends JpaRepository<Lecturer, UUID>, JpaSp
 
     @Query("select lecturer from Lecturer lecturer where lower(lecturer.email) in :emails")
     List<Lecturer> findAllByNormalizedEmailIn(@Param("emails") Collection<String> emails);
+
+    @Query("select lecturer.id from Lecturer lecturer order by lecturer.id")
+    Page<UUID> findAllIds(Pageable pageable);
 }

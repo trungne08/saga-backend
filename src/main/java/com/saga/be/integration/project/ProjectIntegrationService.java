@@ -44,6 +44,7 @@ import com.saga.be.repository.SyncJobLogRepository;
 import com.saga.be.security.ApplicationRole;
 import com.saga.be.security.SagaPrincipal;
 import com.saga.be.service.AuthenticationAuditService;
+import com.saga.be.service.ProjectIntegrationNotificationProducer;
 import jakarta.servlet.http.HttpSession;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -99,6 +100,7 @@ public class ProjectIntegrationService {
     private final ApplicationEventPublisher eventPublisher;
     private final IntegrationAttemptLimiter attemptLimiter;
     private final AuthenticationAuditService auditService;
+    private final ProjectIntegrationNotificationProducer notificationProducer;
     private final SecureRandom secureRandom = new SecureRandom();
 
     public ProjectIntegrationService(
@@ -123,7 +125,8 @@ public class ProjectIntegrationService {
             AutomaticSyncDispatcher syncDispatcher,
             ApplicationEventPublisher eventPublisher,
             IntegrationAttemptLimiter attemptLimiter,
-            AuthenticationAuditService auditService
+            AuthenticationAuditService auditService,
+            ProjectIntegrationNotificationProducer notificationProducer
     ) {
         this.authorization = authorization;
         this.stateService = stateService;
@@ -147,6 +150,7 @@ public class ProjectIntegrationService {
         this.eventPublisher = eventPublisher;
         this.attemptLimiter = attemptLimiter;
         this.auditService = auditService;
+        this.notificationProducer = notificationProducer;
     }
 
     public ProjectIntegrationsResponse integrations(
@@ -341,7 +345,8 @@ public class ProjectIntegrationService {
                     "BACKFILLING",
                     remoteAddress
             );
-                return integrations(principal, projectId);
+            notificationProducer.jiraProjectLinked(principal, projectId, saved.getId());
+            return integrations(principal, projectId);
             } catch (RuntimeException exception) {
                 compensateCreatedWebhook(
                         registration,
@@ -800,6 +805,11 @@ public class ProjectIntegrationService {
                 projectId,
                 "BACKFILLING",
                 remoteAddress
+        );
+        notificationProducer.gitHubProjectLinked(
+                principal,
+                projectId,
+                request.installationId()
         );
         return integrations(principal, projectId);
     }

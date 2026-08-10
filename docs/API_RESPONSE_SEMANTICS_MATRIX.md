@@ -185,6 +185,12 @@ Quy ước: `OAS` là response được khai báo trực tiếp trong OpenAPI; `
 | DELETE | `/api/me/integrations/jira` | Generated: disconnectJira | OAS: 204 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD (provider) | disconnectJira; OAS: 204 | OK | Bổ sung response metadata chi tiết theo task riêng. |
 | DELETE | `/api/me/integrations/github` | PersonalIntegrationController | OAS: 204 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD (provider) | disconnectGitHub; OAS: 204 | OK | Bổ sung response metadata chi tiết theo task riêng. |
 
+## Automatic Jira notification response semantics — 2026-08-11
+
+- No automatic Task/Sprint notification endpoint is added. Existing Jira mutation success/error bodies and HTTP statuses remain unchanged.
+- Bell side effects occur only after durable canonical `COMPLETED`; unresolved `REMOTE_SUCCEEDED`, FAILED, and UNKNOWN operations keep their existing recovery/error semantics and do not expose a success notification.
+- Notification or Firebase delivery failure is isolated from the already-completed mutation response. `actionUrl` is null until an internal FE route is confirmed.
+
 ## Missing APIs
 
 - **MISSING_API:** `DELETE /api/projects/{projectId}` không có trong generated OpenAPI/controller. Source baseline đã ghi đây là thiếu có chủ đích cho đến khi có dependency-guard/retention design; không triển khai trong milestone này.

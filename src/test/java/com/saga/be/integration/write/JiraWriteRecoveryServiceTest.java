@@ -19,6 +19,7 @@ import com.saga.be.entity.Sprint;
 import com.saga.be.entity.Task;
 import com.saga.be.entity.enums.JiraWriteOperationStatus;
 import com.saga.be.entity.enums.JiraWriteOperationType;
+import com.saga.be.entity.enums.NotificationType;
 import com.saga.be.integration.project.JiraCredentialService;
 import com.saga.be.integration.provider.JiraIssueSnapshot;
 import com.saga.be.integration.provider.JiraProviderClient;
@@ -30,6 +31,7 @@ import com.saga.be.repository.JiraBoardRepository;
 import com.saga.be.repository.JiraWriteOperationRepository;
 import com.saga.be.repository.SprintRepository;
 import com.saga.be.repository.TaskRepository;
+import com.saga.be.service.JiraMutationNotificationProducer;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -45,6 +47,7 @@ class JiraWriteRecoveryServiceTest {
         JiraProviderClient provider = mock(JiraProviderClient.class);
         JiraIssueUpsertService issueUpserts = mock(JiraIssueUpsertService.class);
         JiraWriteOperationService operationService = mock(JiraWriteOperationService.class);
+        JiraMutationNotificationProducer notifications = mock(JiraMutationNotificationProducer.class);
         JiraCanonicalTaskReadService canonicalReads = mock(JiraCanonicalTaskReadService.class);
         Project project = Project.builder().build(); project.setId(UUID.randomUUID());
         JiraBoard board = JiraBoard.builder().project(project).cloudId("cloud").build(); board.setId(UUID.randomUUID());
@@ -60,12 +63,14 @@ class JiraWriteRecoveryServiceTest {
         when(canonicalReads.exists(project.getId(), "101")).thenReturn(true);
 
         new JiraWriteRecoveryService(operations, boards, credentials, provider, issueUpserts,
-                mock(JiraSprintUpsertService.class), mock(TaskRepository.class), mock(SprintRepository.class), operationService, canonicalReads)
+                mock(JiraSprintUpsertService.class), mock(TaskRepository.class), mock(SprintRepository.class), operationService,
+                canonicalReads, notifications)
                 .recoverRemoteSuccesses();
 
         verify(issueUpserts).upsert(board.getId(), snapshot);
         verify(canonicalReads).exists(project.getId(), "101");
         verify(operationService).complete(operation.getId());
+        verify(notifications).taskCompleted(operation.getId(), NotificationType.TASK_UPDATED, null);
         verify(provider, never()).createIssue(any(), any(), any());
         verify(provider, never()).updateIssue(any(), any(), any(), any());
         verify(provider, never()).deleteIssue(any(), any(), any());
@@ -93,7 +98,7 @@ class JiraWriteRecoveryServiceTest {
 
         new JiraWriteRecoveryService(operations, boards, credentials, provider, issueUpserts,
                 mock(JiraSprintUpsertService.class), mock(TaskRepository.class), mock(SprintRepository.class),
-                operationService, canonicalReads).recoverRemoteSuccesses();
+                operationService, canonicalReads, mock(JiraMutationNotificationProducer.class)).recoverRemoteSuccesses();
 
         verify(issueUpserts).upsert(board.getId(), snapshot);
         verify(canonicalReads).exists(project.getId(), "101");
@@ -302,6 +307,6 @@ class JiraWriteRecoveryServiceTest {
         JiraCanonicalTaskReadService canonicalReads = mock(JiraCanonicalTaskReadService.class);
         when(canonicalReads.exists(any(), any())).thenReturn(true);
         return new JiraWriteRecoveryService(operations, boards, credentials, provider, issueUpserts, sprintUpserts,
-                tasks, sprints, operationService, canonicalReads);
+                tasks, sprints, operationService, canonicalReads, mock(JiraMutationNotificationProducer.class));
     }
 }

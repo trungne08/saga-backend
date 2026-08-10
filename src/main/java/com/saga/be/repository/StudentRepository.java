@@ -10,6 +10,8 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Repository;
 
 @Repository
@@ -35,4 +37,7 @@ public interface StudentRepository extends JpaRepository<Student, UUID> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select student from Student student where student.id = :id")
     Optional<Student> findForTeamMembershipWriteById(@Param("id") UUID id);
+
+    @Query("select student.id from Student student order by student.id")
+    Page<UUID> findAllIds(Pageable pageable);
 }

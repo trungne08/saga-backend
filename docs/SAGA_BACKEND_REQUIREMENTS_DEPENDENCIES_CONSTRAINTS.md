@@ -839,3 +839,24 @@ chặn nullable repair.
 - `NOTIFICATION_DELIVERY_PROCESSING_ENABLED` defaults true; `NOTIFICATION_DELIVERY_RETRY_DELAY_MS` defaults 60000; `NOTIFICATION_DELIVERY_PROCESSING_TIMEOUT_MS` defaults 300000. Tests disable the processor and use mocks only.
 - Admin broadcast remains outside this contract and BLOCKED. The only producer is a new grouped-import `TeamMember`; it cannot redefine roster/enrollment/grouping/DEC-023/Cognito/session semantics.
 - Source/test evidence: targeted Notification/Firebase **16/16 PASS**; full **122 suites / 769 tests / 1 failure / 0 errors / 0 skipped**. The only failure is **PREEXISTING_BASELINE_SOURCE_CONFLICT_WITH_DEC_023**, not a notification/Firebase regression.
+## Notification broadcast and producer constraints — 2026-08-11
+
+- V26/V27 are additive after V25: `notification_broadcast` provides sender/audience/content/idempotency/status counters; `user_notification.broadcast_id` provides broadcast recipient dedup and nullable `event_key` provides event replay dedup. Do not edit V25 or legacy `notification`.
+- Broadcast requires the existing `Idempotency-Key` header convention. The sender-role-key fingerprint is immutable: same intent replays safely, changed intent conflicts. Fanout fetches IDs in bounded 200-row pages and never makes provider calls in the HTTP transaction.
+- Admin audiences: STUDENTS, LECTURERS, ALL_USERS. ALL_USERS is Student + Lecturer, with ADMIN inclusion explicitly TBD. No AccountStatus filtering is allowed until Product decides it.
+- Lecturer Course audience is distinct TeamMember Students of all requested Courses after every Course ownership check succeeds. StudentCourseInvitation is prohibited as audience/enrollment evidence.
+- Verified personal Jira/GitHub identity mappings and verified project Jira-board/GitHub-installation links have one confirmed automatic recipient: the initiating actor. The historical Task/Sprint TBD in this paragraph is superseded by DEC-071 and the constraints below.
+- Broadcast title/message are trimmed, nonblank, max 160/1000, text-only; FID/provider/recipient identity and raw user content must not appear in response or logs.
+
+## Jira mutation notification constraints — 2026-08-11
+
+- Producer runs only after persisted COMPLETED Jira write operation, uses existing DB notification/FID delivery, and never calls FCM directly.
+- Date-only deadline scan uses `JIRA_TIME_ZONE`, excludes deleted/null-due/DONE/CANCELLED, and reuses V27 semantic event dedup with task due-date revision.
+- Task mutation recipient is the canonical assignee, or owning TeamMember Students only when canonical assignee is null. Sprint mutation recipient is owning TeamMember Students. Exclude the actor only when the actor is a Student recipient; do not infer Lecturer/Admin Team membership and do not add AccountStatus filtering.
+- `JiraWriteOperation.id` plus `NotificationType` is the durable mutation event identity. The V27 unique key combines recipient profile/role with `event_key`, so producer replay/concurrency cannot create a second Bell row. Raw `Idempotency-Key` is never placed in the event key or logs.
+- `REMOTE_SUCCEEDED`, FAILED, UNKNOWN, reconciliation, and webhook snapshots do not create mutation success notifications. Start/Close require canonical Sprint state `active`/`closed` before completion and notification.
+- Jira due-date semantic is date-only: public request DTOs use `LocalDate`; canonical parser and legacy `Task.dueDate`/DB column store start-of-day `LocalDateTime`. Do not infer a due instant or 3-hour/24-hour alert. Only `TASK_DUE_TOMORROW`, `TASK_DUE_TODAY`, and `TASK_OVERDUE` are allowed.
+- Deadline semantic identity is recipient ownership columns plus `task:{taskId}:due:{yyyy-MM-dd}:type:{NotificationType}`. A due-date revision may create a new reminder; restart, rerun, or concurrent scans cannot duplicate the same revision/type/recipient.
+- Deadline scan is bounded to 100 rows per page and configured by `NOTIFICATION_DEADLINE_PROCESSING_ENABLED` (default true) and `NOTIFICATION_DEADLINE_SCAN_DELAY_MS` (default 3600000). One Task exception must not stop the batch. The scheduler uses injected `Clock` and `JIRA_TIME_ZONE`, never JVM default date semantics.
+- Bell notification and durable delivery rows are committed before the existing after-commit Firebase processor runs. Zero FIDs still yields a Bell notification; multiple active FIDs yield multiple deliveries, not multiple Bell rows. Producer/FCM failure cannot change Jira `COMPLETED` or roll back canonical Task/Sprint state.
+- No automatic-notification public API exists, no request accepts actor/recipient, and `actionUrl` is null until a canonical internal FE route is confirmed. DEC-023 and Course roster/enrollment/invitation semantics remain unchanged.

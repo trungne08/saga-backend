@@ -19,6 +19,7 @@ import com.saga.be.integration.security.OAuthFlow;
 import com.saga.be.integration.security.OAuthStateService;
 import com.saga.be.security.SagaPrincipal;
 import com.saga.be.service.AuthenticationAuditService;
+import com.saga.be.service.PersonalIntegrationNotificationProducer;
 import jakarta.servlet.http.HttpSession;
 import java.net.URI;
 import java.util.List;
@@ -35,6 +36,7 @@ public class PersonalIntegrationService {
     private final GitHubIntegrationProperties gitHubProperties;
     private final IntegrationAttemptLimiter attemptLimiter;
     private final AuthenticationAuditService auditService;
+    private final PersonalIntegrationNotificationProducer notificationProducer;
 
     public PersonalIntegrationService(
             IdentityMappingService identityMappingService,
@@ -44,7 +46,8 @@ public class PersonalIntegrationService {
             JiraIntegrationProperties jiraProperties,
             GitHubIntegrationProperties gitHubProperties,
             IntegrationAttemptLimiter attemptLimiter,
-            AuthenticationAuditService auditService
+            AuthenticationAuditService auditService,
+            PersonalIntegrationNotificationProducer notificationProducer
     ) {
         this.identityMappingService = identityMappingService;
         this.stateService = stateService;
@@ -54,6 +57,7 @@ public class PersonalIntegrationService {
         this.gitHubProperties = gitHubProperties;
         this.attemptLimiter = attemptLimiter;
         this.auditService = auditService;
+        this.notificationProducer = notificationProducer;
     }
 
     public PersonalIntegrationsResponse connections(SagaPrincipal principal) {
@@ -117,6 +121,7 @@ public class PersonalIntegrationService {
                 "SUCCESS",
                 remoteAddress
         );
+        notificationProducer.jiraLinked(principal, mapping.getId());
         return IdentityConnectionResponse.from(mapping);
     }
 
@@ -228,6 +233,7 @@ public class PersonalIntegrationService {
                 "SUCCESS",
                 remoteAddress
         );
+        notificationProducer.gitHubLinked(principal, mapping.getId());
         return IdentityConnectionResponse.from(mapping);
     }
 

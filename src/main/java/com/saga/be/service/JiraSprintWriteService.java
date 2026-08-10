@@ -11,6 +11,7 @@ import com.saga.be.entity.Task;
 import com.saga.be.entity.enums.IntegrationStatus;
 import com.saga.be.entity.enums.JiraWriteOperationStatus;
 import com.saga.be.entity.enums.JiraWriteOperationType;
+import com.saga.be.entity.enums.NotificationType;
 import com.saga.be.exception.IntegrationException;
 import com.saga.be.integration.project.JiraCredentialService;
 import com.saga.be.integration.project.JiraBoardResolutionService;
@@ -34,6 +35,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -48,13 +50,24 @@ public class JiraSprintWriteService {
     private final JiraWriteOperationService operations;
     private final SprintRepository sprints;
     private final TaskRepository tasks;
+    private final JiraMutationNotificationProducer notificationProducer;
 
+    @Autowired
     public JiraSprintWriteService(ProjectIntegrationAuthorizationService authorization, JiraBoardRepository boards,
             JiraCredentialService credentials, JiraBoardResolutionService boardResolver, JiraProviderClient provider, JiraSprintUpsertService upserts,
-            JiraWriteOperationService operations, SprintRepository sprints, TaskRepository tasks) {
+            JiraWriteOperationService operations, SprintRepository sprints, TaskRepository tasks,
+            JiraMutationNotificationProducer notificationProducer) {
         this.authorization = authorization; this.boards = boards; this.credentials = credentials;
         this.boardResolver = boardResolver; this.provider = provider; this.upserts = upserts; this.operations = operations;
         this.sprints = sprints; this.tasks = tasks;
+        this.notificationProducer = notificationProducer;
+    }
+
+    public JiraSprintWriteService(ProjectIntegrationAuthorizationService authorization, JiraBoardRepository boards,
+            JiraCredentialService credentials, JiraBoardResolutionService boardResolver, JiraProviderClient provider,
+            JiraSprintUpsertService upserts, JiraWriteOperationService operations, SprintRepository sprints,
+            TaskRepository tasks) {
+        this(authorization, boards, credentials, boardResolver, provider, upserts, operations, sprints, tasks, null);
     }
 
     @Transactional(readOnly = true)
@@ -83,7 +96,7 @@ public class JiraSprintWriteService {
             } catch (IntegrationException exception) { operations.failed(op.getId(), exception.getCode()); throw exception;
             } catch (RuntimeException exception) { operations.unknown(op.getId(), "JIRA_WRITE_OUTCOME_UNKNOWN"); throw exception; }
         }
-        return reconcile(op, board, projectId);
+        return reconcile(op, board, projectId, principal);
     }
 
     @Transactional
@@ -114,9 +127,15 @@ public class JiraSprintWriteService {
 
     @Transactional
     public void delete(SagaPrincipal principal, UUID projectId, UUID sprintId, String key) {
-        Sprint sprint = sprint(projectId, sprintId); Project project = authorization.requireProjectManager(principal, projectId);
+        Project project = authorization.requireProjectManager(principal, projectId);
+        Sprint sprint = sprints.findByIdAndBoardProjectId(sprintId, projectId)
+                .orElseThrow(() -> notFound("Sprint not found"));
         JiraWriteOperation op = operations.claim(project, principal, JiraWriteOperationType.SPRINT_DELETE, key, operations.fingerprint(sprint.getExternalSprintId()));
         if (op.getStatus() == JiraWriteOperationStatus.COMPLETED) return;
+        if (sprint.getDeletedAt() != null) {
+            operations.failed(op.getId(), "JIRA_RESOURCE_NOT_FOUND");
+            throw notFound("Sprint not found");
+        }
         JiraBoard board = board(projectId);
         JiraWriteScope.requireGranted(board, JiraWriteScope.DELETE_SPRINT_SCOPE);
         String token = credentials.validAccessToken(board);
@@ -127,6 +146,7 @@ public class JiraSprintWriteService {
         }
         for (Task task : tasks.findByProjectId(projectId)) if (task.getSprint() != null && sprintId.equals(task.getSprint().getId())) task.setSprint(null);
         tasks.flush(); sprint.setDeletedAt(LocalDateTime.now()); sprints.saveAndFlush(sprint); operations.complete(op.getId());
+        emitCompleted(op, NotificationType.SPRINT_DELETED, principal, sprint.getName());
     }
 
     private JiraSprintResponse mutate(SagaPrincipal principal, UUID projectId, Sprint sprint, String key, JiraWriteOperationType type,
@@ -167,17 +187,25 @@ public class JiraSprintWriteService {
         }
         if (op.getStatus() == JiraWriteOperationStatus.FAILED) throw IntegrationException.conflict(
                 "JIRA_WRITE_PREVIOUSLY_FAILED", "The previous Jira write failed before a recoverable remote success");
-        return reconcile(op, board, projectId);
+        return reconcile(op, board, projectId, principal);
     }
 
-    private JiraSprintResponse reconcile(JiraWriteOperation op, JiraBoard board, UUID projectId) {
+    private JiraSprintResponse reconcile(
+            JiraWriteOperation op,
+            JiraBoard board,
+            UUID projectId,
+            SagaPrincipal actor
+    ) {
         if (op.getRemoteResourceId() == null) throw IntegrationException.conflict("JIRA_WRITE_OPERATION_IN_PROGRESS", "The Jira write outcome is still being recovered");
         try {
             JiraWriteScope.requireGranted(board, JiraWriteScope.READ_SPRINT_SCOPE);
             String token = credentials.validAccessToken(board);
             credentials.requireCurrentScopes(board, JiraWriteScope.READ_SPRINT_SCOPE);
             Sprint sprint = upserts.upsert(board.getId(), provider.getSprint(token, board.getCloudId(), op.getRemoteResourceId()));
-            operations.complete(op.getId()); return JiraSprintResponse.from(sprint);
+            requireCanonicalLifecycleState(op, sprint);
+            operations.complete(op.getId());
+            emitCompleted(op, notificationType(op.getOperationType()), actor, sprint.getName());
+            return JiraSprintResponse.from(sprint);
         } catch (IntegrationException exception) {
             logFailure(projectId, null, op, "CANONICAL_GET_SPRINT", JiraWriteScope.READ_SPRINT_SCOPE,
                     "GRANTED", exception, JiraWriteOperationStatus.REMOTE_SUCCEEDED);
@@ -189,7 +217,23 @@ public class JiraSprintWriteService {
         }
     }
 
+    private void requireCanonicalLifecycleState(JiraWriteOperation operation, Sprint sprint) {
+        String expected = switch (operation.getOperationType()) {
+            case SPRINT_START -> "active";
+            case SPRINT_CLOSE -> "closed";
+            default -> null;
+        };
+        if (expected != null && !expected.equalsIgnoreCase(sprint.getState())) {
+            throw IntegrationException.conflict(
+                    "JIRA_WRITE_RECOVERY_REQUIRED",
+                    "The Jira write is awaiting local recovery"
+            );
+        }
+    }
+
     private JiraSprintResponse result(JiraWriteOperation op, UUID projectId) { return JiraSprintResponse.from(sprints.findByBoardProjectIdAndDeletedAtIsNull(projectId).stream().filter(value -> value.getExternalSprintId().equals(op.getRemoteResourceId())).findFirst().orElseThrow(() -> IntegrationException.conflict("JIRA_WRITE_RECOVERY_REQUIRED", "The Jira write is awaiting local recovery"))); }
+    private void emitCompleted(JiraWriteOperation operation, NotificationType type, SagaPrincipal actor, String name) { if (type == null || notificationProducer == null) return; try { notificationProducer.sprintCompleted(operation.getId(), type, actor, name); } catch (RuntimeException exception) { log.warn("notification producer=JIRA_SPRINT operation={} stage=COMPLETED result=FAILED exceptionClass={}", operation.getOperationType(), exception.getClass().getSimpleName()); } }
+    private NotificationType notificationType(JiraWriteOperationType type) { return switch (type) { case SPRINT_CREATE -> NotificationType.SPRINT_CREATED; case SPRINT_UPDATE -> NotificationType.SPRINT_UPDATED; case SPRINT_START -> NotificationType.SPRINT_STARTED; case SPRINT_CLOSE -> NotificationType.SPRINT_CLOSED; default -> null; }; }
     private Sprint sprint(UUID projectId, UUID id) { return sprints.findByIdAndBoardProjectIdAndDeletedAtIsNull(id, projectId).orElseThrow(() -> notFound("Sprint not found")); }
     private JiraBoard board(UUID projectId) { JiraBoard board = boards.findByProjectId(projectId).orElseThrow(() -> IntegrationException.conflict("JIRA_LINK_NOT_FOUND", "The project has no Jira connection")); if (board.getConnectionStatus() != IntegrationStatus.ACTIVE) throw IntegrationException.conflict("JIRA_INTEGRATION_NOT_ACTIVE", "The Jira integration is not active"); return board; }
     private IntegrationException notFound(String text) { return new IntegrationException(HttpStatus.NOT_FOUND, "JIRA_RESOURCE_NOT_FOUND", text); }

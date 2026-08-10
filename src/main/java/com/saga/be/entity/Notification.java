@@ -7,6 +7,10 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Table;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.UniqueConstraint;
 import org.hibernate.annotations.JdbcTypeCode;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -18,7 +22,16 @@ import java.sql.Types;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "user_notification")
+@Table(name = "user_notification", uniqueConstraints = {
+        @UniqueConstraint(
+                name = "uk_user_notification_broadcast_recipient",
+                columnNames = {"broadcast_id", "recipient_profile_id", "recipient_role"}
+        ),
+        @UniqueConstraint(
+                name = "uk_user_notification_recipient_event",
+                columnNames = {"recipient_profile_id", "recipient_role", "event_key"}
+        )
+})
 @Getter
 @Setter
 @NoArgsConstructor
@@ -46,6 +59,13 @@ public class Notification extends BaseEntity {
 
     @Column(name = "action_url", length = 500)
     private String actionUrl;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "broadcast_id")
+    private NotificationBroadcast broadcast;
+
+    @Column(name = "event_key", length = 255)
+    private String eventKey;
 
     @Column(name = "read_at")
     private LocalDateTime readAt;

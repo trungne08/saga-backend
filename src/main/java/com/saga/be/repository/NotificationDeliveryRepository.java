@@ -40,4 +40,6 @@ public interface NotificationDeliveryRepository extends JpaRepository<Notificati
             @Param("staleBefore") LocalDateTime staleBefore,
             Pageable pageable
     );
+
+    long countByNotificationBroadcastId(UUID broadcastId);
 }

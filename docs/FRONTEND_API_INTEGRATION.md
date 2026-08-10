@@ -1401,4 +1401,26 @@ All calls use the existing browser OIDC session. Do not send Bearer tokens or ow
 - `POST /api/me/firebase-installations` with `{ "firebaseInstallationId": "<browser-fid>" }` — registers or reactivates the current browser FID. Same-owner replay is idempotent; a FID owned by another principal returns 409.
 - `DELETE /api/me/firebase-installations/{installationId}` — idempotently revokes an owned installation; foreign/missing IDs return 404.
 
-The client must obtain a Firebase Installation ID, not an FCM registration token. Register after authenticated session establishment and revoke the returned installation UUID on logout/device opt-out when practical. Notification list/read state always comes from SAGA APIs; FCM only prompts immediate refresh/display. Admin broadcast has no endpoint and remains BLOCKED.
+The client must obtain a Firebase Installation ID, not an FCM registration token. Register after authenticated session establishment and revoke the returned installation UUID on logout/device opt-out when practical. Notification list/read state always comes from SAGA APIs; FCM only prompts immediate refresh/display. Manual broadcast is available through the endpoints documented below.
+## Manual notification broadcast — 2026-08-11
+
+All requests use `credentials: "include"`, existing `X-XSRF-TOKEN`, and an `Idempotency-Key` header. Do not use Bearer. Do not send actor/sender/recipient IDs, FIDs, external URLs, provider data, or Cognito IDs.
+
+| Endpoint | Role | Body | Result |
+| --- | --- | --- | --- |
+| `POST /api/admin/notifications/broadcast` | ADMIN | `{ "audience": "STUDENTS" | "LECTURERS" | "ALL_USERS", "title": "...", "message": "..." }` | 200 broadcast id, scope, safe counts, status |
+| `POST /api/v1/courses/notifications/broadcast` | LECTURER | `{ "courseIds": ["<course-uuid>"], "title": "...", "message": "..." }` | 200 COURSE_STUDENTS broadcast counters/status |
+
+Title is max 160 and message max 1000; both must be nonblank plain text. Same `Idempotency-Key` plus same intent replays; reuse for different content/scope returns 409. Lecturer duplicate Course IDs are normalized. A non-owned/missing Course fails the entire request before any notification is created. ALL_USERS currently means Student + Lecturer only; Admin inclusion and AccountStatus filtering are not available UI controls.
+
+Responses contain `broadcastId`, `audience`, `status`, `recipientCount`, `notificationCount`, `deliveryQueuedCount`, and `completedAt`; they never contain FID, email, recipient IDs, credentials, provider output or Cognito subject. Bell list/unread/read and Firebase FID registration remain as documented below.
+
+## Automatic Jira Task and Sprint notifications — 2026-08-11
+
+No new FE endpoint exists. Existing Task/Sprint mutation requests retain browser session, CSRF, and Idempotency-Key rules; Bell items appear only after backend canonical completion. Due-date reminders are calendar Tomorrow/Today/Overdue only, never 3-hour/24-hour alarms.
+
+Task Bell types are `TASK_CREATED`, `TASK_UPDATED`, `TASK_ASSIGNEE_CHANGED`, `TASK_SPRINT_CHANGED`, `TASK_ESTIMATION_CHANGED`, `TASK_STATUS_CHANGED`, and `TASK_DELETED`. Sprint types are `SPRINT_CREATED`, `SPRINT_UPDATED`, `SPRINT_STARTED`, `SPRINT_CLOSED`, and `SPRINT_DELETED`; deadline types are `TASK_DUE_TOMORROW`, `TASK_DUE_TODAY`, and `TASK_OVERDUE`.
+
+Task recipients are the canonical assignee, or owning Team Students only when unassigned. Sprint recipients are owning Team Students. A Student who performs the mutation does not notify themself. The backend does not add an AccountStatus filter. `actionUrl` is currently null because no canonical internal FE Task/Sprint route is confirmed; FE must not substitute localhost, Railway, or Jira provider URLs.
+
+FCM is only a prompt to refresh/display. A Bell item exists even with no active browser FID, and multiple FIDs do not create duplicate Bell items. Mutation HTTP responses/errors are unchanged; a notification persistence or Firebase failure does not turn a completed Jira mutation into an HTTP/provider rollback.

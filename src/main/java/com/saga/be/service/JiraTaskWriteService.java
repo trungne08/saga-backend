@@ -20,6 +20,7 @@ import com.saga.be.entity.enums.IntegrationStatus;
 import com.saga.be.entity.enums.JiraWriteOperationStatus;
 import com.saga.be.entity.enums.JiraWriteOperationType;
 import com.saga.be.entity.enums.Priority;
+import com.saga.be.entity.enums.NotificationType;
 import com.saga.be.entity.enums.TaskType;
 import com.saga.be.exception.IntegrationException;
 import com.saga.be.integration.project.JiraCredentialService;
@@ -54,6 +55,7 @@ import org.springframework.http.HttpStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -73,13 +75,16 @@ public class JiraTaskWriteService {
     private final IdentityMapRepository identityMapRepository;
     private final SprintRepository sprintRepository;
     private final JiraSprintUpsertService sprintUpsertService;
+    private final JiraMutationNotificationProducer notificationProducer;
 
+    @Autowired
     public JiraTaskWriteService(ProjectIntegrationAuthorizationService authorization, JiraBoardRepository boardRepository,
             JiraCredentialService credentialService, JiraProviderClient jiraClient,
             JiraIssueUpsertService issueUpsertService, JiraWriteOperationService operationService,
             JiraCanonicalTaskReadService canonicalTaskReadService, JiraTaskSprintFinalizationService sprintFinalizationService,
             TaskRepository taskRepository, IdentityMapRepository identityMapRepository,
-            SprintRepository sprintRepository, JiraSprintUpsertService sprintUpsertService) {
+            SprintRepository sprintRepository, JiraSprintUpsertService sprintUpsertService,
+            JiraMutationNotificationProducer notificationProducer) {
         this.authorization = authorization;
         this.boardRepository = boardRepository;
         this.credentialService = credentialService;
@@ -92,6 +97,18 @@ public class JiraTaskWriteService {
         this.identityMapRepository = identityMapRepository;
         this.sprintRepository = sprintRepository;
         this.sprintUpsertService = sprintUpsertService;
+        this.notificationProducer = notificationProducer;
+    }
+
+    public JiraTaskWriteService(ProjectIntegrationAuthorizationService authorization, JiraBoardRepository boardRepository,
+            JiraCredentialService credentialService, JiraProviderClient jiraClient,
+            JiraIssueUpsertService issueUpsertService, JiraWriteOperationService operationService,
+            JiraCanonicalTaskReadService canonicalTaskReadService, JiraTaskSprintFinalizationService sprintFinalizationService,
+            TaskRepository taskRepository, IdentityMapRepository identityMapRepository,
+            SprintRepository sprintRepository, JiraSprintUpsertService sprintUpsertService) {
+        this(authorization, boardRepository, credentialService, jiraClient, issueUpsertService, operationService,
+                canonicalTaskReadService, sprintFinalizationService, taskRepository, identityMapRepository,
+                sprintRepository, sprintUpsertService, null);
     }
 
     @Transactional(readOnly = true)
@@ -188,7 +205,7 @@ public class JiraTaskWriteService {
                 throw exception;
             }
         }
-        return reconcileSprint(operation, board, projectId, target == null ? null : target.getId());
+        return reconcileSprint(operation, board, projectId, target == null ? null : target.getId(), principal);
     }
 
     @Transactional
@@ -234,7 +251,7 @@ public class JiraTaskWriteService {
                 throw exception;
             }
         }
-        return reconcileEstimation(operation, board, projectId, estimationFieldId, request.value());
+        return reconcileEstimation(operation, board, projectId, estimationFieldId, request.value(), principal);
     }
 
     @Transactional
@@ -264,6 +281,7 @@ public class JiraTaskWriteService {
         task.setDeletedAt(LocalDateTime.now());
         taskRepository.saveAndFlush(task);
         operationService.complete(operation.getId());
+        emitCompleted(operation, NotificationType.TASK_DELETED, principal);
     }
 
     private TaskReadResponse mutate(SagaPrincipal principal, UUID projectId, UUID taskId, String key,
@@ -274,14 +292,16 @@ public class JiraTaskWriteService {
         if (operation.getStatus() == JiraWriteOperationStatus.COMPLETED) return TaskReadResponse.from(task);
         JiraBoard board = activeBoard(projectId); String token = credentialService.validAccessToken(board);
         JiraWriteScope.requireGranted(board, requiredScope);
-        if (operation.getStatus() == JiraWriteOperationStatus.REMOTE_SUCCEEDED) return reconcile(operation, board, projectId);
+        if (operation.getStatus() == JiraWriteOperationStatus.REMOTE_SUCCEEDED) {
+            return reconcile(operation, board, projectId, principal);
+        }
         try {
             remote.apply(token, board, task);
             operation.setRemoteResourceId(task.getExternalId()); operation.setRemoteResourceKey(task.getExternalKey());
             operationService.markRemoteSucceeded(operation.getId(), task.getExternalId(), task.getExternalKey());
         } catch (IntegrationException exception) { operationService.failed(operation.getId(), exception.getCode()); throw exception;
         } catch (RuntimeException exception) { operationService.unknown(operation.getId(), "JIRA_WRITE_OUTCOME_UNKNOWN"); throw exception; }
-        return reconcile(operation, board, projectId);
+        return reconcile(operation, board, projectId, principal);
     }
 
     private Task task(UUID projectId, UUID taskId) {
@@ -421,7 +441,7 @@ public class JiraTaskWriteService {
             if (operation.getStatus() == JiraWriteOperationStatus.REMOTE_SUCCEEDED) {
                 stage = TaskCreateStage.CANONICAL_ISSUE_FETCH;
                 resourceType = TaskCreateResourceType.CREATED_ISSUE;
-                return reconcile(operation, board, projectId);
+                return reconcile(operation, board, projectId, principal);
             }
 
             stage = TaskCreateStage.JIRA_METADATA_ISSUE_TYPES;
@@ -488,7 +508,7 @@ public class JiraTaskWriteService {
         stage = TaskCreateStage.CANONICAL_ISSUE_FETCH;
         resourceType = TaskCreateResourceType.CREATED_ISSUE;
         try {
-            return reconcile(operation, board, projectId);
+            return reconcile(operation, board, projectId, principal);
         } catch (IntegrationException exception) {
             logCreateFailure(projectId, stage, resourceType, resolutionMode, resolutionResult, exception, operationStatus(operation, null));
             throw exception;
@@ -498,15 +518,21 @@ public class JiraTaskWriteService {
         }
     }
 
-    private TaskReadResponse reconcile(JiraWriteOperation operation, JiraBoard board, UUID projectId) {
-        return reconcile(operation, board, projectId, null);
+    private TaskReadResponse reconcile(
+            JiraWriteOperation operation,
+            JiraBoard board,
+            UUID projectId,
+            SagaPrincipal actor
+    ) {
+        return reconcile(operation, board, projectId, null, null, actor);
     }
 
     private TaskReadResponse reconcileSprint(
             JiraWriteOperation operation,
             JiraBoard board,
             UUID projectId,
-            UUID targetSprintId
+            UUID targetSprintId,
+            SagaPrincipal actor
     ) {
         if (operation.getRemoteResourceId() == null) throw IntegrationException.conflict(
                 "JIRA_WRITE_OPERATION_IN_PROGRESS", "The Jira write outcome is still being recovered");
@@ -522,6 +548,7 @@ public class JiraTaskWriteService {
         }
         operationService.complete(operation.getId());
         operation.setStatus(JiraWriteOperationStatus.COMPLETED);
+        emitCompleted(operation, NotificationType.TASK_SPRINT_CHANGED, actor);
         return result;
     }
 
@@ -530,18 +557,10 @@ public class JiraTaskWriteService {
             JiraBoard board,
             UUID projectId,
             String estimationFieldId,
-            Integer expectedStoryPoint
+            Integer expectedStoryPoint,
+            SagaPrincipal actor
     ) {
-        return reconcile(operation, board, projectId, estimationFieldId, expectedStoryPoint);
-    }
-
-    private TaskReadResponse reconcile(
-            JiraWriteOperation operation,
-            JiraBoard board,
-            UUID projectId,
-            String estimationFieldId
-    ) {
-        return reconcile(operation, board, projectId, estimationFieldId, null);
+        return reconcile(operation, board, projectId, estimationFieldId, expectedStoryPoint, actor);
     }
 
     private TaskReadResponse reconcile(
@@ -549,7 +568,8 @@ public class JiraTaskWriteService {
             JiraBoard board,
             UUID projectId,
             String estimationFieldId,
-            Integer expectedStoryPoint
+            Integer expectedStoryPoint,
+            SagaPrincipal actor
     ) {
         if (operation.getRemoteResourceId() == null) throw IntegrationException.conflict(
                 "JIRA_WRITE_OPERATION_IN_PROGRESS", "The Jira write outcome is still being recovered");
@@ -570,7 +590,31 @@ public class JiraTaskWriteService {
         }
         operationService.complete(operation.getId());
         operation.setStatus(JiraWriteOperationStatus.COMPLETED);
+        emitCompleted(operation, notificationType(operation.getOperationType()), actor);
         return result;
+    }
+
+    private void emitCompleted(JiraWriteOperation operation, NotificationType type, SagaPrincipal actor) {
+        if (type == null || notificationProducer == null) return;
+        try {
+            notificationProducer.taskCompleted(operation.getId(), type, actor);
+        } catch (RuntimeException exception) {
+            log.warn("notification producer=JIRA_TASK operation={} stage=COMPLETED result=FAILED exceptionClass={}",
+                    operation.getOperationType(), exception.getClass().getSimpleName());
+        }
+    }
+
+    private NotificationType notificationType(JiraWriteOperationType type) {
+        if (type == null) return null;
+        return switch (type) {
+            case TASK_CREATE -> NotificationType.TASK_CREATED;
+            case TASK_UPDATE -> NotificationType.TASK_UPDATED;
+            case TASK_ASSIGN -> NotificationType.TASK_ASSIGNEE_CHANGED;
+            case TASK_SPRINT -> NotificationType.TASK_SPRINT_CHANGED;
+            case TASK_ESTIMATION -> NotificationType.TASK_ESTIMATION_CHANGED;
+            case TASK_TRANSITION -> NotificationType.TASK_STATUS_CHANGED;
+            default -> null;
+        };
     }
 
     private TaskReadResponse completed(JiraWriteOperation operation, UUID projectId) {

@@ -34,6 +34,16 @@ public interface TaskRepository extends JpaRepository<Task, UUID>, JpaSpecificat
     );
     List<Task> findByProjectId(UUID projectId);
 
+    @EntityGraph(attributePaths = {"project", "assignee"})
+    @Query("select task from Task task where task.deletedAt is null and task.dueDate is not null "
+            + "and (task.status is null or task.status not in :statuses) "
+            + "and (:afterId is null or task.id > :afterId) order by task.id")
+    List<Task> findDeadlineEligibleTasksAfter(
+            @Param("statuses") java.util.Collection<com.saga.be.entity.enums.TaskStatus> statuses,
+            @Param("afterId") UUID afterId,
+            Pageable pageable
+    );
+
     List<Task> findByProjectIdAndAssigneeId(UUID projectId, UUID assigneeId);
 
     List<Task> findByProjectCourseId(UUID courseId);
