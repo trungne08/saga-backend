@@ -48,10 +48,10 @@ import org.springframework.web.multipart.MultipartFile;
 public class ExcelImportService {
 
     private static final List<String> COURSE_IMPORT_HEADERS = List.of(
-            "Class", "RollNumber", "Email", "MemberCode", "FullName", "Group", "Leader"
+            "Class", "StudentCode", "Email", "MemberCode", "FullName", "Group", "Leader"
     );
     private static final List<String> ADMIN_TEMPLATE_HEADERS = List.of(
-            "Class", "RollNumber", "Email", "MemberCode", "FullName"
+            "Class", "StudentCode", "Email", "MemberCode", "FullName"
     );
     private static final int MAX_ROWS = 1_000;
     private static final long MAX_FILE_SIZE_BYTES = 1_048_576L;
