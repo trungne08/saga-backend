@@ -25,13 +25,13 @@ import org.springframework.web.server.ResponseStatusException;
 @RequestMapping("/api/me/notifications")
 @RequiredArgsConstructor
 @PreAuthorize("hasAnyRole('ADMIN','LECTURER','STUDENT')")
-@Tag(name = "Notifications", description = "Notifications owned by the current user.")
+@Tag(name = "Thông báo", description = "Thông báo Bell, phát thông báo thủ công và đăng ký nhận thông báo đẩy.")
 public class MyNotificationController {
 
     private final NotificationService notificationService;
 
     @GetMapping
-    @Operation(summary = "List notifications of the current principal")
+    @Operation(summary = "Xem danh sách thông báo của tôi")
     public ResponseEntity<Page<NotificationResponse>> list(
             @AuthenticationPrincipal SagaPrincipal principal,
             @RequestParam(defaultValue = "0") int page,
@@ -42,7 +42,7 @@ public class MyNotificationController {
     }
 
     @GetMapping("/unread-count")
-    @Operation(summary = "Count unread notifications of the current principal")
+    @Operation(summary = "Đếm số thông báo chưa đọc")
     public ResponseEntity<NotificationUnreadCountResponse> unreadCount(
             @AuthenticationPrincipal SagaPrincipal principal
     ) {
@@ -50,7 +50,7 @@ public class MyNotificationController {
     }
 
     @PatchMapping("/{notificationId}/read")
-    @Operation(summary = "Mark an owned notification as read")
+    @Operation(summary = "Đánh dấu thông báo là đã đọc")
     public ResponseEntity<NotificationResponse> markRead(
             @AuthenticationPrincipal SagaPrincipal principal,
             @PathVariable UUID notificationId

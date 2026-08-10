@@ -33,7 +33,7 @@ public class TeamRosterController {
     private final TeamRosterService teamRosterService;
 
     @GetMapping
-    @Operation(summary = "List members of a team in a course")
+    @Operation(summary = "Xem danh sách thành viên của nhóm trong khóa học")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Paginated team roster"),
             @ApiResponse(responseCode = "401", description = "Authentication is required"),

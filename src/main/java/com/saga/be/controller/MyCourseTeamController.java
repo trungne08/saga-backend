@@ -32,7 +32,7 @@ public class MyCourseTeamController {
 
     @GetMapping
     @PreAuthorize("hasRole('STUDENT')")
-    @Operation(summary = "List members of the current student's team in a course",
+    @Operation(summary = "Xem thành viên nhóm của tôi trong khóa học",
             description = "STUDENT self-scoped endpoint. The backend resolves teamId from the session-backed "
                     + "SagaPrincipal and courseId; clients must not send teamId. GET does not require CSRF.")
     @ApiResponses({

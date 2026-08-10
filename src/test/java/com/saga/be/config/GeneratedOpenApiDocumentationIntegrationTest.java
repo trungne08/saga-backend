@@ -1,6 +1,7 @@
 package com.saga.be.config;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -48,6 +49,7 @@ class GeneratedOpenApiDocumentationIntegrationTest {
         Files.writeString(Path.of("target", "generated-openapi.json"), body);
         JsonNode root = JsonMapper.builder().build().readTree(body);
         Set<String> documentedTags = documentedTagNames(root);
+        Set<String> usedTags = new HashSet<>();
         int operationCount = 0;
 
         Iterator<Map.Entry<String, JsonNode>> paths = root.path("paths").properties().iterator();
@@ -65,12 +67,24 @@ class GeneratedOpenApiDocumentationIntegrationTest {
                         () -> "Thiếu summary: " + method.getKey() + " " + path.getKey());
                 assertTrue(operation.path("description").isTextual() && !operation.path("description").asText().isBlank(),
                         () -> "Thiếu description: " + method.getKey() + " " + path.getKey());
-                assertTrue(operation.path("tags").isArray() && operation.path("tags").size() > 0,
-                        () -> "Thiếu tag: " + method.getKey() + " " + path.getKey());
+                assertTrue(operation.path("tags").isArray() && operation.path("tags").size() == 1,
+                        () -> "Operation phải có đúng một tag: " + method.getKey() + " " + path.getKey());
                 for (JsonNode tag : operation.path("tags")) {
+                    usedTags.add(tag.asText());
                     assertTrue(documentedTags.contains(tag.asText()),
                             () -> "Tag chưa có mô tả: " + tag.asText());
                 }
+                String summary = operation.path("summary").asText();
+                assertTrue(summary.matches(".*[À-ỹĐđ].*"),
+                        () -> "Summary chưa phải tiếng Việt rõ nghĩa: " + method.getKey() + " " + path.getKey());
+                assertFalse(summary.startsWith("Thực hiện tác vụ")
+                                || summary.startsWith("Xem dữ liệu")
+                                || summary.startsWith("Tạo dữ liệu")
+                                || summary.startsWith("Cập nhật dữ liệu")
+                                || summary.startsWith("Xóa hoặc ngắt kết nối"),
+                        () -> "Summary còn quá generic: " + method.getKey() + " " + path.getKey());
+                assertFalse(operation.path("description").asText().startsWith("Thực hiện chức năng"),
+                        () -> "Description còn quá generic: " + method.getKey() + " " + path.getKey());
                 for (JsonNode parameter : operation.path("parameters")) {
                     assertFalse("Authorization".equalsIgnoreCase(parameter.path("name").asText())
                                     && !path.getKey().startsWith("/api/webhooks/"),
@@ -80,9 +94,76 @@ class GeneratedOpenApiDocumentationIntegrationTest {
             }
         }
 
-        assertTrue(operationCount > 0, "OpenAPI không sinh operation nào");
+        assertEquals(125, operationCount, "Cleanup metadata không được làm mất hoặc thêm API operation");
         System.out.println("Generated OpenAPI operation count: " + operationCount);
+        assertEquals(usedTags, documentedTags, "Global tags phải đúng bằng tập tag thực sự có operation");
+        assertEquals(documentedTags.size(), root.path("tags").size(), "Global tags không được trùng tên");
+        assertFalse(documentedTags.contains("Notifications"));
+        assertTrue(documentedTags.contains("Thông báo"));
         assertFalse(root.path("components").path("securitySchemes").has("bearerAuth"));
+        root.path("components").path("securitySchemes").properties().forEach(entry ->
+                assertFalse("http".equalsIgnoreCase(entry.getValue().path("type").asText())
+                                && "bearer".equalsIgnoreCase(entry.getValue().path("scheme").asText()),
+                        () -> "Không được sinh Bearer security scheme: " + entry.getKey()));
+
+        Map<String, String> notificationEndpoints = Map.of(
+                "/api/me/notifications", "get",
+                "/api/me/notifications/unread-count", "get",
+                "/api/me/notifications/{notificationId}/read", "patch",
+                "/api/me/firebase-installations", "post",
+                "/api/me/firebase-installations/{installationId}", "delete",
+                "/api/admin/notifications/broadcast", "post",
+                "/api/v1/courses/notifications/broadcast", "post"
+        );
+        notificationEndpoints.forEach((notificationPath, httpMethod) -> {
+            JsonNode operation = root.path("paths").path(notificationPath).path(httpMethod);
+            assertTrue(operation.isObject(), () -> "Thiếu Notification endpoint: " + httpMethod + " " + notificationPath);
+            assertEquals(1, operation.path("tags").size());
+            assertEquals("Thông báo", operation.path("tags").get(0).asText());
+        });
+        assertTrue(root.path("paths").path("/api/me/notifications/{notificationId}/read")
+                .path("patch").path("description").asText().contains("CSRF"));
+        assertTrue(root.path("paths").path("/api/admin/notifications/broadcast")
+                .path("post").path("parameters").toString().contains("Idempotency-Key"));
+        assertTrue(root.path("paths").path("/api/v1/courses/notifications/broadcast")
+                .path("post").path("parameters").toString().contains("Idempotency-Key"));
+        assertEquals("example-browser-fid", root.at("/components/schemas/FirebaseInstallationRegistrationRequest/properties/firebaseInstallationId/example").asText());
+
+        Set<String> jiraMutations = Set.of(
+                "post /api/v1/projects/{projectId}/tasks",
+                "put /api/v1/projects/{projectId}/tasks/{taskId}",
+                "put /api/v1/projects/{projectId}/tasks/{taskId}/assignee",
+                "put /api/v1/projects/{projectId}/tasks/{taskId}/sprint",
+                "put /api/v1/projects/{projectId}/tasks/{taskId}/estimation",
+                "post /api/v1/projects/{projectId}/tasks/{taskId}/transitions",
+                "delete /api/v1/projects/{projectId}/tasks/{taskId}",
+                "post /api/v1/projects/{projectId}/sprints",
+                "put /api/v1/projects/{projectId}/sprints/{sprintId}",
+                "post /api/v1/projects/{projectId}/sprints/{sprintId}/start",
+                "post /api/v1/projects/{projectId}/sprints/{sprintId}/close",
+                "delete /api/v1/projects/{projectId}/sprints/{sprintId}"
+        );
+        jiraMutations.forEach(mutation -> {
+            String httpMethod = mutation.substring(0, mutation.indexOf(' '));
+            String jiraPath = mutation.substring(mutation.indexOf(' ') + 1);
+            JsonNode operation = root.path("paths").path(jiraPath).path(httpMethod);
+            assertTrue(operation.path("parameters").toString().contains("Idempotency-Key"),
+                    () -> "Jira mutation thiếu Idempotency-Key: " + httpMethod + " " + jiraPath);
+            assertTrue(operation.path("description").asText().contains("CSRF"),
+                    () -> "Jira mutation thiếu mô tả CSRF: " + httpMethod + " " + jiraPath);
+        });
+
+        Set<String> providerCallbacks = Set.of(
+                "/api/integrations/jira/callback",
+                "/api/me/integrations/github/callback",
+                "/api/integrations/github/setup",
+                "/api/integrations/github/project/callback",
+                "/api/projects/{projectId}/github/setup",
+                "/api/projects/{projectId}/github/callback"
+        );
+        providerCallbacks.forEach(callbackPath -> assertTrue(
+                root.path("paths").path(callbackPath).path("get").path("description").asText().contains("FE không gọi"),
+                () -> "Callback chưa ghi rõ FE không gọi thủ công: " + callbackPath));
         assertTrue(root.at("/paths/~1api~1projects~1{projectId}~1github~1repositories~1{repositoryId}~1commits/get/parameters")
                 .toString().contains("branch"));
         assertTrue(root.at("/paths/~1api~1v1~1projects~1{projectId}~1sprints/post/parameters")

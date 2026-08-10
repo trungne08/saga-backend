@@ -74,7 +74,7 @@ public class ProjectSprintController {
             @RequestHeader("Idempotency-Key") String key) { sprintWriteService.delete(principal, projectId, sprintId, key); return ResponseEntity.noContent().build(); }
 
     @GetMapping("/projects/{projectId}/sprints")
-    @Operation(summary = "List sprints by project")
+    @Operation(summary = "Xem danh sách Sprint của dự án")
     @PreAuthorize("hasAnyRole('ADMIN', 'LECTURER', 'STUDENT')")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Sprint list for the project"),
@@ -90,7 +90,7 @@ public class ProjectSprintController {
     }
 
     @GetMapping("/teams/{teamId}/sprints")
-    @Operation(summary = "List sprints by team")
+    @Operation(summary = "Xem danh sách Sprint của nhóm")
     @PreAuthorize("hasAnyRole('ADMIN', 'LECTURER', 'STUDENT')")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Danh sách Sprint. state=PROJECT_NOT_CREATED khi Team đã được phép truy cập nhưng chưa có Project; EMPTY khi Project chưa có Sprint; READY khi có Sprint."),

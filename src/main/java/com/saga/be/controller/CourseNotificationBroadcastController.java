@@ -21,13 +21,13 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/courses/notifications")
 @RequiredArgsConstructor
 @PreAuthorize("hasRole('LECTURER')")
-@Tag(name = "Notifications", description = "Course notification broadcasts for assigned Lecturers.")
+@Tag(name = "Thông báo", description = "Thông báo Bell, phát thông báo thủ công và đăng ký nhận thông báo đẩy.")
 public class CourseNotificationBroadcastController {
 
     private final NotificationBroadcastService broadcastService;
 
     @PostMapping("/broadcast")
-    @Operation(summary = "Broadcast plain-text notification to confirmed TeamMember students")
+    @Operation(summary = "Gửi thông báo đến sinh viên của các khóa học đang giảng dạy")
     public ResponseEntity<NotificationBroadcastResponse> broadcast(
             @AuthenticationPrincipal SagaPrincipal principal,
             @RequestHeader("Idempotency-Key") String idempotencyKey,

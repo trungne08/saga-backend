@@ -23,13 +23,13 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/me/firebase-installations")
 @RequiredArgsConstructor
 @PreAuthorize("hasAnyRole('ADMIN','LECTURER','STUDENT')")
-@Tag(name = "Notifications", description = "Firebase installations owned by the current user.")
+@Tag(name = "Thông báo", description = "Thông báo Bell, phát thông báo thủ công và đăng ký nhận thông báo đẩy.")
 public class MyFirebaseInstallationController {
 
     private final FirebaseInstallationService installationService;
 
     @PostMapping
-    @Operation(summary = "Register or reactivate the current browser Firebase installation")
+    @Operation(summary = "Đăng ký trình duyệt hiện tại để nhận thông báo đẩy")
     public ResponseEntity<FirebaseInstallationResponse> register(
             @AuthenticationPrincipal SagaPrincipal principal,
             @Valid @RequestBody FirebaseInstallationRegistrationRequest request
@@ -41,7 +41,7 @@ public class MyFirebaseInstallationController {
     }
 
     @DeleteMapping("/{installationId}")
-    @Operation(summary = "Revoke an owned Firebase installation")
+    @Operation(summary = "Ngừng nhận thông báo đẩy trên trình duyệt này")
     public ResponseEntity<FirebaseInstallationResponse> unregister(
             @AuthenticationPrincipal SagaPrincipal principal,
             @PathVariable UUID installationId

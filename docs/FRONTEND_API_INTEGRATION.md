@@ -42,7 +42,7 @@ FE gửi sparse body. `description` non-null luôn requested vì ADF canonicaliz
 
 Không có API Admin mới trong A13. FE reuse shared route khi ADMIN đã được source cho phép: `/api/v1/courses/**` (bao gồm roster), Team roster, Task/Sprint, analytics, Peer Review và Contribution theo exact route hiện hữu. Không gọi `/api/admin/courses/**` vì không tồn tại.
 
-Các capability chưa có endpoint: per-user audit history, đổi role, reset password, add/remove Course membership, notification broadcast và generic evaluation settings. FE không dựng request giả, không gửi `actorId`/`adminId`, không dùng Bearer hay Cognito Admin flow. Dashboard anomaly/graph-processing chart không thuộc A13.
+Các capability vẫn chưa có endpoint: per-user audit history, đổi role, reset password và generic evaluation settings. Course membership mutation và notification broadcast đã được bổ sung ở milestone sau và được mô tả trong quick start cuối tài liệu. FE không dựng request giả, không gửi `actorId`/`adminId`, không dùng Bearer hay Cognito Admin flow. Dashboard anomaly/graph-processing chart không thuộc A13.
 
 ## A12 — Bàn giao Admin cho FE, 2026-08-09
 
@@ -59,8 +59,9 @@ Các capability chưa có endpoint: per-user audit history, đổi role, reset p
 | Subject/Class/Semester/Course | `/api/v1/subjects`, `/classes`, `/semesters`, `/courses` | POST/PUT/DELETE | ADMIN | Có | request domain → entity/204 | CONFIRMED | DELETE là soft-delete có dependency guard. |
 | Course instructors | `/api/v1/courses/instructors` | GET | ADMIN | Không | paged lecturer options | CONFIRMED | Dùng khi gán Course. |
 
-Không gọi endpoint không tồn tại cho per-user audit, notification broadcast, impersonation, role
-mutation, password reset, manual Course membership, Project DELETE hoặc generic settings. Mọi request
+Không gọi endpoint không tồn tại cho per-user audit, impersonation, role mutation, password reset,
+Project DELETE hoặc generic settings. Notification broadcast và manual Course membership dùng đúng các route
+được mô tả ở phần quick start; không invent route khác. Mọi request
 dùng `credentials: "include"`; không dùng Bearer.
 
 ## Account lifecycle M3B — 2026-08-09
@@ -1424,3 +1425,156 @@ Task Bell types are `TASK_CREATED`, `TASK_UPDATED`, `TASK_ASSIGNEE_CHANGED`, `TA
 Task recipients are the canonical assignee, or owning Team Students only when unassigned. Sprint recipients are owning Team Students. A Student who performs the mutation does not notify themself. The backend does not add an AccountStatus filter. `actionUrl` is currently null because no canonical internal FE Task/Sprint route is confirmed; FE must not substitute localhost, Railway, or Jira provider URLs.
 
 FCM is only a prompt to refresh/display. A Bell item exists even with no active browser FID, and multiple FIDs do not create duplicate Bell items. Mutation HTTP responses/errors are unchanged; a notification persistence or Firebase failure does not turn a completed Jira mutation into an HTTP/provider rollback.
+
+# Frontend integration quick start — 2026-08-11
+
+Phần này là luồng tích hợp ngắn nhất cho FE/QA. Contract chi tiết của các domain cũ vẫn nằm ở các mục phía trên; không dùng nội dung này để suy ra endpoint mới.
+
+## 1. Authentication model
+
+- Đăng nhập bằng top-level browser navigation tới `GET /api/auth/login`; backend trả `302` vào Cognito.
+- API nghiệp vụ dùng cookie `JSESSIONID`. Mọi `fetch`/Axios request phải dùng `credentials: "include"`.
+- Không gửi `Authorization: Bearer` và không lưu Cognito/provider token ở FE.
+- Sau login, gọi `GET /api/auth/me` để lấy profile, role và account status của session hiện tại.
+- Gọi `GET /api/auth/csrf`, giữ token trong memory và gửi qua `X-XSRF-TOKEN` cho `POST`, `PUT`, `PATCH`, `DELETE`.
+- `POST /api/auth/logout` là Spring Security route, cần CSRF và dùng browser form/navigation để theo redirect Cognito. Đây không phải controller JSON API.
+
+## 2. Current user
+
+| Khi nào FE gọi | API | Kết quả |
+|---|---|---|
+| Sau khi browser quay về từ login; khi hydrate auth state | `GET /api/auth/me` | Profile local, application role và account status của user hiện tại |
+| Trước mutation hoặc khi token cần làm mới | `GET /api/auth/csrf` | Tên header, parameter và token CSRF của session |
+
+Không truyền `userId`. Anonymous trả `401`; user đã đăng nhập nhưng không đủ quyền ở business API trả `403`.
+
+## 3. Student Import và Invitation Email
+
+| API | Role | Input | Response thành công |
+|---|---|---|---|
+| `POST /api/v1/courses/{courseId}/import-students` | ADMIN hoặc LECTURER phụ trách Course | `multipart/form-data`, field `file`, XLSX grouping template | `200 CourseStudentImportResponse` |
+| `POST /api/v1/courses/{courseId}/admin-import-students-template` | ADMIN | `multipart/form-data`, field `file`, XLSX 5 cột | `200 CourseStudentImportResponse` |
+
+Sau khi import/membership được lưu theo contract hiện tại, backend có thể enqueue invitation tương ứng. Email được xử lý bất đồng bộ qua outbox; lỗi cấu hình/provider hoặc gửi email không rollback import/TeamMember. `invitationsQueued` trong response là số event được enqueue, không phải xác nhận email đã tới inbox.
+
+- Student đã có liên kết Cognito nhận mẫu đăng nhập.
+- Student local chưa liên kết nhận hướng dẫn đăng ký/kích hoạt bằng đúng email nhận thư.
+- FE không gọi SMTP/Gmail và không có endpoint `/send-mail` hay invitation-status API công khai.
+- Trạng thái Gmail/Railway gửi thật vẫn cần deployment smoke; không hiển thị “email đã gửi thành công” chỉ từ HTTP 200 của import.
+
+## 4. Notification Bell
+
+| Chức năng | API | Contract |
+|---|---|---|
+| Danh sách của tôi | `GET /api/me/notifications?page=0&size=20` | Newest-first; `page >= 0`, `1 <= size <= 100` |
+| Số chưa đọc | `GET /api/me/notifications/unread-count` | `{ "unreadCount": number }` |
+| Đánh dấu đã đọc | `PATCH /api/me/notifications/{notificationId}/read` | Cần CSRF; idempotent; foreign/missing ID trả `404` |
+
+`NotificationResponse` gồm `id`, `type`, `title`, `message`, nullable `actionUrl`, `read`, nullable `readAt`, `createdAt`. SAGA DB là nguồn lịch sử và read-state chuẩn. FCM không thay thế các API này.
+
+## 5. Firebase Web Push
+
+1. FE cấu hình Firebase Web SDK bằng `firebaseConfig` public của đúng environment.
+2. Lấy Firebase Installation ID theo client contract đang hỗ trợ; example tài liệu là `example-browser-fid`, không dùng FID thật.
+3. Gọi `POST /api/me/firebase-installations` với:
+
+```json
+{
+  "firebaseInstallationId": "example-browser-fid"
+}
+```
+
+4. Giữ `id` UUID trong response để có thể gọi `DELETE /api/me/firebase-installations/{installationId}` khi user tắt push/xóa device registration.
+5. Khi nhận foreground/background push, invalidate hoặc refetch Bell API; không coi payload FCM là canonical history.
+
+Firebase Admin service account/private key tuyệt đối không đưa xuống FE. VAPID public key và service-worker deployment là cấu hình public theo environment; việc FCM Web nhận push thật vẫn là `TBD_DEPLOYMENT_SMOKE`. Backend hiện nhận trường tên `firebaseInstallationId`; không tự đổi sang registration-token contract ở FE.
+
+## 6. Admin notification broadcast
+
+`POST /api/admin/notifications/broadcast` — chỉ ADMIN, cần session, CSRF và `Idempotency-Key`.
+
+```json
+{
+  "audience": "STUDENTS",
+  "title": "Thông báo lịch bảo trì",
+  "message": "Hệ thống tạm ngừng lúc 22:00."
+}
+```
+
+`audience` chỉ nhận `STUDENTS`, `LECTURERS`, `ALL_USERS`. `ALL_USERS` hiện là toàn bộ Student + Lecturer local; không gồm Admin. Title tối đa 160, message tối đa 1000, đều là plain text không chứa `<` hoặc `>`.
+
+Response 200 gồm `broadcastId`, `audience`, `status`, `recipientCount`, `notificationCount`, `deliveryQueuedCount`, `completedAt`. Cùng key + cùng intent trả lại kết quả; tái sử dụng key cho nội dung/scope khác trả `409`.
+
+## 7. Lecturer Course notification
+
+`POST /api/v1/courses/notifications/broadcast` — chỉ LECTURER, cần session, CSRF và `Idempotency-Key`.
+
+```json
+{
+  "courseIds": ["11111111-1111-1111-1111-111111111111"],
+  "title": "Nhắc lịch demo",
+  "message": "Các nhóm chuẩn bị demo vào thứ Sáu."
+}
+```
+
+- `courseIds` có 1–100 phần tử; duplicate Course ID được normalize.
+- Mọi Course phải active và do Lecturer hiện tại phụ trách. Missing Course trả `404`; Course ngoài scope trả `403`; toàn request dừng trước fanout.
+- Người nhận chỉ lấy từ distinct `TeamMember` của các Course được duyệt; Student trùng nhiều Course chỉ nhận một Bell item cho broadcast.
+- Response dùng audience `COURSE_STUDENTS` và cùng bộ counter/status như Admin broadcast.
+
+## 8. Automatic notifications
+
+FE không gọi send API cho các event dưới đây. FE chỉ gọi business API Task/Sprint/Integration/Import bình thường; backend tạo Bell sau confirmed success.
+
+| Event | FE gọi send API? | Người nhận | Trigger | Notification type | Action URL |
+|---|---|---|---|---|---|
+| Thêm membership Course | Không | Student vừa có TeamMember | Membership mới được persist | `COURSE_MEMBERSHIP_ADDED` | `null` |
+| Liên kết Jira cá nhân thành công | Không | User khởi tạo | Callback xác nhận liên kết đã lưu | `JIRA_LINK_SUCCEEDED` | `null` |
+| Liên kết GitHub cá nhân thành công | Không | User khởi tạo | Callback xác nhận liên kết đã lưu | `GITHUB_LINK_SUCCEEDED` | `null` |
+| Liên kết Jira Project thành công | Không | User khởi tạo | Jira board link được persist | `JIRA_PROJECT_LINK_SUCCEEDED` | `null` |
+| Liên kết GitHub Project thành công | Không | User khởi tạo | GitHub installation/repository link được persist | `GITHUB_PROJECT_LINK_SUCCEEDED` | `null` |
+| Task create | Không | Assignee; nếu chưa assign thì Team sở hữu Project | Jira write `COMPLETED` | `TASK_CREATED` | `null` |
+| Task update | Không | Như trên | Jira write `COMPLETED` | `TASK_UPDATED` | `null` |
+| Task assignee | Không | Assignee mới; nếu chưa assign thì Team | Jira write `COMPLETED` | `TASK_ASSIGNEE_CHANGED` | `null` |
+| Task sprint | Không | Assignee hoặc Team | Target Sprint/backlog được canonical-confirm | `TASK_SPRINT_CHANGED` | `null` |
+| Task estimation | Không | Assignee hoặc Team | Story Point được canonical-confirm | `TASK_ESTIMATION_CHANGED` | `null` |
+| Task status | Không | Assignee hoặc Team | Transition được canonical-confirm | `TASK_STATUS_CHANGED` | `null` |
+| Task delete | Không | Assignee hoặc Team | Jira delete và local tombstone hoàn tất | `TASK_DELETED` | `null` |
+| Sprint create/update/start/close/delete | Không | Student Team sở hữu Project | Jira write `COMPLETED`; start/close đã canonical-confirm state | `SPRINT_CREATED`, `SPRINT_UPDATED`, `SPRINT_STARTED`, `SPRINT_CLOSED`, `SPRINT_DELETED` | `null` |
+| Task đến hạn ngày mai | Không | Assignee hoặc Team | Date-only deadline scan | `TASK_DUE_TOMORROW` | `null` |
+| Task đến hạn hôm nay | Không | Assignee hoặc Team | Date-only deadline scan | `TASK_DUE_TODAY` | `null` |
+| Task quá hạn | Không | Assignee hoặc Team | Date-only deadline scan | `TASK_OVERDUE` | `null` |
+
+Student actor của Task/Sprint mutation được loại khỏi tập recipient khi phù hợp. Event dedup ở backend ngăn replay/restart tạo trùng Bell item.
+
+## 9. Notification frontend behavior
+
+```text
+App boot / sau login
+  -> GET /api/auth/me
+  -> GET /api/auth/csrf
+  -> POST /api/me/firebase-installations (khi push được bật và có FID)
+  -> GET /api/me/notifications?page=0&size=20
+  -> GET /api/me/notifications/unread-count
+
+Foreground FCM
+  -> invalidate/refetch Bell list + unread count
+
+Background FCM
+  -> service worker/browser notification
+  -> khi app mở lại, refetch Bell list + unread count
+
+Mark read
+  -> PATCH /api/me/notifications/{id}/read
+  -> cập nhật item và unread count từ response/refetch
+```
+
+Không dựng Bell history chỉ từ push payload và không giả định `actionUrl` luôn có giá trị.
+
+## 10. Logout và device lifecycle
+
+Backend logout hiện không tự revoke Firebase installation. Product policy “một device có tiếp tục nhận push sau logout hay không” vẫn `TBD`; FE không được tự suy diễn contract mới.
+
+- Khi user chủ động tắt push hoặc xóa đăng ký device: gọi revoke bằng installation UUID đã lưu.
+- Khi logout: thực hiện `POST /api/auth/logout` theo browser navigation. Chỉ revoke trước logout nếu UI/product đã chọn rõ hành vi đó và FE vẫn còn session + CSRF hợp lệ.
+- Sau logout xóa auth/CSRF/Bell state khỏi memory; không lưu FID, cookie hoặc token thật vào log.

@@ -1,0 +1,94 @@
+# SAGA Frontend Handoff
+
+Checklist triển khai FE cho browser session, invitation email và Notification/Firebase. Tài liệu chi tiết: `docs/FRONTEND_API_INTEGRATION.md`.
+
+## Environment
+
+```text
+API_BASE_URL=https://<saga-backend-host>
+FIREBASE_CONFIG=<public web config for environment>
+FIREBASE_VAPID_PUBLIC_KEY=<public key when Web Messaging rollout is enabled>
+```
+
+Không đưa Firebase Admin service account, private key, Gmail App Password, Cognito client secret, session cookie, CSRF token hoặc FID thật vào source/log.
+
+## Auth/session setup
+
+- Login: browser navigation `GET {API_BASE_URL}/api/auth/login`.
+- Mọi API call: `credentials: "include"`; không Bearer.
+- Hydrate user: `GET /api/auth/me`.
+- Bootstrap CSRF: `GET /api/auth/csrf`; mutation gửi `X-XSRF-TOKEN`.
+- Logout: POST form/navigation tới `/api/auth/logout`; không dùng GET logout.
+
+## API theo feature
+
+| Feature | API | Role | Khi gọi |
+|---|---|---|---|
+| Current user | `GET /api/auth/me` | Authenticated | App boot/sau login |
+| CSRF | `GET /api/auth/csrf` | Authenticated | Trước mutation |
+| Course grouping import | `POST /api/v1/courses/{courseId}/import-students` | ADMIN hoặc LECTURER phụ trách | Upload XLSX |
+| Admin Course import | `POST /api/v1/courses/{courseId}/admin-import-students-template` | ADMIN | Upload XLSX 5 cột |
+| Bell list | `GET /api/me/notifications?page=0&size=20` | ADMIN/LECTURER/STUDENT | App boot, refresh, sau FCM |
+| Unread count | `GET /api/me/notifications/unread-count` | ADMIN/LECTURER/STUDENT | App boot và badge refresh |
+| Mark read | `PATCH /api/me/notifications/{id}/read` | Owner | User mở/đọc item |
+| Register browser FID | `POST /api/me/firebase-installations` | Authenticated | Sau login và Firebase init |
+| Revoke browser FID | `DELETE /api/me/firebase-installations/{installationId}` | Owner | Tắt push/xóa device registration |
+| Admin broadcast | `POST /api/admin/notifications/broadcast` | ADMIN | Gửi manual audience |
+| Course broadcast | `POST /api/v1/courses/notifications/broadcast` | LECTURER | Gửi tới TeamMember của Course sở hữu |
+
+## Notification integration
+
+- SAGA DB/Bell API là source of truth; FCM chỉ báo có thay đổi.
+- Foreground/background push đều dẫn tới refetch Bell list và unread count.
+- `actionUrl` hiện nullable; không invent route.
+- Broadcast cần `Idempotency-Key`; cùng intent dùng lại key, intent khác tạo key mới.
+- Automatic Task/Sprint/Integration/deadline notification không có send endpoint cho FE.
+
+## Firebase Web boundary
+
+- Dùng Firebase Web SDK và public environment config.
+- Gửi placeholder format `{ "firebaseInstallationId": "example-browser-fid" }` tới backend.
+- Lưu installation UUID backend trả về để revoke; không coi FID là UUID này.
+- Không đưa Firebase Admin credential xuống browser.
+- FCM production receipt/service-worker/VAPID vẫn cần deployment smoke.
+
+## Invitation email
+
+- Email invitation là side effect của Course student import/membership, không phải API gửi mail riêng.
+- HTTP import success chỉ xác nhận dữ liệu/import và số invitation enqueue; không xác nhận email đã đến inbox.
+- Delivery bất đồng bộ; lỗi Gmail/config không rollback membership.
+- Không dựng SMTP UI và không gọi `/send-mail`.
+
+## Common errors
+
+| Status | FE xử lý |
+|---|---|
+| `400` | Hiển thị validation/query/file/audience lỗi; không retry mù |
+| `401` | Session không còn hợp lệ; đưa user về login |
+| `403` | User không có role/ownership hoặc CSRF thiếu/sai; refresh CSRF một lần khi phù hợp |
+| `404` | Resource không tồn tại hoặc không thuộc owner |
+| `409` | Idempotency-Key bị tái sử dụng khác intent, FID thuộc owner khác, hoặc business conflict |
+
+## Do / Don't
+
+Do:
+
+- Dùng `credentials: "include"` và CSRF cho mutation.
+- Refetch Bell API sau push.
+- Dùng một Idempotency-Key ổn định cho cùng broadcast/Jira mutation intent.
+- Hiển thị import/email state đúng: queued khác sent.
+
+Don't:
+
+- Không dùng Bearer cho browser business API.
+- Không gửi actorId/recipientId/FID list trong broadcast.
+- Không coi FCM payload là notification history.
+- Không invent generic send-mail/send-notification endpoint.
+- Không tự coi invitation là Course enrollment hoặc thay đổi DEC-023.
+
+## Remaining deployment checks
+
+- Browser E2E: login, `/me`, `/csrf`, mutation, logout với cookie topology thật.
+- Firebase Web: public config/VAPID/service worker, foreground/background receipt và Bell refetch.
+- Gmail: outbox chuyển `PENDING/FAILED -> SENT` và kiểm tra inbox/spam.
+- Quyết định product về revoke FID khi logout; backend hiện không tự revoke.
