@@ -9,13 +9,16 @@ import com.saga.be.entity.enums.RoleInTeam;
 import com.saga.be.exception.CourseImportException;
 import com.saga.be.helper.StudentIdentityNormalizer;
 import com.saga.be.repository.StudentRepository;
+import com.saga.be.repository.StudentCourseInvitationRepository;
 import com.saga.be.repository.TeamMemberRepository;
 import com.saga.be.repository.TeamRepository;
 import com.saga.be.security.SagaPrincipal;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -44,28 +47,78 @@ import org.springframework.web.multipart.MultipartFile;
 @RequiredArgsConstructor
 public class ExcelImportService {
 
-    private static final List<String> HEADERS = List.of(
+    private static final List<String> COURSE_IMPORT_HEADERS = List.of(
             "Class", "RollNumber", "Email", "MemberCode", "FullName", "Group", "Leader"
+    );
+    private static final List<String> ADMIN_TEMPLATE_HEADERS = List.of(
+            "Class", "RollNumber", "Email", "MemberCode", "FullName"
     );
     private static final int MAX_ROWS = 1_000;
     private static final long MAX_FILE_SIZE_BYTES = 1_048_576L;
+    private static final String TEAM_PREFIX = "Group ";
 
     private final CourseImportAuthorizationService authorizationService;
     private final StudentRepository studentRepository;
+    private final StudentCourseInvitationRepository studentCourseInvitationRepository;
     private final TeamRepository teamRepository;
     private final TeamMemberRepository teamMemberRepository;
     private final StudentIdentityNormalizer identityNormalizer;
     private final StudentInvitationOutboxService invitationOutboxService;
 
     @Transactional
-    public void importStudentsToCourse(SagaPrincipal principal, UUID courseId, MultipartFile file) {
+    public CourseStudentImportSummary importStudentsToCourse(SagaPrincipal principal, UUID courseId, MultipartFile file) {
         Course course = authorizationService.requireImportAccess(principal, courseId);
-        List<ImportRow> rows = parse(file);
+        List<ImportRow> rows = parse(file, ImportTemplateMode.COURSE_GROUPING);
         ImportPlan plan = preflight(course, rows);
-        persist(course, plan);
+        PersistStats stats = persist(course, plan);
+        return summary(plan, stats, true);
     }
 
-    private List<ImportRow> parse(MultipartFile file) {
+    @Transactional
+    public CourseStudentImportSummary importStudentsToCourseByAdminTemplate(
+            SagaPrincipal principal,
+            UUID courseId,
+            MultipartFile file
+    ) {
+        Course course = authorizationService.requireImportAccess(principal, courseId);
+        List<ImportRow> rows = parse(file, ImportTemplateMode.ADMIN_ENROLLMENT);
+        ImportPlan plan = preflight(course, rows);
+        PersistStats stats = persistWithoutGrouping(course, plan);
+        return summary(plan, stats, false);
+    }
+
+    @Transactional(readOnly = true)
+    public ExportedCourseStudentTemplate exportCourseStudentTemplate(SagaPrincipal principal, UUID courseId) {
+        Course course = authorizationService.requireImportAccess(principal, courseId);
+        String classCode = course.getClazz() == null || course.getClazz().getClassCode() == null
+                ? ""
+                : course.getClazz().getClassCode().trim();
+
+        Map<UUID, Student> studentsById = new HashMap<>();
+        for (Student invitedStudent : studentCourseInvitationRepository.findDistinctStudentsByCourseId(courseId)) {
+            studentsById.put(invitedStudent.getId(), invitedStudent);
+        }
+        for (TeamMember membership : teamMemberRepository.findByTeamCourseId(courseId)) {
+            Student student = membership.getStudent();
+            if (student != null) {
+                studentsById.put(student.getId(), student);
+            }
+        }
+
+        List<Student> students = new ArrayList<>(studentsById.values());
+        Comparator<Student> studentOrder = Comparator.comparing(
+                (Student student) -> identityNormalizer.normalizeStudentCode(student.getStudentCode()),
+                String.CASE_INSENSITIVE_ORDER
+        ).thenComparing(Student::getId);
+        students.sort(studentOrder);
+
+        return new ExportedCourseStudentTemplate(
+                templateFilename(course),
+                toWorkbookBytes(classCode, students)
+        );
+    }
+
+    private List<ImportRow> parse(MultipartFile file, ImportTemplateMode mode) {
         if (file == null || file.isEmpty() || !isXlsx(file)) {
             throw badRequest("MALFORMED_WORKBOOK", "The uploaded file must be a non-empty XLSX workbook");
         }
@@ -77,7 +130,7 @@ public class ExcelImportService {
                 throw badRequest("MALFORMED_WORKBOOK", "The workbook must contain a sheet");
             }
             Sheet sheet = workbook.getSheetAt(0);
-            validateHeader(sheet.getRow(0));
+            validateHeader(sheet.getRow(0), mode.headers());
 
             List<ImportRow> rows = new ArrayList<>();
             Set<String> studentCodes = new HashSet<>();
@@ -90,7 +143,7 @@ public class ExcelImportService {
                 if (rows.size() >= MAX_ROWS) {
                     throw badRequest("ROW_LIMIT", "The workbook exceeds the supported row limit");
                 }
-                ImportRow parsed = parseRow(row);
+                ImportRow parsed = parseRow(row, mode);
                 if (!studentCodes.add(parsed.studentCode()) || !emails.add(parsed.email())) {
                     throw badRequest("DUPLICATE_IN_FILE", "The workbook contains duplicate student identity values");
                 }
@@ -107,29 +160,29 @@ public class ExcelImportService {
         }
     }
 
-    private void validateHeader(Row header) {
-        if (header == null || header.getLastCellNum() != HEADERS.size()) {
+    private void validateHeader(Row header, List<String> expectedHeaders) {
+        if (header == null || header.getLastCellNum() != expectedHeaders.size()) {
             throw badRequest("INVALID_HEADER", "The workbook header does not match the Course import schema");
         }
-        for (int index = 0; index < HEADERS.size(); index++) {
+        for (int index = 0; index < expectedHeaders.size(); index++) {
             Cell cell = header.getCell(index);
             if (cell == null || cell.getCellType() == CellType.FORMULA) {
                 throw badRequest("INVALID_HEADER", "The workbook header does not match the Course import schema");
             }
-            if (!HEADERS.get(index).equals(readCell(cell))) {
+            if (!expectedHeaders.get(index).equals(readCell(cell))) {
                 throw badRequest("INVALID_HEADER", "The workbook header does not match the Course import schema");
             }
         }
     }
 
-    private ImportRow parseRow(Row row) {
-        rejectFormulaCells(row);
-        rejectUnexpectedValues(row);
+    private ImportRow parseRow(Row row, ImportTemplateMode mode) {
+        rejectFormulaCells(row, mode.headers().size());
+        rejectUnexpectedValues(row, mode.headers().size());
         String studentCode = identityNormalizer.normalizeStudentCode(requiredCell(row, 1));
         String email = identityNormalizer.normalizeEmail(requiredCell(row, 2));
         String fullName = requiredCell(row, 4).trim();
-        String groupIndex = readOptionalCell(row, 5);
-        String leaderMark = readOptionalCell(row, 6);
+        String groupIndex = mode.groupingEnabled() ? readOptionalCell(row, 5) : "";
+        String leaderMark = mode.groupingEnabled() ? readOptionalCell(row, 6) : "";
         if (studentCode.isBlank() || email.isBlank() || fullName.isBlank()) {
             throw badRequest("INVALID_ROW", "A student row is missing a required value");
         }
@@ -202,9 +255,12 @@ public class ExcelImportService {
         return new ImportPlan(rows, existingStudents, newStudents, teamsByName);
     }
 
-    private void persist(Course course, ImportPlan plan) {
+    private PersistStats persist(Course course, ImportPlan plan) {
         List<Student> savedNewStudents = studentRepository.saveAll(plan.newStudents());
         Map<String, Student> studentsByIdentity = new HashMap<>();
+        int membershipsCreated = 0;
+        int teamsCreated = 0;
+        int invitationsQueued = 0;
         for (Student student : savedNewStudents) {
             studentsByIdentity.put(identityKey(student.getStudentCode(), student.getEmail()), student);
         }
@@ -222,28 +278,54 @@ public class ExcelImportService {
         Map<UUID, List<TeamMember>> membershipsByStudent = membershipsByStudent(membershipStudentIds, course.getId());
         Map<String, Team> teamsByName = new HashMap<>(plan.teamsByName());
         for (ImportRow row : plan.rows()) {
-            if (row.groupIndex().isBlank()) {
-                continue;
+            Student studentByIdentity = studentsByIdentity.get(identityKey(row.studentCode(), row.email()));
+            if (!row.groupIndex().isBlank()) {
+                Student student = lockedStudents.get(studentByIdentity.getId());
+                String teamName = teamName(row.groupIndex());
+                Team team = teamsByName.get(teamName);
+                if (team == null) {
+                    team = teamRepository.save(Team.builder().course(course).name(teamName).build());
+                    teamsByName.put(teamName, team);
+                    teamsCreated++;
+                }
+                List<TeamMember> memberships = membershipsByStudent.getOrDefault(student.getId(), List.of());
+                if (memberships.isEmpty()) {
+                    TeamMember membership = TeamMember.builder().team(team).student(student)
+                            .roleInTeam(roleFor(row.leaderMark())).build();
+                    teamMemberRepository.save(membership);
+                    membershipsByStudent.put(student.getId(), List.of(membership));
+                    membershipsCreated++;
+                } else if (memberships.size() == 1 && memberships.get(0).getTeam().getId().equals(team.getId())) {
+                    // Same Student + Team is idempotent and intentionally preserves the existing role.
+                } else {
+                    throw conflict("COURSE_TEAM_MEMBERSHIP_CONFLICT",
+                            "The student already belongs to another Team in this Course");
+                }
             }
-            Student student = lockedStudents.get(studentsByIdentity.get(identityKey(row.studentCode(), row.email())).getId());
-            String teamName = teamName(row.groupIndex());
-            Team team = teamsByName.computeIfAbsent(teamName, unused -> teamRepository.save(
-                    Team.builder().course(course).name(teamName).build()
-            ));
-            List<TeamMember> memberships = membershipsByStudent.getOrDefault(student.getId(), List.of());
-            if (memberships.isEmpty()) {
-                TeamMember membership = TeamMember.builder().team(team).student(student)
-                        .roleInTeam(roleFor(row.leaderMark())).build();
-                teamMemberRepository.save(membership);
-                membershipsByStudent.put(student.getId(), List.of(membership));
-            } else if (memberships.size() == 1 && memberships.get(0).getTeam().getId().equals(team.getId())) {
-                // Same Student + Team is idempotent and intentionally preserves the existing role.
-            } else {
-                throw conflict("COURSE_TEAM_MEMBERSHIP_CONFLICT",
-                        "The student already belongs to another Team in this Course");
+            if (invitationOutboxService.enqueueForCourse(studentByIdentity, course)) {
+                invitationsQueued++;
             }
-            invitationOutboxService.enqueueForCourse(student, course);
         }
+        return new PersistStats(invitationsQueued, teamsCreated, membershipsCreated);
+    }
+
+    private PersistStats persistWithoutGrouping(Course course, ImportPlan plan) {
+        List<Student> savedNewStudents = studentRepository.saveAll(plan.newStudents());
+        Map<String, Student> studentsByIdentity = new HashMap<>();
+        int invitationsQueued = 0;
+        for (Student student : savedNewStudents) {
+            studentsByIdentity.put(identityKey(student.getStudentCode(), student.getEmail()), student);
+        }
+        for (Map.Entry<ImportRow, Student> entry : plan.existingStudents().entrySet()) {
+            studentsByIdentity.put(identityKey(entry.getKey().studentCode(), entry.getKey().email()), entry.getValue());
+        }
+        for (ImportRow row : plan.rows()) {
+            Student student = studentsByIdentity.get(identityKey(row.studentCode(), row.email()));
+            if (invitationOutboxService.enqueueForCourse(student, course)) {
+                invitationsQueued++;
+            }
+        }
+        return new PersistStats(invitationsQueued, 0, 0);
     }
 
     private Map<UUID, Student> lockedStudents(Collection<UUID> ids) {
@@ -291,8 +373,8 @@ public class ExcelImportService {
         return result;
     }
 
-    private void rejectFormulaCells(Row row) {
-        for (int index = 0; index < HEADERS.size(); index++) {
+    private void rejectFormulaCells(Row row, int expectedColumns) {
+        for (int index = 0; index < expectedColumns; index++) {
             Cell cell = row.getCell(index);
             if (cell != null && cell.getCellType() == CellType.FORMULA) {
                 throw badRequest("FORMULA_NOT_ALLOWED", "Formula cells are not allowed in Course import rows");
@@ -300,8 +382,8 @@ public class ExcelImportService {
         }
     }
 
-    private void rejectUnexpectedValues(Row row) {
-        for (int index = HEADERS.size(); index < row.getLastCellNum(); index++) {
+    private void rejectUnexpectedValues(Row row, int expectedColumns) {
+        for (int index = expectedColumns; index < row.getLastCellNum(); index++) {
             Cell cell = row.getCell(index);
             if (cell != null && cell.getCellType() == CellType.FORMULA) {
                 throw badRequest("FORMULA_NOT_ALLOWED", "Formula cells are not allowed in Course import rows");
@@ -345,7 +427,7 @@ public class ExcelImportService {
     }
 
     private String teamName(String groupIndex) {
-        return "Group " + groupIndex;
+        return TEAM_PREFIX + groupIndex;
     }
 
     private RoleInTeam roleFor(String leaderMark) {
@@ -364,6 +446,53 @@ public class ExcelImportService {
         return new CourseImportException(HttpStatus.CONFLICT, code, message);
     }
 
+    private byte[] toWorkbookBytes(String classCode, List<Student> students) {
+        try (XSSFWorkbook workbook = new XSSFWorkbook(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            Sheet sheet = workbook.createSheet("Danh_Sach_SV");
+            Row header = sheet.createRow(0);
+            for (int index = 0; index < COURSE_IMPORT_HEADERS.size(); index++) {
+                header.createCell(index).setCellValue(COURSE_IMPORT_HEADERS.get(index));
+            }
+            for (int index = 0; index < students.size(); index++) {
+                Student student = students.get(index);
+                Row row = sheet.createRow(index + 1);
+                row.createCell(0).setCellValue(classCode);
+                row.createCell(1).setCellValue(student.getStudentCode() == null ? "" : student.getStudentCode());
+                row.createCell(2).setCellValue(student.getEmail() == null ? "" : student.getEmail());
+                row.createCell(3).setCellValue(student.getStudentCode() == null
+                        ? ""
+                        : student.getStudentCode().toLowerCase(Locale.ROOT));
+                row.createCell(4).setCellValue(student.getFullName() == null ? "" : student.getFullName());
+                row.createCell(5).setCellValue("");
+                row.createCell(6).setCellValue("");
+            }
+            workbook.write(output);
+            return output.toByteArray();
+        } catch (IOException exception) {
+            throw new IllegalStateException("Could not generate course student template", exception);
+        }
+    }
+
+    private String templateFilename(Course course) {
+        String courseCode = course.getCourseCode() == null ? "course" : course.getCourseCode().trim();
+        String safeCode = courseCode.replaceAll("[^A-Za-z0-9._-]", "_");
+        return "course-student-template-" + (safeCode.isBlank() ? "course" : safeCode) + ".xlsx";
+    }
+
+    private CourseStudentImportSummary summary(ImportPlan plan, PersistStats stats, boolean groupingApplied) {
+        int totalRows = plan.rows().size();
+        int createdStudents = plan.newStudents().size();
+        return new CourseStudentImportSummary(
+                totalRows,
+                createdStudents,
+                totalRows - createdStudents,
+                stats.invitationsQueued(),
+                stats.teamsCreated(),
+                stats.membershipsCreated(),
+                groupingApplied
+        );
+    }
+
     private record ImportRow(String studentCode, String email, String fullName, String groupIndex, String leaderMark) {
     }
 
@@ -373,5 +502,47 @@ public class ExcelImportService {
             List<Student> newStudents,
             Map<String, Team> teamsByName
     ) {
+    }
+
+    public record ExportedCourseStudentTemplate(String filename, byte[] bytes) {
+    }
+
+    public record CourseStudentImportSummary(
+            int totalRows,
+            int createdStudents,
+            int reusedStudents,
+            int invitationsQueued,
+            int teamsCreated,
+            int membershipsCreated,
+            boolean groupingApplied
+    ) {
+    }
+
+    private record PersistStats(
+            int invitationsQueued,
+            int teamsCreated,
+            int membershipsCreated
+    ) {
+    }
+
+    private enum ImportTemplateMode {
+        COURSE_GROUPING(COURSE_IMPORT_HEADERS, true),
+        ADMIN_ENROLLMENT(ADMIN_TEMPLATE_HEADERS, false);
+
+        private final List<String> headers;
+        private final boolean groupingEnabled;
+
+        ImportTemplateMode(List<String> headers, boolean groupingEnabled) {
+            this.headers = headers;
+            this.groupingEnabled = groupingEnabled;
+        }
+
+        List<String> headers() {
+            return headers;
+        }
+
+        boolean groupingEnabled() {
+            return groupingEnabled;
+        }
     }
 }

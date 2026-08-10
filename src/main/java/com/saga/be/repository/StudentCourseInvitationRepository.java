@@ -1,6 +1,7 @@
 package com.saga.be.repository;
 
 import com.saga.be.entity.StudentCourseInvitation;
+import com.saga.be.entity.Student;
 import com.saga.be.entity.enums.StudentInvitationStatus;
 import com.saga.be.entity.enums.StudentInvitationType;
 import jakarta.persistence.LockModeType;
@@ -43,4 +44,12 @@ public interface StudentCourseInvitationRepository
             @Param("status") StudentInvitationStatus status,
             @Param("staleBefore") java.time.LocalDateTime staleBefore
     );
+
+    @Query("""
+            select distinct invitation.student
+            from StudentCourseInvitation invitation
+            where invitation.course.id = :courseId
+            order by lower(invitation.student.studentCode), invitation.student.id
+            """)
+    List<Student> findDistinctStudentsByCourseId(@Param("courseId") UUID courseId);
 }

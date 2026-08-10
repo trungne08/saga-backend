@@ -26,6 +26,7 @@ import com.saga.be.security.SagaPrincipal;
 import com.saga.be.service.ExcelImportService;
 import com.saga.be.service.StudentInvitationClaimService;
 import com.saga.be.service.StudentInvitationProcessor;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.List;
@@ -56,6 +57,8 @@ import jakarta.servlet.http.Cookie;
 class CourseImportSecurityIntegrationTest {
 
     private static final String IMPORT_PATH = "/api/v1/courses/{courseId}/import-students";
+    private static final String ADMIN_TEMPLATE_IMPORT_PATH = "/api/v1/courses/{courseId}/admin-import-students-template";
+    private static final String GROUPING_TEMPLATE_PATH = "/api/v1/courses/{courseId}/students-grouping-template";
 
     @Autowired
     private MockMvc mockMvc;
@@ -356,14 +359,110 @@ class CourseImportSecurityIntegrationTest {
         );
     }
 
+    @Test
+    void adminTemplateImportThenLecturerDownloadAndGroupImportWorks() throws Exception {
+        Lecturer owner = createLecturer();
+        Course course = createCourse(owner);
+
+        mockMvc.perform(adminTemplateImportRequest(
+                        authenticationFor(ApplicationRole.ADMIN, UUID.randomUUID()),
+                        course.getId(),
+                        adminRow("SE010001", "template-flow@example.test")
+                ))
+                .andExpect(status().isOk());
+
+        assertEquals(1, studentRepository.count());
+        assertEquals(0, teamMemberRepository.count());
+        assertEquals(1, invitationRepository.count());
+
+        MvcResult templateResult = mockMvc.perform(get(GROUPING_TEMPLATE_PATH, course.getId())
+                        .with(authentication(authenticationFor(ApplicationRole.LECTURER, owner.getId()))))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        MockMultipartFile groupedFile = groupedTemplate(
+                templateResult.getResponse().getContentAsByteArray(),
+                "3",
+                "x"
+        );
+
+        mockMvc.perform(importRequest(
+                        authenticationFor(ApplicationRole.LECTURER, owner.getId()),
+                        course.getId(),
+                        groupedFile
+                ))
+                .andExpect(status().isOk());
+
+        assertEquals(1, teamMemberRepository.count());
+        assertEquals("Group 3", teamRepository.findAll().get(0).getName());
+        assertEquals(RoleInTeam.LEADER, teamMemberRepository.findAll().get(0).getRoleInTeam());
+    }
+
+    @Test
+    void adminTemplateImportRejectsLecturerTemplateWithGroupLeaderColumns() throws Exception {
+        Course course = createCourse(createLecturer());
+
+        mockMvc.perform(adminTemplateImportRequest(
+                        authenticationFor(ApplicationRole.ADMIN, UUID.randomUUID()),
+                        course.getId(),
+                        workbook(row("SE010002", "grouping-not-allowed@example.test", "1", "x"))
+                ))
+                .andExpect(status().isBadRequest());
+
+        assertEquals(0, teamMemberRepository.count());
+        assertEquals(0, invitationRepository.count());
+    }
+
+    @Test
+    void lecturerCannotCallAdminTemplateImportEndpoint() throws Exception {
+        Lecturer owner = createLecturer();
+        Course course = createCourse(owner);
+
+        mockMvc.perform(adminTemplateImportRequest(
+                        authenticationFor(ApplicationRole.LECTURER, owner.getId()),
+                        course.getId(),
+                        adminRow("SE010003", "lecturer-forbidden@example.test")
+                ))
+                .andExpect(status().isForbidden());
+    }
+
     private org.springframework.test.web.servlet.request.MockMultipartHttpServletRequestBuilder importRequest(
             Authentication authentication,
             UUID courseId,
             StudentRow... rows
     ) throws Exception {
+        return importRequest(authentication, courseId, workbook(rows));
+    }
+
+    private org.springframework.test.web.servlet.request.MockMultipartHttpServletRequestBuilder importRequest(
+            Authentication authentication,
+            UUID courseId,
+            MockMultipartFile workbook
+    ) throws Exception {
         Cookie csrfCookie = csrfCookie(authentication);
         return multipart(IMPORT_PATH, courseId)
-                .file(workbook(rows))
+                .file(workbook)
+                .with(authentication(authentication))
+                .cookie(csrfCookie)
+                .header("X-XSRF-TOKEN", csrfCookie.getValue());
+    }
+
+    private org.springframework.test.web.servlet.request.MockMultipartHttpServletRequestBuilder adminTemplateImportRequest(
+            Authentication authentication,
+            UUID courseId,
+            AdminTemplateRow... rows
+    ) throws Exception {
+        return adminTemplateImportRequest(authentication, courseId, adminTemplateWorkbook(rows));
+    }
+
+    private org.springframework.test.web.servlet.request.MockMultipartHttpServletRequestBuilder adminTemplateImportRequest(
+            Authentication authentication,
+            UUID courseId,
+            MockMultipartFile workbook
+    ) throws Exception {
+        Cookie csrfCookie = csrfCookie(authentication);
+        return multipart(ADMIN_TEMPLATE_IMPORT_PATH, courseId)
+                .file(workbook)
                 .with(authentication(authentication))
                 .cookie(csrfCookie)
                 .header("X-XSRF-TOKEN", csrfCookie.getValue());
@@ -422,6 +521,7 @@ class CourseImportSecurityIntegrationTest {
             for (int index = 0; index < columns.length; index++) {
                 header.createCell(index).setCellValue(columns[index]);
             }
+
             for (int index = 0; index < rows.length; index++) {
                 StudentRow student = rows[index];
                 var row = sheet.createRow(index + 1);
@@ -443,11 +543,63 @@ class CourseImportSecurityIntegrationTest {
         }
     }
 
+    private MockMultipartFile groupedTemplate(byte[] templateBytes, String group, String leader) throws IOException {
+        try (XSSFWorkbook workbook = new XSSFWorkbook(new ByteArrayInputStream(templateBytes));
+             ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            var sheet = workbook.getSheetAt(0);
+            var row = sheet.getRow(1);
+            row.getCell(5).setCellValue(group);
+            row.getCell(6).setCellValue(leader);
+            workbook.write(output);
+            return new MockMultipartFile(
+                    "file",
+                    "students-grouped.xlsx",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    output.toByteArray()
+            );
+        }
+    }
+
+    private MockMultipartFile adminTemplateWorkbook(AdminTemplateRow... rows) throws IOException {
+        try (XSSFWorkbook workbook = new XSSFWorkbook();
+             ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            var sheet = workbook.createSheet("Danh_Sach_SV");
+            var header = sheet.createRow(0);
+            String[] columns = {"Class", "RollNumber", "Email", "MemberCode", "FullName"};
+            for (int index = 0; index < columns.length; index++) {
+                header.createCell(index).setCellValue(columns[index]);
+            }
+            for (int index = 0; index < rows.length; index++) {
+                AdminTemplateRow student = rows[index];
+                var row = sheet.createRow(index + 1);
+                row.createCell(0).setCellValue("SE");
+                row.createCell(1).setCellValue(student.studentCode());
+                row.createCell(2).setCellValue(student.email());
+                row.createCell(3).setCellValue(student.studentCode().toLowerCase());
+                row.createCell(4).setCellValue("Imported Student");
+            }
+            workbook.write(output);
+            return new MockMultipartFile(
+                    "file",
+                    "students-admin-template.xlsx",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    output.toByteArray()
+            );
+        }
+    }
+
     private StudentRow row(String studentCode, String email, String group, String leader) {
         return new StudentRow(studentCode, email, group, leader);
     }
 
+    private AdminTemplateRow adminRow(String studentCode, String email) {
+        return new AdminTemplateRow(studentCode, email);
+    }
+
     private record StudentRow(String studentCode, String email, String group, String leader) {
+    }
+
+    private record AdminTemplateRow(String studentCode, String email) {
     }
 
     private record MasterDataRequest(String path, String body) {

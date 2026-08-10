@@ -27,7 +27,7 @@ public class StudentInvitationOutboxService {
     }
 
     @Transactional
-    public void enqueueForCourse(Student student, Course course) {
+    public boolean enqueueForCourse(Student student, Course course) {
         StudentInvitationType type = hasCognitoSubject(student)
                 ? StudentInvitationType.LINKED_STUDENT
                 : StudentInvitationType.FIRST_LOGIN_REQUIRED;
@@ -36,7 +36,7 @@ public class StudentInvitationOutboxService {
                 course.getId(),
                 type
         ).isPresent()) {
-            return;
+            return false;
         }
 
         StudentCourseInvitation invitation = StudentCourseInvitation.builder()
@@ -50,9 +50,10 @@ public class StudentInvitationOutboxService {
             invitation = invitationRepository.saveAndFlush(invitation);
         } catch (DataIntegrityViolationException exception) {
             // The database uniqueness constraint is the concurrency-safe deduplication guard.
-            return;
+            return false;
         }
         eventPublisher.publishEvent(new StudentInvitationQueued(invitation.getId()));
+        return true;
     }
 
     private boolean hasCognitoSubject(Student student) {

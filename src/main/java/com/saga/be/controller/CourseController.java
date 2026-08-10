@@ -3,17 +3,25 @@ package com.saga.be.controller;
 import com.saga.be.dto.request.CourseRequest;
 import com.saga.be.dto.response.CourseStudentRosterResponse;
 import com.saga.be.dto.response.CourseStudentBasicInfoResponse;
+import com.saga.be.dto.response.CourseStudentImportResponse;
 import com.saga.be.dto.response.LecturerOptionResponse;
 import com.saga.be.entity.Course;
 import com.saga.be.service.CourseService;
 import com.saga.be.service.ExcelImportService;
+import com.saga.be.service.ExcelImportService.CourseStudentImportSummary;
+import com.saga.be.service.ExcelImportService.ExportedCourseStudentTemplate;
 import com.saga.be.security.SagaPrincipal;
+import io.swagger.v3.oas.annotations.Operation;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import java.nio.charset.StandardCharsets;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.http.CacheControl;
+import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -31,6 +39,8 @@ import java.util.UUID;
 @RequiredArgsConstructor
 @Validated
 public class CourseController {
+    private static final MediaType XLSX_MEDIA_TYPE = MediaType.parseMediaType(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
 
     private final CourseService courseService;
     private final ExcelImportService excelImportService;
@@ -132,11 +142,55 @@ public class CourseController {
 
     @PostMapping(value = "/{courseId}/import-students", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @PreAuthorize("hasAnyRole('ADMIN', 'LECTURER')")
-    public ResponseEntity<String> importStudents(
+    @Operation(summary = "Import phân nhóm sinh viên vào course",
+            description = "Nhập file XLSX template để tạo/cập nhật Team membership của sinh viên trong course.")
+    public ResponseEntity<CourseStudentImportResponse> importStudents(
             @AuthenticationPrincipal SagaPrincipal principal,
             @PathVariable UUID courseId,
             @RequestParam("file") MultipartFile file) {
-        excelImportService.importStudentsToCourse(principal, courseId, file);
-        return ResponseEntity.ok("Import danh sách sinh viên thành công!");
+        CourseStudentImportSummary summary = excelImportService.importStudentsToCourse(principal, courseId, file);
+        return ResponseEntity.ok(CourseStudentImportResponse.from(
+                "COURSE_GROUPING_IMPORT",
+                "Import danh sách sinh viên và phân nhóm thành công!",
+                summary
+        ));
+    }
+
+    @PostMapping(value = "/{courseId}/admin-import-students-template", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("hasRole('ADMIN')")
+    @Operation(summary = "Admin import danh sách sinh viên vào course",
+            description = "Nhập file XLSX template 5 cột (Class, RollNumber, Email, MemberCode, FullName) để gắn danh sách sinh viên vào course.")
+    public ResponseEntity<CourseStudentImportResponse> importStudentsByAdminTemplate(
+            @AuthenticationPrincipal SagaPrincipal principal,
+            @PathVariable UUID courseId,
+            @RequestParam("file") MultipartFile file
+    ) {
+        CourseStudentImportSummary summary = excelImportService.importStudentsToCourseByAdminTemplate(
+                principal,
+                courseId,
+                file
+        );
+        return ResponseEntity.ok(CourseStudentImportResponse.from(
+                "ADMIN_TEMPLATE_IMPORT",
+                "Import danh sách sinh viên vào course thành công!",
+                summary
+        ));
+    }
+
+    @GetMapping("/{courseId}/students-grouping-template")
+    @PreAuthorize("hasAnyRole('ADMIN', 'LECTURER')")
+    @Operation(summary = "Tải template phân nhóm sinh viên",
+            description = "Tải file XLSX gồm danh sách sinh viên đã thuộc course để giảng viên điền Group/Leader rồi import lại.")
+    public ResponseEntity<byte[]> downloadStudentsGroupingTemplate(
+            @AuthenticationPrincipal SagaPrincipal principal,
+            @PathVariable UUID courseId
+    ) {
+        ExportedCourseStudentTemplate template = excelImportService.exportCourseStudentTemplate(principal, courseId);
+        return ResponseEntity.ok()
+                .contentType(XLSX_MEDIA_TYPE)
+                .cacheControl(CacheControl.noStore())
+                .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
+                        .filename(template.filename(), StandardCharsets.UTF_8).build().toString())
+                .body(template.bytes());
     }
 }
