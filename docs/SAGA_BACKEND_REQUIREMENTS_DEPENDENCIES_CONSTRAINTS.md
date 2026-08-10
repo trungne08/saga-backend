@@ -1,3 +1,9 @@
+## Ràng buộc J1H TASK_ESTIMATION finalization — 2026-08-10
+
+- `TASK_ESTIMATION` chỉ `COMPLETED` sau Jira Agile estimation mutation đã `REMOTE_SUCCEEDED`, canonical GET có field estimation discovery theo board, upsert và fresh `JiraCanonicalTaskReadService` xác nhận `storyPoint` bằng request integer không âm.
+- Ngay sau `markRemoteSucceeded` transaction riêng phải đồng bộ remote id/key/status vào object orchestration trước reconcile. Failure canonical hay mismatch phải giữ `REMOTE_SUCCEEDED`, không `FAILED`, không success giả và không replay provider mutation với cùng key.
+- `request_fingerprint` không lưu target intent đọc được; recovery nền không được tự complete `TASK_ESTIMATION`. Không đổi entity/schema/migration, global MySQL isolation, scope/auth/session/CSRF hoặc thêm hardcode Jira/customfield/Bearer.
+
 ## Ràng buộc J1G Jira Task update metadata — 2026-08-10
 
 - `PUT /tasks/{taskId}` không nhận type/assignee/Sprint/estimation/status; giữ route/scope/idempotency/recovery riêng.

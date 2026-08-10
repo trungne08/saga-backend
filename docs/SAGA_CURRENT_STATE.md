@@ -1,3 +1,9 @@
+## J1H Jira Task Estimation remote-success finalization — 2026-08-10
+
+- **CONFIRMED_SOURCE:** lỗi 409 `JIRA_WRITE_OPERATION_IN_PROGRESS` xảy ra sau Jira estimation thành công khi `markRemoteSucceeded` đã ghi DB bằng transaction riêng nhưng object request vẫn thiếu `remoteResourceId`; `reconcile` chặn object cũ trước canonical GET/upsert.
+- **Đã hoàn thành:** estimation nay đồng bộ object cục bộ rồi đọc Jira canonical cùng estimation field đã discovery, upsert và fresh-read `REQUIRES_NEW` xác nhận chính xác Story Point trước `COMPLETED`. Giá trị `0` hợp lệ.
+- **Đã hoàn thành:** lỗi canonical hoặc mismatch giữ `REMOTE_SUCCEEDED`; replay cùng key/body không PUT estimation lần hai. Recovery nền không finalize estimation vì fingerprint không cung cấp target intent để xác minh an toàn.
+
 ## J1G Jira Task update edit-metadata — 2026-08-10
 
 - **CONFIRMED:** `JIRA_EDIT_FIELD_NOT_ALLOWED` phát sinh local sau editmeta thành công nếu field cần mutate không hiện diện; trước J1G full-form update gửi mọi field non-null.

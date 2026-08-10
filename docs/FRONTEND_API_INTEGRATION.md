@@ -1,3 +1,9 @@
+## J1H Jira Task Estimation recovery — 2026-08-10
+
+Với `PUT /api/v1/projects/{projectId}/tasks/{taskId}/estimation`, gửi `{ "value": <integer không âm> }` và giữ nguyên `Idempotency-Key` khi retry cùng intent. Sau remote success, backend chỉ fetch/upsert Jira canonical và trả `200` khi `storyPoint` canonical đúng value đã gửi; không gửi PUT estimation lần hai.
+
+Nếu nhận lỗi recovery sau sự cố canonical, FE không tạo key mới và không đổi value để "sửa" trạng thái: retry cùng body/key. Background recovery không tự complete estimation vì backend không persist target intent ngoài fingerprint. `0` là giá trị hợp lệ. CSRF, session và quyền Project Manager không đổi.
+
 ## J1G Jira Task Update contract — 2026-08-10
 
 `PUT /api/v1/projects/{projectId}/tasks/{taskId}` chỉ dùng field optional `title`, `description`, `priorityId`, `dueDate` (`YYYY-MM-DD`), `labels`, `componentIds`. Omit/null là không đổi; `labels: []`/`componentIds: []` replace-all rỗng. Không gửi type, assignee, sprintId, estimation hay status vào body này.

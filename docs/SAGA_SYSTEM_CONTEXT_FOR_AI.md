@@ -1,3 +1,9 @@
+## J1H Jira Task Estimation remote-success finalization — 2026-08-10
+
+- **CONFIRMED_SOURCE/FIX:** `TASK_ESTIMATION` đồng bộ remote id/key/status vào object orchestration ngay sau `markRemoteSucceeded` commit riêng, trước canonical reconciliation. Flow discovery estimation field theo board, Jira GET có field đã discover, upsert và `JiraCanonicalTaskReadService` fresh `REQUIRES_NEW` read-only; chỉ `complete` khi `storyPoint` canonical đúng `request.value`.
+- **CONFIRMED:** canonical fetch/upsert/read hoặc target mismatch sau remote success giữ `REMOTE_SUCCEEDED`, không `FAILED` và không gọi lại Jira estimation mutation. Retry cùng `Idempotency-Key` và request fingerprint chỉ canonical recover; response `COMPLETED` replay dùng snapshot local hiện có.
+- **BOUNDARY:** operation chỉ persist fingerprint hash, không persist target estimation giải mã được. Vì vậy background recovery không hoàn tất `TASK_ESTIMATION`; nó giữ `REMOTE_SUCCEEDED` để retry cùng request/key xác nhận target. Không đổi global DB isolation, entity/schema/migration, provider ID/customfield hardcode, bearer auth, session/CSRF hoặc authorization.
+
 ## J1G Jira Task update edit-metadata correctness — 2026-08-10
 
 - `PUT /api/v1/projects/{projectId}/tasks/{taskId}` chỉ nhận `title`, `description`, `priorityId`, `dueDate`, `labels`, `componentIds`; type/assignee/Sprint/estimation/status dùng endpoint riêng.

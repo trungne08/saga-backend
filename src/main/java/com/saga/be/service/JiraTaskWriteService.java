@@ -220,6 +220,11 @@ public class JiraTaskWriteService {
             try {
                 jiraClient.estimateIssue(token, board.getCloudId(), board.getJiraBoardId(), external(task), request.value());
                 operationService.markRemoteSucceeded(operation.getId(), task.getExternalId(), task.getExternalKey());
+                // markRemoteSucceeded runs in a separate transaction. Keep this request's
+                // object in the same state before the immediate canonical finalization.
+                operation.setRemoteResourceId(task.getExternalId());
+                operation.setRemoteResourceKey(task.getExternalKey());
+                operation.setStatus(JiraWriteOperationStatus.REMOTE_SUCCEEDED);
             } catch (IntegrationException exception) {
                 operationService.failed(operation.getId(), exception.getCode());
                 throw exception;
@@ -228,7 +233,7 @@ public class JiraTaskWriteService {
                 throw exception;
             }
         }
-        return reconcile(operation, board, projectId, estimationFieldId);
+        return reconcileEstimation(operation, board, projectId, estimationFieldId, request.value());
     }
 
     @Transactional
@@ -474,11 +479,31 @@ public class JiraTaskWriteService {
         return result;
     }
 
+    private TaskReadResponse reconcileEstimation(
+            JiraWriteOperation operation,
+            JiraBoard board,
+            UUID projectId,
+            String estimationFieldId,
+            Integer expectedStoryPoint
+    ) {
+        return reconcile(operation, board, projectId, estimationFieldId, expectedStoryPoint);
+    }
+
     private TaskReadResponse reconcile(
             JiraWriteOperation operation,
             JiraBoard board,
             UUID projectId,
             String estimationFieldId
+    ) {
+        return reconcile(operation, board, projectId, estimationFieldId, null);
+    }
+
+    private TaskReadResponse reconcile(
+            JiraWriteOperation operation,
+            JiraBoard board,
+            UUID projectId,
+            String estimationFieldId,
+            Integer expectedStoryPoint
     ) {
         if (operation.getRemoteResourceId() == null) throw IntegrationException.conflict(
                 "JIRA_WRITE_OPERATION_IN_PROGRESS", "The Jira write outcome is still being recovered");
@@ -489,6 +514,14 @@ public class JiraTaskWriteService {
         TaskReadResponse result = canonicalTaskReadService.findResponse(projectId, operation.getRemoteResourceId())
                 .orElseThrow(() -> IntegrationException.conflict(
                         "JIRA_WRITE_RECOVERY_REQUIRED", "The Jira write is awaiting local recovery"));
+        if (expectedStoryPoint != null && !Objects.equals(expectedStoryPoint, result.storyPoint())) {
+            log.warn("jira_task_estimation_recovery_pending operation=TASK_ESTIMATION "
+                            + "stage=TARGET_VERIFICATION expectedStoryPoint={} observedStoryPoint={} "
+                            + "writeOperationStatus=REMOTE_SUCCEEDED",
+                    expectedStoryPoint, result.storyPoint());
+            throw IntegrationException.conflict(
+                    "JIRA_WRITE_RECOVERY_REQUIRED", "The Jira write is awaiting local recovery");
+        }
         operationService.complete(operation.getId());
         operation.setStatus(JiraWriteOperationStatus.COMPLETED);
         return result;

@@ -1,3 +1,9 @@
+## J1H — Jira Task Estimation canonical finalization (2026-08-10)
+
+| Method | Path | Success | Client error | Recovery / safety |
+| --- | --- | --- | --- | --- |
+| PUT | `/api/v1/projects/{projectId}/tasks/{taskId}/estimation` | 200 canonical `TaskReadResponse` chỉ khi `storyPoint` fresh-read bằng `value` | 400 validation/thiếu Idempotency-Key; 409 `JIRA_SCOPE_INSUFFICIENT`, `JIRA_BOARD_NOT_CONFIGURED`, `JIRA_ESTIMATION_UNSUPPORTED` | Sau remote success, canonical fetch/upsert/mismatch trả recovery-required và giữ `REMOTE_SUCCEEDED`; same key/body không gọi Jira estimation lần hai; background không complete thiếu target intent |
+
 ## J1G — Jira Task Update edit metadata (2026-08-10)
 
 | Method | Path | Success | Client error | Provider failure | Idempotency / safety |

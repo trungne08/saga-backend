@@ -1,3 +1,10 @@
+## DEC-064 — J1H finalization TASK_ESTIMATION theo target-aware canonical recovery
+
+- Ngày: 2026-08-10; trạng thái: ACCEPTED.
+- Evidence: `markRemoteSucceeded` dùng transaction riêng. Nếu orchestration object không nhận lại remote identity, canonical reconcile ném `JIRA_WRITE_OPERATION_IN_PROGRESS` dù Jira đã áp estimation.
+- Quyết định: đồng bộ remote id/key/status trong object ngay sau remote success; canonical GET phải yêu cầu estimation field được discovery theo board, upsert và fresh-read xác nhận `storyPoint == request.value` rồi mới `complete`.
+- Hệ quả: retry cùng key/request không replay mutation Jira; canonical failure hoặc mismatch giữ `REMOTE_SUCCEEDED`. Vì schema chỉ có fingerprint hash, scheduler/recovery nền không đủ target intent để complete `TASK_ESTIMATION` và phải giữ pending recovery. Không thêm migration, hardcode customfield/Jira ID, Bearer hay thay đổi isolation toàn cục.
+
 ## DEC-062 — Jira Task update chỉ gửi diff canonical có thể chứng minh (2026-08-10)
 
 **Status: ACCEPTED.**

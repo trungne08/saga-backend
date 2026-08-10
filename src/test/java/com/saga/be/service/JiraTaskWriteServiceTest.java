@@ -16,6 +16,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.saga.be.dto.request.JiraTaskCreateRequest;
+import com.saga.be.dto.request.JiraTaskEstimationRequest;
 import com.saga.be.dto.request.JiraTaskSprintRequest;
 import com.saga.be.dto.request.JiraTaskUpdateRequest;
 import com.saga.be.entity.JiraBoard;
@@ -645,6 +646,89 @@ class JiraTaskWriteServiceTest {
     }
 
     @Test
+    void estimationFinalizesFromFreshCanonicalStoryPointAfterRemoteSuccess() {
+        EstimationFixture fixture = estimationFixture(0);
+
+        TaskReadResponse response = fixture.service.estimate(fixture.principal, fixture.projectId, fixture.task.getId(),
+                "key", new JiraTaskEstimationRequest(0));
+
+        assertEquals(0, response.storyPoint());
+        verify(fixture.provider).estimateIssue("token", "cloud", "7", "101", 0);
+        verify(fixture.provider).getIssue("token", "cloud", "101", "customfield_10016");
+        verify(fixture.upserts).upsert(fixture.board.getId(), fixture.snapshot);
+        verify(fixture.operations).markRemoteSucceeded(fixture.operation.getId(), "101", "P-1");
+        verify(fixture.operations).complete(fixture.operation.getId());
+        assertEquals("101", fixture.operation.getRemoteResourceId());
+        assertEquals(JiraWriteOperationStatus.COMPLETED, fixture.operation.getStatus());
+    }
+
+    @Test
+    void remoteSucceededEstimationReplayFinalizesWithoutAnotherProviderMutation() {
+        EstimationFixture fixture = estimationFixture(5);
+        fixture.operation.setStatus(JiraWriteOperationStatus.REMOTE_SUCCEEDED);
+        fixture.operation.setRemoteResourceId("101");
+        fixture.operation.setRemoteResourceKey("P-1");
+
+        assertEquals(5, fixture.service.estimate(fixture.principal, fixture.projectId, fixture.task.getId(),
+                "key", new JiraTaskEstimationRequest(5)).storyPoint());
+
+        verify(fixture.provider, never()).estimateIssue(any(), any(), any(), any(), any());
+        verify(fixture.provider).getIssue("token", "cloud", "101", "customfield_10016");
+        verify(fixture.operations).complete(fixture.operation.getId());
+    }
+
+    @Test
+    void estimationCanonicalFailureRetainsRemoteSucceededAndReplayDoesNotRepeatMutation() {
+        EstimationFixture fixture = estimationFixture(5);
+        when(fixture.provider.getIssue("token", "cloud", "101", "customfield_10016"))
+                .thenThrow(IntegrationException.unavailable("JIRA_PROVIDER_UNAVAILABLE"));
+
+        assertThrows(IntegrationException.class, () -> fixture.service.estimate(fixture.principal, fixture.projectId,
+                fixture.task.getId(), "key", new JiraTaskEstimationRequest(5)));
+
+        assertEquals(JiraWriteOperationStatus.REMOTE_SUCCEEDED, fixture.operation.getStatus());
+        verify(fixture.operations, never()).failed(fixture.operation.getId(), "JIRA_PROVIDER_UNAVAILABLE");
+        verify(fixture.operations, never()).complete(fixture.operation.getId());
+
+        doReturn(fixture.snapshot).when(fixture.provider).getIssue("token", "cloud", "101", "customfield_10016");
+        fixture.service.estimate(fixture.principal, fixture.projectId, fixture.task.getId(), "key",
+                new JiraTaskEstimationRequest(5));
+
+        verify(fixture.provider, times(1)).estimateIssue("token", "cloud", "7", "101", 5);
+        verify(fixture.operations).complete(fixture.operation.getId());
+    }
+
+    @Test
+    void estimationTargetMismatchRetainsRemoteSucceededWithoutCompleting() {
+        EstimationFixture fixture = estimationFixture(3);
+        Task mismatch = Task.builder().project(fixture.project).externalId("101").externalKey("P-1")
+                .title("Task").storyPoint(2).build();
+        mismatch.setId(fixture.task.getId());
+        when(fixture.canonicalReads.findResponse(fixture.projectId, "101"))
+                .thenReturn(Optional.of(TaskReadResponse.from(mismatch)));
+
+        assertEquals("JIRA_WRITE_RECOVERY_REQUIRED", assertThrows(IntegrationException.class,
+                () -> fixture.service.estimate(fixture.principal, fixture.projectId, fixture.task.getId(), "key",
+                        new JiraTaskEstimationRequest(3))).getCode());
+
+        assertEquals(JiraWriteOperationStatus.REMOTE_SUCCEEDED, fixture.operation.getStatus());
+        verify(fixture.operations, never()).complete(fixture.operation.getId());
+    }
+
+    @Test
+    void estimationRequiresGrantedSoftwareAndBoardReadScopesBeforeMutation() {
+        EstimationFixture fixture = estimationFixture(3);
+        fixture.board.setGrantedScopes("write:issue:jira-software read:project:jira");
+
+        assertEquals("JIRA_SCOPE_INSUFFICIENT", assertThrows(IntegrationException.class,
+                () -> fixture.service.estimate(fixture.principal, fixture.projectId, fixture.task.getId(), "key",
+                        new JiraTaskEstimationRequest(3))).getCode());
+
+        verify(fixture.provider, never()).estimateIssue(any(), any(), any(), any(), any());
+        verify(fixture.operations, never()).markRemoteSucceeded(any(), any(), any());
+    }
+
+    @Test
     void backlogUsesTheSameCanonicalRecoveryAndFreshConfirmationWithoutSprintMove() {
         SprintFixture fixture = sprintFixture(true);
 
@@ -982,6 +1066,51 @@ class JiraTaskWriteServiceTest {
         return new UpdateFixture(service, provider, operations, projectId, task, operation, principal, response);
     }
 
+    private EstimationFixture estimationFixture(int storyPoint) {
+        ProjectIntegrationAuthorizationService authorization = mock(ProjectIntegrationAuthorizationService.class);
+        JiraBoardRepository boards = mock(JiraBoardRepository.class);
+        JiraCredentialService credentials = mock(JiraCredentialService.class);
+        JiraProviderClient provider = mock(JiraProviderClient.class);
+        JiraIssueUpsertService upserts = mock(JiraIssueUpsertService.class);
+        JiraWriteOperationService operations = mock(JiraWriteOperationService.class);
+        JiraCanonicalTaskReadService canonicalReads = mock(JiraCanonicalTaskReadService.class);
+        TaskRepository tasks = mock(TaskRepository.class);
+        UUID projectId = UUID.randomUUID();
+        Project project = Project.builder().name("Project").build(); project.setId(projectId);
+        JiraBoard board = JiraBoard.builder().project(project).cloudId("cloud").jiraBoardId("7")
+                .connectionStatus(IntegrationStatus.ACTIVE).grantedScopes(
+                        "write:issue:jira-software read:board-scope.admin:jira-software read:project:jira"
+                ).build();
+        board.setId(UUID.randomUUID());
+        Task task = Task.builder().project(project).externalId("101").externalKey("P-1").title("Task").build();
+        task.setId(UUID.randomUUID());
+        JiraWriteOperation operation = JiraWriteOperation.builder().project(project)
+                .operationType(JiraWriteOperationType.TASK_ESTIMATION).status(JiraWriteOperationStatus.PENDING).build();
+        operation.setId(UUID.randomUUID());
+        SagaPrincipal principal = new SagaPrincipal("sub", "a@b.test", "User", ApplicationRole.ADMIN,
+                UUID.randomUUID(), AccountStatus.ACTIVE);
+        Task confirmed = Task.builder().project(project).externalId("101").externalKey("P-1").title("Task")
+                .storyPoint(storyPoint).build();
+        confirmed.setId(task.getId());
+        JiraIssueSnapshot snapshot = new JiraIssueSnapshot("101", "P-1", "Task", "Task", "To Do", null,
+                storyPoint, null, null, null, null, LocalDateTime.now(), null, null, null, null, null);
+        when(authorization.requireProjectManager(principal, projectId)).thenReturn(project);
+        when(tasks.findByIdAndProjectId(task.getId(), projectId)).thenReturn(Optional.of(task));
+        when(operations.fingerprint(any())).thenReturn("fingerprint");
+        when(operations.claim(project, principal, JiraWriteOperationType.TASK_ESTIMATION, "key", "fingerprint"))
+                .thenReturn(operation);
+        when(boards.findByProjectId(projectId)).thenReturn(Optional.of(board));
+        when(credentials.validAccessToken(board)).thenReturn("token");
+        when(provider.estimationFieldId("token", "cloud", "7")).thenReturn("customfield_10016");
+        when(provider.getIssue("token", "cloud", "101", "customfield_10016")).thenReturn(snapshot);
+        when(canonicalReads.findResponse(projectId, "101")).thenReturn(Optional.of(TaskReadResponse.from(confirmed)));
+        JiraTaskWriteService service = new JiraTaskWriteService(authorization, boards, credentials, provider, upserts,
+                operations, canonicalReads, mock(JiraTaskSprintFinalizationService.class), tasks,
+                mock(IdentityMapRepository.class), mock(SprintRepository.class), mock(JiraSprintUpsertService.class));
+        return new EstimationFixture(service, provider, upserts, operations, canonicalReads, projectId, project, board,
+                task, operation, principal, snapshot);
+    }
+
     private record CreateFixture(
             ProjectIntegrationAuthorizationService authorization,
             JiraBoardRepository boards,
@@ -1033,6 +1162,22 @@ class JiraTaskWriteServiceTest {
             JiraWriteOperation operation,
             SagaPrincipal principal,
             TaskReadResponse response
+    ) {
+    }
+
+    private record EstimationFixture(
+            JiraTaskWriteService service,
+            JiraProviderClient provider,
+            JiraIssueUpsertService upserts,
+            JiraWriteOperationService operations,
+            JiraCanonicalTaskReadService canonicalReads,
+            UUID projectId,
+            Project project,
+            JiraBoard board,
+            Task task,
+            JiraWriteOperation operation,
+            SagaPrincipal principal,
+            JiraIssueSnapshot snapshot
     ) {
     }
 

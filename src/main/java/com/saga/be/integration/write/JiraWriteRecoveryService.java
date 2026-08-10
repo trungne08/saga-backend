@@ -64,8 +64,10 @@ public class JiraWriteRecoveryService {
             sprints.findByBoardProjectIdAndDeletedAtIsNull(operation.getProject().getId()).stream()
                     .filter(sprint -> operation.getRemoteResourceId().equals(sprint.getExternalSprintId()))
                     .findFirst().ifPresent(sprint -> tombstoneSprint(operation.getProject().getId(), sprint));
-        } else if (operation.getOperationType() == JiraWriteOperationType.TASK_SPRINT) {
-            log.warn("Jira write recovery remains pending: stage=TARGET_INTENT writeOperationStatus=REMOTE_SUCCEEDED operationType=TASK_SPRINT");
+        } else if (operation.getOperationType() == JiraWriteOperationType.TASK_SPRINT
+                || operation.getOperationType() == JiraWriteOperationType.TASK_ESTIMATION) {
+            log.warn("Jira write recovery remains pending: stage=TARGET_INTENT writeOperationStatus=REMOTE_SUCCEEDED operationType={}",
+                    operation.getOperationType());
             return;
         } else if (operation.getOperationType().name().startsWith("TASK_")) {
             String token = credentials.validAccessToken(board);
