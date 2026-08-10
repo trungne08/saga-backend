@@ -1,3 +1,13 @@
+## DEC-068 — Gmail SMTP là production adapter cho Student Course Invitation
+
+- **Decision:** giữ nguyên transactional outbox, `StudentInvitationProcessor` và `StudentInvitationDeliveryAdapter`; production implementation dùng Spring Boot Mail `JavaMailSender` với Gmail SMTP, MIME UTF-8 text + HTML và FROM từ configured mail username.
+- Adapter chỉ khả dụng khi host/port/username/password/auth/STARTTLS và sender bean đầy đủ. Thiếu cấu hình phải fail-safe thành unavailable delivery trong khi backend vẫn start; không fake/default credential và không startup SMTP connection test.
+- Chỉ adapter success mới mark `SENT`; provider/config exception propagate tới processor để mark `FAILED`. Retry, max attempts, stale PROCESSING recovery, SENT no-resend, at-least-once semantics và không rollback Student/Team/TeamMember giữ nguyên.
+- Linked CTA là `Đăng nhập SAGA`; unlinked CTA là `Đăng ký / Kích hoạt tài khoản SAGA`. URL lấy từ `STUDENT_INVITATION_LOGIN_URL`; wording generic, không hard-code OAuth callback/Google và không chứa password/token/UUID/Cognito subject.
+- Safe log chỉ gồm `provider=GMAIL_SMTP`, stage, attempt, result, category và exception class. SMTP connect/read/write timeout bounded 5000/10000/10000 ms.
+- **Supersession:** quyết định này chỉ supersede phần **production-provider TBD** của DEC-019. Mọi quyết định khác trong DEC-019 về outbox, dedup, transaction, retry, template intent và provisioning vẫn còn hiệu lực.
+- **Evidence:** targeted invitation/import 37/37. Full `./mvnw.cmd clean test` chạy **116 suites / 753 tests / 1 failure / 0 errors / 0 skipped**; failure duy nhất là contract roster DEC-023 do `CourseService#getCourseRoster` baseline còn đọc invitation outbox, không thuộc Gmail delivery. Gmail giữ trạng thái **CONFIRMED_SOURCE_TEST**; toàn working tree chưa green và Gmail production là **TBD_DEPLOYMENT_SMOKE**.
+
 ## DEC-067 — Normal Update Priority dùng business enum, backend sở hữu provider-ID resolution
 
 - Ngày: 2026-08-10; trạng thái: ACCEPTED / CONFIRMED_SOURCE_TEST.

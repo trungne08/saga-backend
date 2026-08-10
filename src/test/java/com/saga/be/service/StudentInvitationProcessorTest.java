@@ -1,6 +1,7 @@
 package com.saga.be.service;
 
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 
 import com.saga.be.entity.enums.StudentInvitationStatus;
@@ -36,6 +37,10 @@ class StudentInvitationProcessorTest {
 
         verify(deliveryAdapter).deliver(message());
         verify(claimService).markSent(invitationId);
+        verify(claimService, never()).markFailed(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.anyString()
+        );
     }
 
     @Test
@@ -49,6 +54,23 @@ class StudentInvitationProcessorTest {
         processor().process(invitationId);
 
         verify(claimService).markFailed(invitationId, "DELIVERY_UNAVAILABLE");
+        verify(claimService, never()).markSent(invitationId);
+    }
+
+    @Test
+    void marksFailureAndNeverSentWhenSmtpProviderFails() {
+        UUID invitationId = UUID.randomUUID();
+        StudentInvitationMessage message = message();
+        when(claimService.claim(invitationId)).thenReturn(Optional.of(message));
+        org.mockito.Mockito.doThrow(new StudentInvitationDeliveryException(
+                "SMTP_SEND",
+                new org.springframework.mail.MailSendException("provider failure")
+        )).when(deliveryAdapter).deliver(message);
+
+        processor().process(invitationId);
+
+        verify(claimService).markFailed(invitationId, "DELIVERY_FAILED");
+        verify(claimService, never()).markSent(invitationId);
     }
 
     @Test

@@ -335,7 +335,7 @@
 ## 4. Đang thực hiện
 
 - Cập nhật sáu tài liệu làm checkpoint/source-of-truth kỹ thuật cho các lượt tiếp theo.
-- Import Excel ở trạng thái **PARTIAL**: scope authorization, identity binding và outbox đã hoàn thành; validation/parser và production email delivery chưa production-ready.
+- Import Excel ở trạng thái **PARTIAL** vì validation/parser/preview/error DTO; scope authorization, identity binding, outbox và Gmail adapter đã hoàn thành ở source/test. Production Gmail delivery vẫn chờ deployment smoke.
 
 ## 5. Chưa hoàn thành
 
@@ -359,7 +359,7 @@
 | Ưu tiên | Việc cần làm | Lý do | File liên quan | Cách kiểm chứng |
 |---|---|---|---|---|
 | P0 | Hoàn thiện import Excel validation/preview/error DTO | Scope authorization, rollback, idempotency và identity bind đã có; parser contract vẫn thiếu | `ExcelImportService`, DTO | validation/preview/row-error tests |
-| P0 | Chọn và cấu hình mail provider production | Outbox/adapter đã có nhưng delivery thật vẫn TBD | adapter/config/deployment | provider sandbox and retry verification |
+| P0 | Deploy và smoke Gmail SMTP | Adapter/config source đã có; delivery thật vẫn TBD | deployment secrets/outbox/log | thư thật, inbox/spam, FAILED→SENT retry verification |
 | P0 | Browser E2E cookie/CORS/CSRF | localhost→Railway có third-party-cookie risk | `CorsConfig`, `SecurityConfig`, profiles | login→me→csrf→mutation trên browser thật |
 | P1 | Chuẩn hóa error response | FE cần contract ổn định | `GlobalExceptionHandler`, DTO | MockMvc contract tests cho 400/404/409/500 |
 | P1 | Xác minh session deployment topology | Tránh mất session khi redeploy/scale | Railway config và session config | restart/replica test trên môi trường staging |
@@ -419,7 +419,7 @@ BASE HEAD của snapshot cũ: `0bc30be`. HEAD audit hiện hành là `4f3dee9`; 
 - **PARTIAL/TBD:** Không có production mail provider trong `pom.xml` hay source; adapter mặc định đánh dấu failed an toàn. Parser/preview/error DTO, Cognito self-sign-up deployed và database invariant trực tiếp `UNIQUE(student_id, course_id)` còn mở.
 - **Railway runtime fact (user-provided):** deployment từng fail vì database thiếu `student.version`; V6/V7 phải migrate trước Hibernate `validate`. Repository không có production log, nên trạng thái migration production là **TBD**, không CONFIRMED.
 - **CONFIRMED:** Course roster được đưa vào tại checkpoint lịch sử `52a8c71` và vẫn có trong HEAD `200d866`: lấy `TeamMember -> Team -> Course`, ADMIN mọi Course/LECTURER instructor, anonymous 401, STUDENT 403, Course thiếu 404; GET không cần CSRF. Filter/sort chạy trước pagination, metadata tính trên toàn tập sau filter và tie-break theo id. `hasTeam=all|with|without`; sortBy `studentCode|fullName|email|teamName|projectName`; direction `asc|desc`; query invalid 400.
-- **PARTIAL:** `studentsWithoutTeam`/`hasTeam=without` hiện rỗng vì chưa có Student–Course enrollment độc lập; invitation outbox không phải enrollment source. Legacy invalid data nhiều Team cùng Course được đọc không crash nhưng không hợp lệ theo business rule.
+- **PARTIAL / SOURCE DRIFT:** `studentsWithoutTeam`/`hasTeam=without` theo contract phải rỗng vì chưa có Student–Course enrollment độc lập; invitation outbox không phải enrollment source. Current baseline `CourseService#getCourseRoster` vẫn đọc invitation outbox và làm fail contract test DEC-023; behavior này không được coi là feature. Legacy invalid data nhiều Team cùng Course được đọc không crash nhưng không hợp lệ theo business rule.
 - **CONFIRMED:** Lecturer options được đưa vào tại checkpoint lịch sử `52a8c71` và vẫn có trong HEAD `200d866`: ADMIN-only; anonymous 401, LECTURER/STUDENT 403; keyword chỉ `fullName`/`email`, không tìm/trả `cognitoSub`; sortBy `fullName|email`, direction `asc|desc`, invalid query 400, GET không cần CSRF.
 - **ACCEPTED (Product Owner):** Student có thể ở nhiều Course nhưng tối đa một Team trong mỗi Course; role và Project độc lập theo Team/Course. Nhiều Team/Project cùng Course hợp lệ nếu mỗi Project thuộc Team khác; cùng Student ở hai Team của cùng Course là không hợp lệ.
 - **CONFIRMED:** Rule TeamMember được đưa vào tại checkpoint lịch sử `52a8c71` và vẫn có trong HEAD `200d866`: `ExcelImportService` là production write path duy nhất tạo TeamMember. Lock `PESSIMISTIC_WRITE` trên Student rồi query Student+Course: chưa có thì tạo; cùng Team idempotent không đổi role; Team khác cùng Course conflict 409, không move/delete/update membership; khác Course hợp lệ. Local seed không tạo dữ liệu trái rule.
@@ -588,3 +588,11 @@ BASE HEAD của snapshot cũ: `0bc30be`. HEAD audit hiện hành là `4f3dee9`; 
 - **CONFIRMED_RUNTIME/SOURCE:** incident `CANONICAL_ISSUE_FETCH` với `REMOTE_SUCCEEDED` phù hợp stale outer snapshot MySQL `REPEATABLE_READ`: outer create đã đọc Project/board/local state trước child canonical upsert `REQUIRES_NEW` commit.
 - **CONFIRMED:** create và recovery Task canonical flow dùng `JiraCanonicalTaskReadService.findResponse/exists`, mỗi call là fresh `REQUIRES_NEW` read-only transaction. Chỉ complete sau confirmation; missing Task giữ recovery-required/`REMOTE_SUCCEEDED` và không POST Jira lần hai.
 - **PARTIAL:** test infrastructure hiện chỉ H2 MySQL-mode, không có Testcontainers/Docker MySQL; không tuyên bố đã tái tạo MySQL MVCC trong test.
+## Student Course Invitation Gmail SMTP — 2026-08-11
+
+- **IMPLEMENTED / CONFIRMED_SOURCE_TEST:** production delivery adapter dùng Spring Boot Mail `JavaMailSender`, MIME UTF-8 plain text + HTML, FROM từ mail username và CTA từ `STUDENT_INVITATION_LOGIN_URL`.
+- **FAIL-SAFE:** thiếu host/port/username/password/auth/STARTTLS hoặc sender bean thì backend vẫn start và dùng unavailable adapter. Không có default/fake credential; SMTP connection/read/write timeout đều hữu hạn.
+- **OUTBOX UNCHANGED:** `StudentInvitationProcessor` chỉ mark `SENT` sau send success; config/provider exception mark `FAILED`, retry/max-attempt/stale recovery/SENT no-resend giữ nguyên và membership đã commit không rollback.
+- **SECURITY:** linked/unlinked template không chứa password, token, UUID, Cognito subject hay provider-specific promise; log không chứa recipient/body/secret/identity.
+- **VERIFICATION:** targeted invitation/import 37/37. Full clean chạy **116 suites / 753 tests / 1 failure / 0 errors / 0 skipped**; failure duy nhất là pre-existing `CourseService#getCourseRoster` vi phạm contract DEC-023, không thuộc Gmail delivery.
+- **TBD_DEPLOYMENT_SMOKE:** Gmail production delivery, inbox/spam và outbox transition trên deployment thật chưa được xác nhận.

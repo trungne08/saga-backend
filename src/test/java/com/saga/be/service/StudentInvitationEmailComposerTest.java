@@ -21,20 +21,57 @@ class StudentInvitationEmailComposerTest {
         ), List.of("Group 1"));
 
         assertEquals("https://frontend.example.test/login", message.loginUri().toString());
-        assertTrue(message.body().contains("register with this same email address"));
-        assertFalse(message.body().toLowerCase().contains("password"));
-        assertFalse(message.body().toLowerCase().contains("token"));
-        assertFalse(message.body().contains("JSESSIONID"));
-        assertFalse(message.body().contains("CSRF"));
+        assertTrue(message.body().contains("chưa được kích hoạt hoặc liên kết"));
+        assertTrue(message.body().contains("chính xác địa chỉ email đã nhận thư này"));
+        assertTrue(message.body().contains("Trong lần đăng nhập đầu tiên"));
+        assertTrue(message.body().contains("Đăng ký / Kích hoạt tài khoản SAGA"));
+        assertTrue(message.htmlBody().contains(
+                "href=\"https://frontend.example.test/login\""
+        ));
+        assertTrue(message.htmlBody().contains("Group 1"));
+        assertSafeContent(message);
     }
 
     @Test
     void linkedTemplateAsksStudentToSignIn() {
         StudentInvitationMessage message = composer().compose(invitation(
                 StudentInvitationType.LINKED_STUDENT
-        ), List.of());
+        ), List.of("Nhóm Alpha"));
 
-        assertTrue(message.body().contains("Please sign in to SAGA"));
+        assertEquals("student@example.test", message.recipientEmail());
+        assertTrue(message.body().contains("Hồ sơ SAGA của bạn đã được liên kết"));
+        assertTrue(message.body().contains("Nhóm Alpha"));
+        assertTrue(message.body().contains("Đăng nhập SAGA"));
+        assertFalse(message.body().contains("Đăng ký / Kích hoạt"));
+        assertSafeContent(message);
+    }
+
+    @Test
+    void htmlTemplateEscapesCourseAndTeamNames() {
+        StudentCourseInvitation invitation = invitation(StudentInvitationType.LINKED_STUDENT);
+        invitation.getCourse().setName("Course <unsafe>");
+
+        StudentInvitationMessage message = composer().compose(
+                invitation,
+                List.of("Team <unsafe>")
+        );
+
+        assertTrue(message.htmlBody().contains("Course &lt;unsafe&gt;"));
+        assertTrue(message.htmlBody().contains("Team &lt;unsafe&gt;"));
+        assertFalse(message.htmlBody().contains("Course <unsafe>"));
+    }
+
+    private void assertSafeContent(StudentInvitationMessage message) {
+        String content = (message.body() + message.htmlBody()).toLowerCase();
+        assertFalse(content.contains("password"));
+        assertFalse(content.contains("token"));
+        assertFalse(content.contains("jsessionid"));
+        assertFalse(content.contains("csrf"));
+        assertFalse(content.contains("cognitosub"));
+        assertFalse(content.contains("google"));
+        assertFalse(content.matches(
+                ".*[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}.*"
+        ));
     }
 
     private StudentInvitationEmailComposer composer() {

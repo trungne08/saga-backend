@@ -62,12 +62,38 @@ public class StudentInvitationProcessor {
             try {
                 deliveryAdapter.deliver(message);
                 claimService.markSent(invitationId);
+                log.info(
+                        "Student invitation delivery provider=GMAIL_SMTP stage=OUTBOX "
+                                + "attempt={} result=SENT",
+                        message.attemptNumber()
+                );
             } catch (StudentInvitationDeliveryUnavailableException exception) {
                 claimService.markFailed(invitationId, "DELIVERY_UNAVAILABLE");
-                log.warn("Student invitation delivery is not configured; invitationId={}", invitationId);
+                log.warn(
+                        "Student invitation delivery provider=GMAIL_SMTP stage=CONFIGURATION "
+                                + "attempt={} result=FAILED category=UNAVAILABLE "
+                                + "exceptionClass={}",
+                        message.attemptNumber(),
+                        exception.getClass().getSimpleName()
+                );
+            } catch (StudentInvitationDeliveryException exception) {
+                claimService.markFailed(invitationId, "DELIVERY_FAILED");
+                log.warn(
+                        "Student invitation delivery provider=GMAIL_SMTP stage=SMTP_SEND "
+                                + "attempt={} result=FAILED category={} exceptionClass={}",
+                        message.attemptNumber(),
+                        exception.getCategory(),
+                        exception.getProviderExceptionClass()
+                );
             } catch (RuntimeException exception) {
                 claimService.markFailed(invitationId, "DELIVERY_FAILED");
-                log.warn("Student invitation delivery failed; invitationId={}", invitationId);
+                log.warn(
+                        "Student invitation delivery provider=GMAIL_SMTP stage=DELIVERY "
+                                + "attempt={} result=FAILED category=UNEXPECTED "
+                                + "exceptionClass={}",
+                        message.attemptNumber(),
+                        exception.getClass().getSimpleName()
+                );
             }
         });
     }

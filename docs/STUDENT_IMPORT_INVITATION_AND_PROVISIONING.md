@@ -75,9 +75,9 @@ After commit, the processor claims and locks a record, builds a message and invo
 - a `PROCESSING` record is recovered only after `processing_started_at` is older than the configured timeout; a newer claim is never reclaimed;
 - `SENT` records are not sent again by this policy.
 
-The claim transaction commits before the delivery adapter is called, so it does not hold a database lock during provider I/O. Delivery is **at-least-once**, not exactly-once: if a process stops after a provider accepts a message but before `SENT` is persisted, stale recovery can make a later attempt. A production adapter would need provider-side idempotency to offer stronger delivery semantics.
+The claim transaction commits before the delivery adapter is called, so it does not hold a database lock during provider I/O. Delivery is **at-least-once**, not exactly-once: if a process stops after Gmail SMTP accepts a message but before `SENT` is persisted, stale recovery can make a later attempt. Gmail SMTP does not add a provider idempotency key, so duplicate delivery remains possible in this crash window.
 
-For a linked Student, the message says they were added to Course/Team and asks them to sign in. For an unlinked Student, it asks them to sign in or register with the same imported email; it may mention Google only when the Cognito deployment supports it. Both use the subject `You have been added to Course {courseName}` and contain no password, provider token, Cognito subject, cookie, CSRF value, database id, membership token or invite token.
+For a linked Student, the UTF-8 text/HTML message names the Course, includes Team when available, explains that the profile is linked and uses CTA `Đăng nhập SAGA`. For an unlinked Student, it explains that a local profile exists but the account is not activated/linked, asks the recipient to register or sign in with exactly the email that received the message, describes existing first-login binding and uses CTA `Đăng ký / Kích hoạt tài khoản SAGA`. Both use the configured login URL and contain no password, provider token, Cognito subject, cookie, CSRF value, database id/UUID, membership token or invite token. They do not promise a specific identity provider.
 
 ## Configuration and provider boundary
 
@@ -86,8 +86,14 @@ For a linked Student, the message says they were added to Course/Team and asks t
 | `app.student-invitation.login-url` | `STUDENT_INVITATION_LOGIN_URL` | absolute HTTP(S) front-end login URL or backend `/api/auth/login` |
 | `app.student-invitation.retry-delay-ms` | `STUDENT_INVITATION_RETRY_DELAY_MS` | retry scheduler interval |
 | `app.student-invitation.processing-timeout-ms` | `STUDENT_INVITATION_PROCESSING_TIMEOUT_MS` | age after which a `PROCESSING` claim may be safely recovered; default 300000 ms |
+| `spring.mail.host` | `SPRING_MAIL_HOST` | Gmail SMTP host; required for SMTP adapter |
+| `spring.mail.port` | `SPRING_MAIL_PORT` | SMTP port; default 587 |
+| `spring.mail.username` | `SPRING_MAIL_USERNAME` | authenticated Gmail account and message FROM address |
+| `spring.mail.password` | `SPRING_MAIL_PASSWORD` | deployment secret; never source/log/API data |
+| `spring.mail.properties.mail.smtp.auth` | `SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH` | must be true for Gmail adapter availability |
+| `spring.mail.properties.mail.smtp.starttls.enable` | `SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE` | must be true for Gmail adapter availability |
 
-No URL is hard-coded; `/auth/callback` is not used to begin login. The repository does not contain a mail SDK, mail provider configuration or production adapter. Its default adapter marks delivery unavailable safely. Choosing/configuring a production provider is **TBD** and does not alter the transaction contract.
+No URL is hard-coded; `/auth/callback` is not used to begin login. The repository contains Boot-managed Spring Mail and `GmailSmtpStudentInvitationDeliveryAdapter`. When any required Gmail setting or `JavaMailSender` is missing, configuration selects the unavailable adapter without failing application startup or inventing credentials. SMTP connect/read/write timeouts are bounded at 5000/10000/10000 ms and startup connection testing is disabled. Source/test behavior is **CONFIRMED_SOURCE_TEST**; real Gmail/Railway delivery remains **TBD_DEPLOYMENT_SMOKE**.
 
 ## Update 2026-08-04 — callback redirect isolation
 
@@ -120,7 +126,7 @@ migration status is **TBD**, not CONFIRMED.
 
 **PARTIAL/TBD:** Excel header/schema validation, preview, row-error DTO, production Cognito self-sign-up evidence, and a database invariant directly enforcing `UNIQUE(student_id, course_id)` are not implemented. Product Owner has accepted the business rule: multiple Courses are allowed, but a Student may not be in two Teams of the same Course. The application guard protects write paths that follow it; it does not automatically repair/delete/merge legacy invalid data.
 
-Invitation outbox serves delivery, not Course enrollment. Course roster must not use it as an enrollment source: current membership evidence is `TeamMember -> Team -> Course`. There is no modeled Student–Course relation for a Student without Team, so `studentsWithoutTeam`/`hasTeam=without` remain **PARTIAL** and empty; they must not be inferred from invitations.
+Invitation outbox serves delivery, not Course enrollment. Course roster must not use it as an enrollment source: current membership evidence is `TeamMember -> Team -> Course`. There is no modeled Student–Course relation for a Student without Team, so `studentsWithoutTeam`/`hasTeam=without` remain **PARTIAL** and must be empty. Current baseline `CourseService#getCourseRoster` still reads invitation outbox and fails the DEC-023 contract test; this source drift must not be treated as enrollment behavior.
 
 `GET /api/me/courses/{courseId}/team/members` is a separate STUDENT self-scoped
 read API. It resolves the Student from `SagaPrincipal.localProfileId`, confirms the
@@ -132,7 +138,7 @@ outbox as enrollment. GET uses the existing browser session and needs no CSRF.
 
 Jira label snapshot persistence is separate from import/provisioning: it does not create, delete or change Student, TeamMember, invitation or identity data. Labels remain internal Task classification data; no Task HTTP API or Jira task creation API is introduced.
 
-Tests cover matching/conflicts/status/idempotency, competitive bind, multi-course role preservation, import rollback/dedup, outbox template/dedup, concurrent claims, stale recovery, retry and delivery failure. `CourseTeamMembershipGuardIntegrationTest` also covers same-Team idempotency/role preservation, same-Course conflict 409, independent roles in different Courses, HTTP conflict and two independent competing transactions with a fresh final query. `MyCourseTeamMembersIntegrationTest` covers Student self-scope, no membership/legacy data, project nullable, privacy, pagination and OpenAPI. Kết quả `./mvnw.cmd test` tại working tree hiện tại là **70 suites / 299 tests / 0 failures / 0 errors / 0 skipped**.
+Tests cover matching/conflicts/status/idempotency, competitive bind, multi-course role preservation, import rollback/dedup, linked/unlinked text+HTML, mocked `JavaMailSender`, missing-config fallback, provider failure, concurrent claims, stale recovery, retry, SENT no-resend and membership preservation. `CourseTeamMembershipGuardIntegrationTest` also covers same-Team idempotency/role preservation, same-Course conflict 409, independent roles in different Courses, HTTP conflict and two independent competing transactions with a fresh final query. `MyCourseTeamMembersIntegrationTest` covers Student self-scope, no membership/legacy data, project nullable, privacy, pagination and OpenAPI. Targeted invitation/import tests pass **37/37**. Full `./mvnw.cmd clean test` at the current working tree runs **116 suites / 753 tests / 1 failure / 0 errors / 0 skipped**; the only failure is the pre-existing Course roster/DEC-023 source drift, outside Gmail delivery.
 
 ## Global admin pre-provisioning M7 — 2026-08-09
 

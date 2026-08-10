@@ -379,6 +379,7 @@ Master-data GET cho mọi authenticated user; `AccountStatus` không được en
 | data-mongodb | Boot managed | parent | Mongo audit | `SystemAuditLogRepository` |
 | starter-flyway; flyway-mysql | Boot managed | parent | migration | `db/migration` |
 | webmvc | Boot managed | parent | REST MVC | controller |
+| starter-mail | Boot managed | parent | Gmail SMTP/MIME invitation delivery | `GmailSmtpStudentInvitationDeliveryAdapter` |
 | security; oauth2-client | Boot managed | parent | session/Cognito OIDC | security package |
 | actuator | Boot managed | parent | health | Railway |
 | lombok; validation | Boot managed | parent | boilerplate/DTO validation | entity/DTO |
@@ -403,6 +404,7 @@ Master-data GET cho mọi authenticated user; `AccountStatus` không được en
 | MongoDB Atlas-compatible | Mongo URI/audit/health config |
 | Jira Cloud | 3LO, API, dynamic webhook, sync |
 | GitHub App | OAuth, installation, API, webhook |
+| Gmail SMTP | Student Course Invitation email qua Spring Mail |
 | Railway | `railway.json` build/deploy |
 
 Bằng chứng: `pom.xml`; `infra/lambda/cognito-account-linking/package.json`; `application.properties`; `railway.json`.
@@ -420,6 +422,8 @@ Bằng chứng: `pom.xml`; `infra/lambda/cognito-account-linking/package.json`; 
 | `COGNITO_DOMAIN`, `COGNITO_CLIENT_ID`, `COGNITO_CLIENT_SECRET`, `COGNITO_ISSUER_URI` | all | registration cần values | Cognito OIDC/logout | client secret YES | domain empty | domain logout HTTPS origin | `application.properties:L9-L21` |
 | `DATABASE_JDBC_URL`/`AIVEN_JDBC_URL`, username aliases, password aliases | all | YES | MySQL | password YES | none | Hibernate validate | `application.properties:L35-L45` |
 | `MONGO_URI`, `MONGO_DATABASE`, `MONGO_HEALTH_TIMEOUT` | all | URI/database YES | Mongo | URI có thể secret | PT5S | health Mongo default disabled | `application.properties:L47-L49` |
+| `SPRING_MAIL_HOST`, `SPRING_MAIL_PORT`, `SPRING_MAIL_USERNAME`, `SPRING_MAIL_PASSWORD`, `SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH`, `SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE` | invitation delivery | YES when Gmail enabled | Gmail SMTP | password YES | port 587; auth/TLS false | all required; FROM=username; missing config uses unavailable adapter | mail auto-config; `StudentInvitationDeliveryConfiguration` |
+| `STUDENT_INVITATION_LOGIN_URL` | invitation delivery | YES | email CTA entry URL | NO | public-base `/api/auth/login` | absolute HTTP(S), host, no userinfo | `StudentInvitationProperties#loginUri` |
 | `SESSION_COOKIE_SECURE`, `SESSION_COOKIE_SAME_SITE` | prod | NO | cookie policy | NO | true/none prod | local false/lax | `application-prod.properties` |
 | Springdoc flags (`SPRINGDOC_*`, `SWAGGER_ENABLED`) | all | NO | docs exposure | NO | false | public only when enabled | `application.properties:L29-L30` |
 | `FLYWAY_ENABLED`, `FLYWAY_BASELINE_ON_MIGRATE` | all | NO | migration | NO | false | schema normally validate | `application.properties:L42-L44` |
@@ -440,6 +444,7 @@ Bằng chứng: `pom.xml`; `infra/lambda/cognito-account-linking/package.json`; 
 | OAuth registration | all | provider Cognito, `authorization_code`, redirect template, scope `openid,email,profile`, user-name `sub` | `application.properties:L12-L21` |
 | HTTP/error/session | all | cookie session HttpOnly; không include message/stacktrace/binding errors | `application.properties:L23-L24` |
 | Actuator/Mongo health | all | chỉ expose health, no details, Mongo contributor disabled | `application.properties:L25-L28` |
+| SMTP safety | all | startup connection test false; connect/read/write timeout 5000/10000/10000 ms | `application.properties` mail block |
 | JPA/Flyway | all | `ddl-auto=validate`, `open-in-view=true`, driver MySQL | `application.properties:L35-L45` |
 | local profile | local | Swagger enabled, integration/reconcile disabled, session secure false/same-site lax | `application-local.properties` |
 | prod profile | prod | session secure default true, same-site none | `application-prod.properties` |
@@ -528,7 +533,7 @@ Gửi `JSESSIONID` qua `credentials: "include"`; lấy cookie `XSRF-TOKEN` và g
 | --- | --- | --- | --- | --- |
 | HIGH | AccountStatus không enforce permission. | PENDING/INACTIVE/SUSPENDED vẫn không bị chặn bởi inspected authorization code. | `AuthenticatedProfileService:L209-L211,L261`; account-status search | RECOMMENDED: xác định và enforce policy status. |
 | HIGH | Master data CRUD không hoàn chỉnh, Create ADMIN-only. | Sai nếu kỳ vọng CRUD Lecturer-only. | bốn controller master data | RECOMMENDED: chốt policy rồi bổ sung/update quyền. |
-| HIGH | Validation spreadsheet còn dựa magic columns; production email provider chưa có. | Có thể nhận dữ liệu không đúng contract hoặc không gửi được invitation. | `ExcelImportService`; invitation adapter | RECOMMENDED: header/schema/error DTO và provider configuration trước production. |
+| HIGH | Validation spreadsheet còn dựa magic columns. | Có thể nhận dữ liệu không đúng contract. | `ExcelImportService` | RECOMMENDED: header/schema/error DTO trước production. Gmail adapter đã có source/test; runtime delivery smoke vẫn TBD. |
 | MEDIUM | Guard application ngăn một Student vào hai Team trong cùng Course, nhưng database chưa có invariant trực tiếp `UNIQUE(student_id, course_id)`. | Chỉ write path tuân thủ guard được bảo vệ; dữ liệu legacy invalid không tự được sửa. | `ExcelImportService`; `StudentRepository`; `TeamMemberRepository` | RECOMMENDED: migration/invariant DB sau khi có kế hoạch xử lý legacy data. |
 | MEDIUM | Master-data GET mở cho mọi authenticated Student. | Có thể lộ dữ liệu ngoài scope nếu policy muốn hạn chế. | `SecurityConfig:L119`; controller GET | RECOMMENDED: xác nhận scope nghiệp vụ. |
 | MEDIUM | Project integration dựa service checks, không annotation. | Endpoint mới có thể bypass nếu gọi service sai. | `ProjectIntegrationController`; permission service | RECOMMENDED: bổ sung negative tests/guard pattern. |
@@ -600,12 +605,12 @@ Không có bằng chứng ADMIN thiếu override: `requireTeamManager` chứng m
 | Status | CONFIRMED | Chỉ `PENDING → ACTIVE` khi bind; ACTIVE giữ nguyên; INACTIVE/SUSPENDED không tự kích hoạt. |
 | Course/Team access | CONFIRMED | Student global; access giữ bởi TeamMember hiện hữu. Bind không tạo/xoá/sửa TeamMember hay RoleInTeam. |
 | Invitation | CONFIRMED | V6 outbox unique Student/Course/type sau import commit; claim/FAILED/SENT/retry tối đa 5; stale `PROCESSING` chỉ reclaim sau timeout cấu hình; không rollback import khi delivery lỗi; at-least-once. |
-| Email provider | TBD | Adapter abstraction/fake test có; không có provider/dependency production trong source. |
+| Email provider | CONFIRMED_SOURCE_TEST / TBD_DEPLOYMENT_SMOKE | Gmail SMTP adapter + Boot Mail đã có; production secrets/delivery/inbox chưa smoke. |
 | Import parser/DB invariant | PARTIAL | Header/schema, preview, error DTO từng dòng và database invariant trực tiếp `UNIQUE(student_id, course_id)` chưa có. |
 | Swagger CSRF | CONFIRMED | `withCredentials`; cookie `XSRF-TOKEN`; global same-origin interceptor chỉ POST/PUT/PATCH/DELETE gắn `X-XSRF-TOKEN`; không Bearer. |
 | Logout | CONFIRMED | Framework-managed `POST /api/auth/logout`; valid CSRF 302 Cognito, missing/invalid 403; Swagger fetch có thể `Failed to fetch` khi redirect cross-origin. |
 | Team roster | CONFIRMED | Paged TeamMemberResponse, ADMIN/Lecturer owner/Student exact-Team policy; 401/403/404 và không email/cognitoSub/version. |
-| Course roster | PARTIAL | `TeamMember -> Team -> Course`; filter/sort trước pagination, stable id tie-break, query invalid 400. `studentsWithoutTeam` rỗng vì chưa có enrollment Student–Course độc lập; invitation outbox không phải enrollment. |
+| Course roster | PARTIAL / SOURCE DRIFT | Contract dùng `TeamMember -> Team -> Course`; filter/sort trước pagination, stable id tie-break, query invalid 400. `studentsWithoutTeam` phải rỗng vì chưa có enrollment Student–Course độc lập; invitation outbox không phải enrollment. Current baseline `CourseService#getCourseRoster` còn đọc outbox và fail contract test DEC-023. |
 | Lecturer options | CONFIRMED | ADMIN-only; keyword fullName/email, sort fullName/email, không tìm/trả cognitoSub; invalid query 400. |
 | One Team per Student/Course | CONFIRMED application guard | Excel import lock `PESSIMISTIC_WRITE` Student rồi query Student+Course; same Team idempotent, Team khác 409, khác Course hợp lệ. Test hai thread/hai transaction xác nhận đúng một membership. DB invariant trực tiếp vẫn PARTIAL. |
 
@@ -815,3 +820,12 @@ chặn nullable repair.
 - Với MySQL production `REPEATABLE_READ`, không được dùng outer orchestration transaction để confirm Task vừa được child canonical upsert `REQUIRES_NEW` commit. Confirmation phải qua bean/proxy transaction mới `REQUIRES_NEW`, `readOnly`.
 - `REMOTE_SUCCEEDED` chỉ complete sau fresh local confirmation. Missing Task giữ status đó và trả `JIRA_WRITE_RECOVERY_REQUIRED` ở create; recovery không complete. Cấm global isolation change, EntityManager clear, sleep/polling, blind Jira create retry, new idempotency key hoặc chờ scheduler.
 - J1C metadata resolution, scope, auth/session/CSRF, Jira write operation state machine và schema/migration không đổi.
+## Student Course Invitation Gmail SMTP constraints — 2026-08-11
+
+- Dependency mail phải là `org.springframework.boot:spring-boot-starter-mail` không pin version riêng; delivery dùng `JavaMailSender` phía sau `StudentInvitationDeliveryAdapter` hiện hữu.
+- Production configuration dùng `SPRING_MAIL_HOST`, `SPRING_MAIL_PORT`, `SPRING_MAIL_USERNAME`, `SPRING_MAIL_PASSWORD`, `SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH`, `SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE` và `STUDENT_INVITATION_LOGIN_URL`. Secret chỉ thuộc deployment environment; cấm source/docs/diff/test fixture/log/API response chứa giá trị thật.
+- Adapter Gmail chỉ khả dụng khi toàn bộ cấu hình bắt buộc hợp lệ. Thiếu cấu hình không được làm application fail startup, không được tạo credential mặc định và phải báo delivery unavailable để outbox chuyển `FAILED` theo policy hiện hữu.
+- SMTP phải có bounded `mail.smtp.connectiontimeout=5000`, `mail.smtp.timeout=10000`, `mail.smtp.writetimeout=10000`; không bật startup connection test.
+- MIME phải có text fallback + HTML, FROM từ configured username, TO từ message recipient. Linked/unlinked wording và CTA phải generic, không hard-code OAuth callback, không hứa Google và không chứa password/token/UUID/Cognito subject.
+- Provider exception phải tới `StudentInvitationProcessor`; chỉ success mới `SENT`. Failure không rollback import/membership và retry/max attempts/stale recovery/SENT no-resend không đổi. Log chỉ được phép có provider, stage, attempt, result, safe category và exception class.
+- **CONFIRMED_SOURCE_TEST (Gmail scope):** targeted invitation/import 37/37. Full clean chạy 753 tests với 1 failure pre-existing ở roster contract DEC-023, không thuộc Gmail delivery. **TBD_DEPLOYMENT_SMOKE:** Gmail production chưa được kiểm chứng.

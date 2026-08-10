@@ -1110,9 +1110,10 @@ Cả hai là GET, cần browser session nhưng không cần CSRF. Giá trị fil
 hợp lệ trả 400. Roster filter/sort trước pagination; metadata được tính trên toàn bộ
 tập sau filter và tie-break ổn định theo id. Roster chỉ dùng `TeamMember -> Team ->
 Course` làm bằng chứng Student thuộc Course; invitation outbox không phải enrollment
-source. `studentsWithoutTeam` và `hasTeam=without` hiện rỗng vì chưa có quan hệ
-enrollment Student–Course độc lập, nên FE không được quảng bá nhánh `without` như
-feature đầy đủ.
+source. `studentsWithoutTeam` và `hasTeam=without` theo contract phải rỗng vì chưa có
+quan hệ enrollment Student–Course độc lập. Current baseline còn source drift đọc outbox
+và fail contract test DEC-023; FE không được dựa vào behavior này hay quảng bá nhánh
+`without` như feature đầy đủ.
 
 Business rule đã được Product Owner chốt: Student có thể thuộc nhiều Course nhưng
 tối đa một Team trong mỗi Course; role và Project độc lập theo Team/Course. Legacy
@@ -1385,3 +1386,8 @@ Runtime DEMO-24 xác nhận `TASK_SPRINT=REMOTE_SUCCEEDED` với remote `10026`/
 ## J1D Task Create recovery — 2026-08-10
 
 Khi `POST` Task trả `409 JIRA_WRITE_RECOVERY_REQUIRED`, FE không tự động retry, polling hay tạo `Idempotency-Key` mới. Nếu có luồng gửi lại đã được product chấp thuận, phải giữ nguyên key và request để backend chỉ canonical recovery, không Jira POST mới. Backend chỉ trả success sau fresh local canonical confirmation; failure sau remote success vẫn là recovery state, không phải tín hiệu tạo issue mới.
+## Student Course Invitation email — 2026-08-11
+
+Không có endpoint/request/response/session/CSRF mới cho FE. Backend gửi email sau Course import/manual membership flow qua outbox hiện hữu. CTA của linked Student là `Đăng nhập SAGA`; unlinked Student là `Đăng ký / Kích hoạt tài khoản SAGA`; cả hai trỏ tới deployment URL cấu hình bởi `STUDENT_INVITATION_LOGIN_URL`. FE không dựng OAuth callback từ email, không nhận invite token/password/provider credential và không suy đoán Google là phương thức đăng nhập bắt buộc.
+
+Source/test đã xác nhận template và outbox state machine; delivery Gmail production vẫn **TBD_DEPLOYMENT_SMOKE**. Khi smoke, FE chỉ cần xác nhận CTA mở đúng entry URL và browser session/login flow hiện hữu tiếp tục hoạt động.
