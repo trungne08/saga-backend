@@ -20,11 +20,17 @@ public interface StudentCourseInvitationRepository
 
     boolean existsByCourseId(UUID courseId);
 
+    boolean existsByStudentIdAndCourseId(UUID studentId, UUID courseId);
+
     Optional<StudentCourseInvitation> findByStudentIdAndCourseIdAndInvitationType(
             UUID studentId,
             UUID courseId,
             StudentInvitationType invitationType
     );
+
+    List<StudentCourseInvitation> findByStudentIdAndCourseId(UUID studentId, UUID courseId);
+
+    long deleteByStudentIdAndCourseId(UUID studentId, UUID courseId);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select invitation from StudentCourseInvitation invitation where invitation.id = :id")

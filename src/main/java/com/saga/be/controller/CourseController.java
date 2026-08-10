@@ -1,15 +1,19 @@
 package com.saga.be.controller;
 
 import com.saga.be.dto.request.CourseRequest;
+import com.saga.be.dto.request.CourseManualStudentRequest;
+import com.saga.be.dto.request.CourseStudentTeamUpdateRequest;
 import com.saga.be.dto.response.CourseStudentRosterResponse;
 import com.saga.be.dto.response.CourseStudentBasicInfoResponse;
 import com.saga.be.dto.response.CourseStudentImportResponse;
+import com.saga.be.dto.response.CourseStudentMutationResponse;
 import com.saga.be.dto.response.LecturerOptionResponse;
 import com.saga.be.entity.Course;
 import com.saga.be.service.CourseService;
 import com.saga.be.service.ExcelImportService;
 import com.saga.be.service.ExcelImportService.CourseStudentImportSummary;
 import com.saga.be.service.ExcelImportService.ExportedCourseStudentTemplate;
+import com.saga.be.service.CourseStudentManagementService;
 import com.saga.be.security.SagaPrincipal;
 import io.swagger.v3.oas.annotations.Operation;
 import jakarta.validation.Valid;
@@ -44,6 +48,7 @@ public class CourseController {
 
     private final CourseService courseService;
     private final ExcelImportService excelImportService;
+    private final CourseStudentManagementService courseStudentManagementService;
 
     @GetMapping("/{id}")
     public ResponseEntity<Course> getCourseById(@PathVariable UUID id) {
@@ -192,5 +197,70 @@ public class CourseController {
                 .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
                         .filename(template.filename(), StandardCharsets.UTF_8).build().toString())
                 .body(template.bytes());
+    }
+
+    @GetMapping("/{courseId}/admin-students-template")
+    @PreAuthorize("hasRole('ADMIN')")
+    @Operation(summary = "Admin tải template thêm sinh viên vào course",
+            description = "Tải file XLSX mẫu 5 cột để admin thêm sinh viên vào course bằng API import admin.")
+    public ResponseEntity<byte[]> downloadAdminStudentsTemplate(
+            @AuthenticationPrincipal SagaPrincipal principal,
+            @PathVariable UUID courseId
+    ) {
+        ExportedCourseStudentTemplate template = excelImportService.exportAdminEnrollmentTemplate(principal, courseId);
+        return ResponseEntity.ok()
+                .contentType(XLSX_MEDIA_TYPE)
+                .cacheControl(CacheControl.noStore())
+                .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
+                        .filename(template.filename(), StandardCharsets.UTF_8).build().toString())
+                .body(template.bytes());
+    }
+
+    @PostMapping("/{courseId}/students/manual")
+    @PreAuthorize("hasAnyRole('ADMIN', 'LECTURER')")
+    @Operation(summary = "Thêm thủ công một sinh viên vào course",
+            description = "Nếu có group thì sinh viên vào thẳng nhóm. Nếu không có group thì sinh viên ở danh sách chưa có nhóm.")
+    public ResponseEntity<CourseStudentMutationResponse> addStudentManually(
+            @AuthenticationPrincipal SagaPrincipal principal,
+            @PathVariable UUID courseId,
+            @Valid @RequestBody CourseManualStudentRequest request
+    ) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(
+                courseStudentManagementService.addStudentManually(principal, courseId, request)
+        );
+    }
+
+    @PatchMapping("/{courseId}/students/{studentId}")
+    @PreAuthorize("hasAnyRole('ADMIN', 'LECTURER')")
+    @Operation(summary = "Cập nhật nhóm của sinh viên trong course",
+            description = "Hỗ trợ kéo thả đổi nhóm: truyền group mới để chuyển nhóm, bỏ trống group để đưa về danh sách chưa có nhóm.")
+    public ResponseEntity<CourseStudentMutationResponse> updateCourseStudent(
+            @AuthenticationPrincipal SagaPrincipal principal,
+            @PathVariable UUID courseId,
+            @PathVariable UUID studentId,
+            @RequestBody CourseStudentTeamUpdateRequest request
+    ) {
+        return ResponseEntity.ok(courseStudentManagementService.updateStudentInCourse(
+                principal,
+                courseId,
+                studentId,
+                request
+        ));
+    }
+
+    @DeleteMapping("/{courseId}/students/{studentId}")
+    @PreAuthorize("hasAnyRole('ADMIN', 'LECTURER')")
+    @Operation(summary = "Xóa sinh viên khỏi course",
+            description = "Chỉ xóa enrollment/membership trong course. Nếu sinh viên đã có dữ liệu task hoặc peer review thì bị chặn.")
+    public ResponseEntity<CourseStudentMutationResponse> removeStudentFromCourse(
+            @AuthenticationPrincipal SagaPrincipal principal,
+            @PathVariable UUID courseId,
+            @PathVariable UUID studentId
+    ) {
+        return ResponseEntity.ok(courseStudentManagementService.removeStudentFromCourse(
+                principal,
+                courseId,
+                studentId
+        ));
     }
 }

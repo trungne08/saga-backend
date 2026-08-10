@@ -130,7 +130,11 @@ class GeneratedOpenApiDocumentationIntegrationTest {
         assertTrue(root.at("/paths/~1api~1v1~1courses~1{id}/delete").isObject());
         assertTrue(root.at("/paths/~1api~1v1~1courses~1{courseId}~1import-students/post").isObject());
         assertTrue(root.at("/paths/~1api~1v1~1courses~1{courseId}~1admin-import-students-template/post").isObject());
+        assertTrue(root.at("/paths/~1api~1v1~1courses~1{courseId}~1admin-students-template/get").isObject());
         assertTrue(root.at("/paths/~1api~1v1~1courses~1{courseId}~1students-grouping-template/get").isObject());
+        assertTrue(root.at("/paths/~1api~1v1~1courses~1{courseId}~1students~1manual/post").isObject());
+        assertTrue(root.at("/paths/~1api~1v1~1courses~1{courseId}~1students~1{studentId}/patch").isObject());
+        assertTrue(root.at("/paths/~1api~1v1~1courses~1{courseId}~1students~1{studentId}/delete").isObject());
     }
 
     private Set<String> documentedTagNames(JsonNode root) {

@@ -6,7 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.saga.be.OAuth2TestConfiguration;
@@ -59,6 +62,9 @@ class CourseImportSecurityIntegrationTest {
     private static final String IMPORT_PATH = "/api/v1/courses/{courseId}/import-students";
     private static final String ADMIN_TEMPLATE_IMPORT_PATH = "/api/v1/courses/{courseId}/admin-import-students-template";
     private static final String GROUPING_TEMPLATE_PATH = "/api/v1/courses/{courseId}/students-grouping-template";
+    private static final String ADMIN_TEMPLATE_DOWNLOAD_PATH = "/api/v1/courses/{courseId}/admin-students-template";
+    private static final String MANUAL_ADD_PATH = "/api/v1/courses/{courseId}/students/manual";
+    private static final String STUDENT_UPDATE_PATH = "/api/v1/courses/{courseId}/students/{studentId}";
 
     @Autowired
     private MockMvc mockMvc;
@@ -424,6 +430,134 @@ class CourseImportSecurityIntegrationTest {
                         adminRow("SE010003", "lecturer-forbidden@example.test")
                 ))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void adminCanDownloadAdminTemplateAndLecturerCannot() throws Exception {
+        Lecturer owner = createLecturer();
+        Course course = createCourse(owner);
+
+        MvcResult adminResult = mockMvc.perform(get(ADMIN_TEMPLATE_DOWNLOAD_PATH, course.getId())
+                        .with(authentication(authenticationFor(ApplicationRole.ADMIN, UUID.randomUUID()))))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        try (XSSFWorkbook workbook = new XSSFWorkbook(new ByteArrayInputStream(adminResult.getResponse().getContentAsByteArray()))) {
+            var sheet = workbook.getSheetAt(0);
+            var header = sheet.getRow(0);
+            assertEquals("Class", header.getCell(0).getStringCellValue());
+            assertEquals("RollNumber", header.getCell(1).getStringCellValue());
+            assertEquals("Email", header.getCell(2).getStringCellValue());
+            assertEquals("MemberCode", header.getCell(3).getStringCellValue());
+            assertEquals("FullName", header.getCell(4).getStringCellValue());
+            assertEquals(1, sheet.getPhysicalNumberOfRows());
+        }
+
+        mockMvc.perform(get(ADMIN_TEMPLATE_DOWNLOAD_PATH, course.getId())
+                        .with(authentication(authenticationFor(ApplicationRole.LECTURER, owner.getId()))))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void manualAddWithoutGroupAppearsInWithoutTeamRoster() throws Exception {
+        Lecturer owner = createLecturer();
+        Course course = createCourse(owner);
+        Authentication lecturer = authenticationFor(ApplicationRole.LECTURER, owner.getId());
+        Cookie csrfCookie = csrfCookie(lecturer);
+
+        mockMvc.perform(post(MANUAL_ADD_PATH, course.getId())
+                        .with(authentication(lecturer))
+                        .cookie(csrfCookie)
+                        .header("X-XSRF-TOKEN", csrfCookie.getValue())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"studentCode":"SE020001","email":"manual-no-group@example.test","fullName":"Manual Student"}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.enrolledInCourse").value(true))
+                .andExpect(jsonPath("$.teamId").isEmpty());
+
+        mockMvc.perform(get("/api/v1/courses/{courseId}/students", course.getId())
+                        .with(authentication(lecturer))
+                        .param("hasTeam", "without"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.studentsWithoutTeam.content[0].studentCode").value("SE020001"));
+    }
+
+    @Test
+    void updateStudentSupportsGroupingAndUngrouping() throws Exception {
+        Lecturer owner = createLecturer();
+        Course course = createCourse(owner);
+        Authentication lecturer = authenticationFor(ApplicationRole.LECTURER, owner.getId());
+        Cookie csrfCookie = csrfCookie(lecturer);
+
+        mockMvc.perform(post(MANUAL_ADD_PATH, course.getId())
+                        .with(authentication(lecturer))
+                        .cookie(csrfCookie)
+                        .header("X-XSRF-TOKEN", csrfCookie.getValue())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"studentCode":"SE020002","email":"drag-drop@example.test","fullName":"Drag Drop Student"}
+                                """))
+                .andExpect(status().isCreated());
+
+        var student = studentRepository.findByStudentCodeIgnoreCase("SE020002").orElseThrow();
+
+        mockMvc.perform(patch(STUDENT_UPDATE_PATH, course.getId(), student.getId())
+                        .with(authentication(lecturer))
+                        .cookie(csrfCookie)
+                        .header("X-XSRF-TOKEN", csrfCookie.getValue())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"group":"7","leader":true}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.teamName").value("Group 7"))
+                .andExpect(jsonPath("$.roleInTeam").value("LEADER"));
+
+        mockMvc.perform(patch(STUDENT_UPDATE_PATH, course.getId(), student.getId())
+                        .with(authentication(lecturer))
+                        .cookie(csrfCookie)
+                        .header("X-XSRF-TOKEN", csrfCookie.getValue())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"group":""}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.teamId").isEmpty());
+    }
+
+    @Test
+    void deleteStudentRemovesEnrollmentFromCourse() throws Exception {
+        Lecturer owner = createLecturer();
+        Course course = createCourse(owner);
+        Authentication lecturer = authenticationFor(ApplicationRole.LECTURER, owner.getId());
+        Cookie csrfCookie = csrfCookie(lecturer);
+
+        mockMvc.perform(post(MANUAL_ADD_PATH, course.getId())
+                        .with(authentication(lecturer))
+                        .cookie(csrfCookie)
+                        .header("X-XSRF-TOKEN", csrfCookie.getValue())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"studentCode":"SE020003","email":"remove-course@example.test","fullName":"Remove Student","group":"9","leader":false}
+                                """))
+                .andExpect(status().isCreated());
+
+        var student = studentRepository.findByStudentCodeIgnoreCase("SE020003").orElseThrow();
+
+        mockMvc.perform(delete(STUDENT_UPDATE_PATH, course.getId(), student.getId())
+                        .with(authentication(lecturer))
+                        .cookie(csrfCookie)
+                        .header("X-XSRF-TOKEN", csrfCookie.getValue()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.enrolledInCourse").value(false));
+
+        mockMvc.perform(get("/api/v1/courses/{courseId}/students", course.getId())
+                        .with(authentication(lecturer))
+                        .param("hasTeam", "without"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.studentsWithoutTeam.content").isEmpty());
     }
 
     private org.springframework.test.web.servlet.request.MockMultipartHttpServletRequestBuilder importRequest(

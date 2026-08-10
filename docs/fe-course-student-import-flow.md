@@ -2,11 +2,12 @@
 
 ## 1) Tổng quan luồng
 
-Luồng hiện tại tách thành 3 bước:
+Luồng hiện tại tách thành 4 bước:
 
-1. **Admin import danh sách sinh viên vào course** bằng template 5 cột (không có cột phân nhóm).
-2. **Giảng viên tải template phân nhóm** đã có sẵn danh sách sinh viên thuộc course.
-3. **Giảng viên import lại template đã điền Group/Leader** để tạo Team membership.
+1. **Admin tải template mẫu thêm sinh viên vào course** (template trống 5 cột).
+2. **Admin import danh sách sinh viên vào course** bằng template 5 cột (không có cột phân nhóm).
+3. **Giảng viên tải template phân nhóm** đã có sẵn danh sách sinh viên thuộc course.
+4. **Giảng viên import lại template đã điền Group/Leader** để tạo Team membership.
 
 > Ghi chú: Hệ thống luôn chuẩn hóa identity theo `RollNumber` + `Email` để chống trùng/đụng dữ liệu.
 
@@ -14,7 +15,27 @@ Luồng hiện tại tách thành 3 bước:
 
 ## 2) API chi tiết
 
-## 2.1 Admin import danh sách sinh viên vào course (không phân nhóm)
+## 2.1 Admin tải template mẫu thêm sinh viên vào course
+
+- **Method**: `GET`
+- **Path**: `/api/v1/courses/{courseId}/admin-students-template`
+- **Role**: `ADMIN`
+- **Response**:
+  - `Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`
+  - file đính kèm: `course-admin-student-template-<courseCode>.xlsx`
+  - file chỉ có header 5 cột, chưa có dữ liệu sinh viên
+
+### Header trong template admin
+
+1. `Class`
+2. `RollNumber`
+3. `Email`
+4. `MemberCode`
+5. `FullName`
+
+---
+
+## 2.2 Admin import danh sách sinh viên vào course (không phân nhóm)
 
 - **Method**: `POST`
 - **Path**: `/api/v1/courses/{courseId}/admin-import-students-template`
@@ -51,7 +72,7 @@ Luồng hiện tại tách thành 3 bước:
 
 ---
 
-## 2.2 Tải template phân nhóm sinh viên cho giảng viên
+## 2.3 Tải template phân nhóm sinh viên cho giảng viên
 
 - **Method**: `GET`
 - **Path**: `/api/v1/courses/{courseId}/students-grouping-template`
@@ -72,7 +93,7 @@ Luồng hiện tại tách thành 3 bước:
 
 ---
 
-## 2.3 Import phân nhóm vào course
+## 2.4 Import phân nhóm vào course
 
 - **Method**: `POST`
 - **Path**: `/api/v1/courses/{courseId}/import-students`

@@ -118,6 +118,15 @@ public class ExcelImportService {
         );
     }
 
+    @Transactional(readOnly = true)
+    public ExportedCourseStudentTemplate exportAdminEnrollmentTemplate(SagaPrincipal principal, UUID courseId) {
+        Course course = authorizationService.requireImportAccess(principal, courseId);
+        return new ExportedCourseStudentTemplate(
+                adminTemplateFilename(course),
+                toEmptyTemplateWorkbookBytes(ADMIN_TEMPLATE_HEADERS)
+        );
+    }
+
     private List<ImportRow> parse(MultipartFile file, ImportTemplateMode mode) {
         if (file == null || file.isEmpty() || !isXlsx(file)) {
             throw badRequest("MALFORMED_WORKBOOK", "The uploaded file must be a non-empty XLSX workbook");
@@ -477,6 +486,26 @@ public class ExcelImportService {
         String courseCode = course.getCourseCode() == null ? "course" : course.getCourseCode().trim();
         String safeCode = courseCode.replaceAll("[^A-Za-z0-9._-]", "_");
         return "course-student-template-" + (safeCode.isBlank() ? "course" : safeCode) + ".xlsx";
+    }
+
+    private String adminTemplateFilename(Course course) {
+        String courseCode = course.getCourseCode() == null ? "course" : course.getCourseCode().trim();
+        String safeCode = courseCode.replaceAll("[^A-Za-z0-9._-]", "_");
+        return "course-admin-student-template-" + (safeCode.isBlank() ? "course" : safeCode) + ".xlsx";
+    }
+
+    private byte[] toEmptyTemplateWorkbookBytes(List<String> headers) {
+        try (XSSFWorkbook workbook = new XSSFWorkbook(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            Sheet sheet = workbook.createSheet("Danh_Sach_SV");
+            Row header = sheet.createRow(0);
+            for (int index = 0; index < headers.size(); index++) {
+                header.createCell(index).setCellValue(headers.get(index));
+            }
+            workbook.write(output);
+            return output.toByteArray();
+        } catch (IOException exception) {
+            throw new IllegalStateException("Could not generate admin course student template", exception);
+        }
     }
 
     private CourseStudentImportSummary summary(ImportPlan plan, PersistStats stats, boolean groupingApplied) {

@@ -43,4 +43,8 @@ public interface PeerReviewRepository extends JpaRepository<PeerReview, UUID> {
         List<PeerReview> findBySprintBoardProjectCourseIdAndSprintDeletedAtIsNullOrderByCreatedAtAscIdAsc(
                         UUID courseId
         );
+
+        boolean existsBySprintBoardProjectCourseIdAndReviewerId(UUID courseId, UUID reviewerId);
+
+        boolean existsBySprintBoardProjectCourseIdAndRevieweeId(UUID courseId, UUID revieweeId);
 }

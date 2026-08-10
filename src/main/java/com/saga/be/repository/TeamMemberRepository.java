@@ -32,6 +32,8 @@ public interface TeamMemberRepository extends JpaRepository<TeamMember, UUID> {
             UUID instructorId
     );
 
+    boolean existsByStudentIdAndTeamCourseId(UUID studentId, UUID courseId);
+
     List<TeamMember> findByTeamId(UUID teamId);
 
     List<TeamMember> findByStudentId(UUID studentId);
@@ -70,4 +72,6 @@ public interface TeamMemberRepository extends JpaRepository<TeamMember, UUID> {
 
     @EntityGraph(attributePaths = {"student", "team", "team.project"})
     Page<TeamMember> findByTeamId(UUID teamId, Pageable pageable);
+
+    long countByTeamId(UUID teamId);
 }

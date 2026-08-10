@@ -202,7 +202,27 @@ public class CourseService {
                 .toList();
 
         Page<CourseStudentRosterItem> withTeamPage = page(studentsWithTeam, pageable);
-        Page<CourseStudentRosterItem> withoutTeamPage = Page.empty(pageable);
+        java.util.Set<UUID> studentIdsWithTeam = new java.util.HashSet<>();
+        for (TeamMember membership : teamMembers) {
+            if (membership.getStudent() != null) {
+                studentIdsWithTeam.add(membership.getStudent().getId());
+            }
+        }
+        List<CourseStudentRosterItem> studentsWithoutTeam = studentCourseInvitationRepository
+                .findDistinctStudentsByCourseId(courseId)
+                .stream()
+                .filter(student -> !studentIdsWithTeam.contains(student.getId()))
+                .filter(student -> matchesKeyword(student, keyword))
+                .map(student -> new CourseStudentRosterItem(
+                        student.getId(),
+                        student.getFullName(),
+                        student.getStudentCode(),
+                        student.getEmail(),
+                        null
+                ))
+                .sorted(rosterComparator(sortBy, sortDirection))
+                .toList();
+        Page<CourseStudentRosterItem> withoutTeamPage = page(studentsWithoutTeam, pageable);
         RosterTeamFilter teamFilter = RosterTeamFilter.from(hasTeam);
 
         if (teamFilter == RosterTeamFilter.WITH) {
