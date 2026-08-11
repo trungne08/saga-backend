@@ -1,58 +1,74 @@
 package com.saga.be.config;
 
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
-import com.saga.be.service.GmailSmtpStudentInvitationDeliveryAdapter;
+import com.saga.be.service.GmailApiStudentInvitationDeliveryAdapter;
 import com.saga.be.service.StudentInvitationDeliveryAdapter;
 import com.saga.be.service.UnavailableStudentInvitationDeliveryAdapter;
+import java.time.Duration;
+import java.util.List;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.mock.env.MockEnvironment;
+import tools.jackson.databind.json.JsonMapper;
 
 class StudentInvitationDeliveryConfigurationTest {
 
     @Test
-    void missingMailConfigurationUsesUnavailableAdapterWithoutFailingStartup() {
-        ObjectProvider<JavaMailSender> provider = provider(null);
-
-        StudentInvitationDeliveryAdapter adapter = configuration().studentInvitationDeliveryAdapter(
-                provider,
-                new MockEnvironment()
+    void everyGmailApiSettingIsRequiredButMissingConfigurationDoesNotFailStartup() {
+        List<GmailApiStudentInvitationProperties> incomplete = List.of(
+                properties("", "secret", "refresh", "sender@example.test", "SAGA"),
+                properties("client", "", "refresh", "sender@example.test", "SAGA"),
+                properties("client", "secret", "", "sender@example.test", "SAGA"),
+                properties("client", "secret", "refresh", "", "SAGA"),
+                properties("client", "secret", "refresh", "sender@example.test", "")
         );
 
-        assertInstanceOf(UnavailableStudentInvitationDeliveryAdapter.class, adapter);
+        incomplete.forEach(properties -> assertInstanceOf(
+                UnavailableStudentInvitationDeliveryAdapter.class,
+                adapter(properties)
+        ));
     }
 
     @Test
-    void completeGmailConfigurationUsesSmtpAdapter() {
-        JavaMailSender mailSender = mock(JavaMailSender.class);
-        MockEnvironment environment = new MockEnvironment()
-                .withProperty("spring.mail.host", "smtp.gmail.com")
-                .withProperty("spring.mail.port", "587")
-                .withProperty("spring.mail.username", "sender@example.test")
-                .withProperty("spring.mail.password", "test-only-value")
-                .withProperty("spring.mail.properties.mail.smtp.auth", "true")
-                .withProperty("spring.mail.properties.mail.smtp.starttls.enable", "true");
+    void completeGmailApiConfigurationUsesHttpsAdapterWithoutProviderCall() {
+        StudentInvitationDeliveryAdapter adapter = adapter(properties(
+                "client",
+                "secret",
+                "refresh",
+                "sender@example.test",
+                "SAGA"
+        ));
 
-        StudentInvitationDeliveryAdapter adapter = configuration().studentInvitationDeliveryAdapter(
-                provider(mailSender),
-                environment
+        assertInstanceOf(GmailApiStudentInvitationDeliveryAdapter.class, adapter);
+    }
+
+    private StudentInvitationDeliveryAdapter adapter(
+            GmailApiStudentInvitationProperties properties
+    ) {
+        return new StudentInvitationDeliveryConfiguration()
+                .studentInvitationDeliveryAdapter(
+                        properties,
+                        new IntegrationProperties(
+                                "", "", "", Duration.ofMinutes(10),
+                                Duration.ofSeconds(1), Duration.ofSeconds(2),
+                                false, Duration.ofMinutes(5)
+                        ),
+                        JsonMapper.builder().build()
+                );
+    }
+
+    private GmailApiStudentInvitationProperties properties(
+            String clientId,
+            String clientSecret,
+            String refreshToken,
+            String senderEmail,
+            String senderName
+    ) {
+        return new GmailApiStudentInvitationProperties(
+                clientId,
+                clientSecret,
+                refreshToken,
+                senderEmail,
+                senderName
         );
-
-        assertInstanceOf(GmailSmtpStudentInvitationDeliveryAdapter.class, adapter);
-    }
-
-    @SuppressWarnings("unchecked")
-    private ObjectProvider<JavaMailSender> provider(JavaMailSender mailSender) {
-        ObjectProvider<JavaMailSender> provider = mock(ObjectProvider.class);
-        when(provider.getIfAvailable()).thenReturn(mailSender);
-        return provider;
-    }
-
-    private StudentInvitationDeliveryConfiguration configuration() {
-        return new StudentInvitationDeliveryConfiguration();
     }
 }

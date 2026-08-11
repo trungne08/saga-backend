@@ -379,7 +379,6 @@ Master-data GET cho mọi authenticated user; `AccountStatus` không được en
 | data-mongodb | Boot managed | parent | Mongo audit | `SystemAuditLogRepository` |
 | starter-flyway; flyway-mysql | Boot managed | parent | migration | `db/migration` |
 | webmvc | Boot managed | parent | REST MVC | controller |
-| starter-mail | Boot managed | parent | Gmail SMTP/MIME invitation delivery | `GmailSmtpStudentInvitationDeliveryAdapter` |
 | security; oauth2-client | Boot managed | parent | session/Cognito OIDC | security package |
 | actuator | Boot managed | parent | health | Railway |
 | lombok; validation | Boot managed | parent | boilerplate/DTO validation | entity/DTO |
@@ -404,7 +403,7 @@ Master-data GET cho mọi authenticated user; `AccountStatus` không được en
 | MongoDB Atlas-compatible | Mongo URI/audit/health config |
 | Jira Cloud | 3LO, API, dynamic webhook, sync |
 | GitHub App | OAuth, installation, API, webhook |
-| Gmail SMTP | Student Course Invitation email qua Spring Mail |
+| Gmail REST API | Student Course Invitation qua OAuth 2.0 token refresh và `users.messages.send` HTTPS |
 | Railway | `railway.json` build/deploy |
 
 Bằng chứng: `pom.xml`; `infra/lambda/cognito-account-linking/package.json`; `application.properties`; `railway.json`.
@@ -422,7 +421,7 @@ Bằng chứng: `pom.xml`; `infra/lambda/cognito-account-linking/package.json`; 
 | `COGNITO_DOMAIN`, `COGNITO_CLIENT_ID`, `COGNITO_CLIENT_SECRET`, `COGNITO_ISSUER_URI` | all | registration cần values | Cognito OIDC/logout | client secret YES | domain empty | domain logout HTTPS origin | `application.properties:L9-L21` |
 | `DATABASE_JDBC_URL`/`AIVEN_JDBC_URL`, username aliases, password aliases | all | YES | MySQL | password YES | none | Hibernate validate | `application.properties:L35-L45` |
 | `MONGO_URI`, `MONGO_DATABASE`, `MONGO_HEALTH_TIMEOUT` | all | URI/database YES | Mongo | URI có thể secret | PT5S | health Mongo default disabled | `application.properties:L47-L49` |
-| `SPRING_MAIL_HOST`, `SPRING_MAIL_PORT`, `SPRING_MAIL_USERNAME`, `SPRING_MAIL_PASSWORD`, `SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH`, `SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE` | invitation delivery | YES when Gmail enabled | Gmail SMTP | password YES | port 587; auth/TLS false | all required; FROM=username; missing config uses unavailable adapter | mail auto-config; `StudentInvitationDeliveryConfiguration` |
+| `GMAIL_API_CLIENT_ID`, `GMAIL_API_CLIENT_SECRET`, `GMAIL_API_REFRESH_TOKEN`, `GMAIL_API_SENDER_EMAIL`, `GMAIL_API_SENDER_NAME` | invitation delivery | YES when Gmail enabled | Gmail REST API | client secret/refresh token YES | empty | all five required; missing config uses unavailable adapter; sender email must be authorized by the Gmail account | `GmailApiStudentInvitationProperties`; `StudentInvitationDeliveryConfiguration` |
 | `STUDENT_INVITATION_LOGIN_URL` | invitation delivery | YES | email CTA entry URL | NO | public-base `/api/auth/login` | absolute HTTP(S), host, no userinfo | `StudentInvitationProperties#loginUri` |
 | `SESSION_COOKIE_SECURE`, `SESSION_COOKIE_SAME_SITE` | prod | NO | cookie policy | NO | true/none prod | local false/lax | `application-prod.properties` |
 | Springdoc flags (`SPRINGDOC_*`, `SWAGGER_ENABLED`) | all | NO | docs exposure | NO | false | public only when enabled | `application.properties:L29-L30` |
@@ -436,7 +435,7 @@ Bằng chứng: `pom.xml`; `infra/lambda/cognito-account-linking/package.json`; 
 
 `SPRING_PROFILES_ACTIVE` không được khai báo bằng placeholder trong source hiện tại; profile `local`, `prod`, `test` tồn tại qua các file properties. Test profile dùng URL/client test, tắt provider integration, reconciliation và Mongo health. `src/test/resources/application-test.properties`.
 
-**Danh sách đầy đủ 62 tên biến placeholder đã quét** (các nhóm trong bảng trên không dùng wildcard để tạo thêm tên): `AIVEN_DB_PASSWORD`, `AIVEN_DB_USERNAME`, `AIVEN_JDBC_URL`, `AUTH_LOGOUT_REDIRECT_URI`, `AUTH_SUCCESS_REDIRECT_URI`, `COGNITO_CLIENT_ID`, `COGNITO_CLIENT_SECRET`, `COGNITO_DOMAIN`, `COGNITO_ISSUER_URI`, `DATABASE_JDBC_URL`, `DATABASE_PASSWORD`, `DATABASE_USERNAME`, `FLYWAY_BASELINE_ON_MIGRATE`, `FLYWAY_ENABLED`, `FRONTEND_ORIGINS`, `GITHUB_API_BASE_URL`, `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_INTEGRATION_ENABLED`, `GITHUB_PERSONAL_CALLBACK_URL`, `GITHUB_PRIVATE_KEY`, `GITHUB_PROJECT_CALLBACK_URL`, `GITHUB_SETUP_URL`, `GITHUB_WEB_BASE_URL`, `GITHUB_WEBHOOK_PUBLIC_URL`, `GITHUB_WEBHOOK_SECRET`, `INTEGRATION_HTTP_CONNECT_TIMEOUT`, `INTEGRATION_HTTP_READ_TIMEOUT`, `INTEGRATION_OAUTH_STATE_TTL`, `INTEGRATION_OVERLAP_WINDOW`, `INTEGRATION_RECONCILIATION_DELAY_MS`, `INTEGRATION_RECONCILIATION_ENABLED`, `INTEGRATION_TOKEN_ENCRYPTION_KEY`, `INTEGRATION_TOKEN_ENCRYPTION_KEY_ID`, `INTEGRATION_TOKEN_ENCRYPTION_PREVIOUS_KEYS`, `JIRA_API_BASE_URL`, `JIRA_AUTHORIZATION_URL`, `JIRA_CALLBACK_URL`, `JIRA_CLIENT_ID`, `JIRA_CLIENT_SECRET`, `JIRA_INTEGRATION_ENABLED`, `JIRA_SCOPES`, `JIRA_TIME_ZONE`, `JIRA_TOKEN_URL`, `JIRA_WEBHOOK_PUBLIC_URL`, `LOCAL_DEMO_LEADER_COGNITO_SUB`, `LOCAL_DEMO_SEED_ENABLED`, `LOCAL_WEBHOOK_BASE_URL`, `MONGO_DATABASE`, `MONGO_HEALTH_TIMEOUT`, `MONGO_URI`, `PORT`, `PUBLIC_BASE_URL`, `SESSION_COOKIE_SAME_SITE`, `SESSION_COOKIE_SECURE`, `SPRINGDOC_API_DOCS_ENABLED`, `SPRINGDOC_SWAGGER_UI_ENABLED`, `STALE_SYNC_JOB_RECOVERY_DELAY_MS`, `SWAGGER_ENABLED`, `SYNC_JOB_STALE_AFTER`.
+**Danh sách đầy đủ 78 tên biến placeholder đã quét trong các profile properties** (các nhóm trong bảng trên không dùng wildcard để tạo thêm tên): `AIVEN_DB_PASSWORD`, `AIVEN_DB_USERNAME`, `AIVEN_JDBC_URL`, `AUTH_LOGOUT_REDIRECT_URI`, `AUTH_SUCCESS_REDIRECT_URI`, `COGNITO_CLIENT_ID`, `COGNITO_CLIENT_SECRET`, `COGNITO_DOMAIN`, `COGNITO_ISSUER_URI`, `DATABASE_JDBC_URL`, `DATABASE_PASSWORD`, `DATABASE_USERNAME`, `FLYWAY_BASELINE_ON_MIGRATE`, `FLYWAY_ENABLED`, `FRONTEND_ORIGINS`, `GITHUB_API_BASE_URL`, `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GITHUB_INTEGRATION_ENABLED`, `GITHUB_PERSONAL_CALLBACK_URL`, `GITHUB_PRIVATE_KEY`, `GITHUB_PROJECT_CALLBACK_URL`, `GITHUB_SETUP_URL`, `GITHUB_WEB_BASE_URL`, `GITHUB_WEBHOOK_PUBLIC_URL`, `GITHUB_WEBHOOK_SECRET`, `GMAIL_API_CLIENT_ID`, `GMAIL_API_CLIENT_SECRET`, `GMAIL_API_REFRESH_TOKEN`, `GMAIL_API_SENDER_EMAIL`, `GMAIL_API_SENDER_NAME`, `INTEGRATION_CALLBACK_REDIRECT_URI`, `INTEGRATION_CALLBACK_RESULT_TTL`, `INTEGRATION_HTTP_CONNECT_TIMEOUT`, `INTEGRATION_HTTP_READ_TIMEOUT`, `INTEGRATION_OAUTH_STATE_TTL`, `INTEGRATION_OVERLAP_WINDOW`, `INTEGRATION_RECONCILIATION_DELAY_MS`, `INTEGRATION_RECONCILIATION_ENABLED`, `INTEGRATION_TOKEN_ENCRYPTION_KEY`, `INTEGRATION_TOKEN_ENCRYPTION_KEY_ID`, `INTEGRATION_TOKEN_ENCRYPTION_PREVIOUS_KEYS`, `JIRA_API_BASE_URL`, `JIRA_AUTHORIZATION_URL`, `JIRA_CALLBACK_URL`, `JIRA_CLIENT_ID`, `JIRA_CLIENT_SECRET`, `JIRA_INTEGRATION_ENABLED`, `JIRA_SCOPES`, `JIRA_TIME_ZONE`, `JIRA_TOKEN_URL`, `JIRA_WEBHOOK_PUBLIC_URL`, `LOCAL_DEMO_LEADER_COGNITO_SUB`, `LOCAL_DEMO_SEED_ENABLED`, `LOCAL_WEBHOOK_BASE_URL`, `MONGO_DATABASE`, `MONGO_HEALTH_TIMEOUT`, `MONGO_URI`, `NOTIFICATION_DEADLINE_PROCESSING_ENABLED`, `NOTIFICATION_DEADLINE_SCAN_DELAY_MS`, `NOTIFICATION_DELIVERY_PROCESSING_ENABLED`, `NOTIFICATION_DELIVERY_PROCESSING_TIMEOUT_MS`, `NOTIFICATION_DELIVERY_RETRY_DELAY_MS`, `PORT`, `PRIVACY_CONTACT_URL`, `PUBLIC_BASE_URL`, `SESSION_COOKIE_SAME_SITE`, `SESSION_COOKIE_SECURE`, `SPRINGDOC_API_DOCS_ENABLED`, `SPRINGDOC_SWAGGER_UI_ENABLED`, `STALE_SYNC_JOB_RECOVERY_DELAY_MS`, `STUDENT_INVITATION_LOGIN_URL`, `STUDENT_INVITATION_PROCESSING_TIMEOUT_MS`, `STUDENT_INVITATION_RETRY_DELAY_MS`, `SWAGGER_ENABLED`, `SYNC_JOB_STALE_AFTER`.
 
 | Property cố định/không lấy từ env | Profile | Giá trị/ràng buộc thực tế | Bằng chứng |
 | --- | --- | --- | --- |
@@ -444,7 +443,7 @@ Bằng chứng: `pom.xml`; `infra/lambda/cognito-account-linking/package.json`; 
 | OAuth registration | all | provider Cognito, `authorization_code`, redirect template, scope `openid,email,profile`, user-name `sub` | `application.properties:L12-L21` |
 | HTTP/error/session | all | cookie session HttpOnly; không include message/stacktrace/binding errors | `application.properties:L23-L24` |
 | Actuator/Mongo health | all | chỉ expose health, no details, Mongo contributor disabled | `application.properties:L25-L28` |
-| SMTP safety | all | startup connection test false; connect/read/write timeout 5000/10000/10000 ms | `application.properties` mail block |
+| Gmail API safety | all | không provider call lúc startup; dùng shared integration connect/read timeout, mặc định 3/10 giây; không Gmail health probe | `StudentInvitationDeliveryConfiguration` |
 | JPA/Flyway | all | `ddl-auto=validate`, `open-in-view=true`, driver MySQL | `application.properties:L35-L45` |
 | local profile | local | Swagger enabled, integration/reconcile disabled, session secure false/same-site lax | `application-local.properties` |
 | prod profile | prod | session secure default true, same-site none | `application-prod.properties` |
@@ -605,7 +604,7 @@ Không có bằng chứng ADMIN thiếu override: `requireTeamManager` chứng m
 | Status | CONFIRMED | Chỉ `PENDING → ACTIVE` khi bind; ACTIVE giữ nguyên; INACTIVE/SUSPENDED không tự kích hoạt. |
 | Course/Team access | CONFIRMED | Student global; access giữ bởi TeamMember hiện hữu. Bind không tạo/xoá/sửa TeamMember hay RoleInTeam. |
 | Invitation | CONFIRMED | V6 outbox unique Student/Course/type sau import commit; claim/FAILED/SENT/retry tối đa 5; stale `PROCESSING` chỉ reclaim sau timeout cấu hình; không rollback import khi delivery lỗi; at-least-once. |
-| Email provider | CONFIRMED_SOURCE_TEST / TBD_DEPLOYMENT_SMOKE | Gmail SMTP adapter + Boot Mail đã có; production secrets/delivery/inbox chưa smoke. |
+| Email provider | CONFIRMED_SOURCE_TEST / TBD_DEPLOYMENT_SMOKE | Gmail REST API adapter qua OAuth refresh + HTTPS `users.messages.send` đã có; production secrets/delivery/inbox chưa smoke. |
 | Import parser/DB invariant | PARTIAL | Header/schema, preview, error DTO từng dòng và database invariant trực tiếp `UNIQUE(student_id, course_id)` chưa có. |
 | Swagger CSRF | CONFIRMED | `withCredentials`; cookie `XSRF-TOKEN`; global same-origin interceptor chỉ POST/PUT/PATCH/DELETE gắn `X-XSRF-TOKEN`; không Bearer. |
 | Logout | CONFIRMED | Framework-managed `POST /api/auth/logout`; valid CSRF 302 Cognito, missing/invalid 403; Swagger fetch có thể `Failed to fetch` khi redirect cross-origin. |
@@ -820,15 +819,17 @@ chặn nullable repair.
 - Với MySQL production `REPEATABLE_READ`, không được dùng outer orchestration transaction để confirm Task vừa được child canonical upsert `REQUIRES_NEW` commit. Confirmation phải qua bean/proxy transaction mới `REQUIRES_NEW`, `readOnly`.
 - `REMOTE_SUCCEEDED` chỉ complete sau fresh local confirmation. Missing Task giữ status đó và trả `JIRA_WRITE_RECOVERY_REQUIRED` ở create; recovery không complete. Cấm global isolation change, EntityManager clear, sleep/polling, blind Jira create retry, new idempotency key hoặc chờ scheduler.
 - J1C metadata resolution, scope, auth/session/CSRF, Jira write operation state machine và schema/migration không đổi.
-## Student Course Invitation Gmail SMTP constraints — 2026-08-11
+## Student Course Invitation Gmail REST API constraints — 2026-08-11
 
-- Dependency mail phải là `org.springframework.boot:spring-boot-starter-mail` không pin version riêng; delivery dùng `JavaMailSender` phía sau `StudentInvitationDeliveryAdapter` hiện hữu.
-- Production configuration dùng `SPRING_MAIL_HOST`, `SPRING_MAIL_PORT`, `SPRING_MAIL_USERNAME`, `SPRING_MAIL_PASSWORD`, `SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH`, `SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE` và `STUDENT_INVITATION_LOGIN_URL`. Secret chỉ thuộc deployment environment; cấm source/docs/diff/test fixture/log/API response chứa giá trị thật.
-- Adapter Gmail chỉ khả dụng khi toàn bộ cấu hình bắt buộc hợp lệ. Thiếu cấu hình không được làm application fail startup, không được tạo credential mặc định và phải báo delivery unavailable để outbox chuyển `FAILED` theo policy hiện hữu.
-- SMTP phải có bounded `mail.smtp.connectiontimeout=5000`, `mail.smtp.timeout=10000`, `mail.smtp.writetimeout=10000`; không bật startup connection test.
-- MIME phải có text fallback + HTML, FROM từ configured username, TO từ message recipient. Linked/unlinked wording và CTA phải generic, không hard-code OAuth callback, không hứa Google và không chứa password/token/UUID/Cognito subject.
-- Provider exception phải tới `StudentInvitationProcessor`; chỉ success mới `SENT`. Failure không rollback import/membership và retry/max attempts/stale recovery/SENT no-resend không đổi. Log chỉ được phép có provider, stage, attempt, result, safe category và exception class.
-- **CONFIRMED_SOURCE_TEST (Gmail scope):** targeted invitation/import 37/37. Full clean chạy 753 tests với 1 failure pre-existing ở roster contract DEC-023, không thuộc Gmail delivery. **TBD_DEPLOYMENT_SMOKE:** Gmail production chưa được kiểm chứng.
+- Delivery giữ `StudentInvitationDeliveryAdapter` và HTTP stack Spring `RestClient` + JDK client hiện hữu; không còn dependency Spring Mail/JavaMail, SMTP properties hay Mail health contributor.
+- Production configuration dùng đúng `GMAIL_API_CLIENT_ID`, `GMAIL_API_CLIENT_SECRET`, `GMAIL_API_REFRESH_TOKEN`, `GMAIL_API_SENDER_EMAIL`, `GMAIL_API_SENDER_NAME` và `STUDENT_INVITATION_LOGIN_URL`. Cả năm biến Gmail là bắt buộc để adapter khả dụng; thiếu một biến phải fail-safe thành unavailable mà backend/import vẫn hoạt động.
+- OAuth refresh chỉ POST HTTPS tới `https://oauth2.googleapis.com/token` với `grant_type=refresh_token`. Gmail send chỉ POST HTTPS tới metadata endpoint `https://gmail.googleapis.com/gmail/v1/users/me/messages/send`; quyền tối thiểu cần cấp là `https://www.googleapis.com/auth/gmail.send`.
+- Access token chỉ sống trong process, cache thread-safe và refresh trước expiry 60 giây. Không persist/log client secret, refresh/access token, Authorization header, form body, raw MIME hay raw provider response. Request body nhạy cảm được gửi dưới dạng byte array để Spring debug log không serialize nội dung.
+- MIME UTF-8 phải có `multipart/alternative`, text + HTML, Base64URL toàn message trong JSON `raw`, FROM gồm configured sender name/email và TO từ message recipient. Header CR/LF injection bị từ chối trước provider call.
+- Shared integration connect/read timeout mặc định 3/10 giây, không provider call lúc startup và không live Gmail health probe.
+- 429/5xx/network và 403 reason rate/quota được phân loại retryable; invalid grant/client, malformed token response, 400/401 và 403 permission/sender là non-retryable. Outbox schema hiện không lưu retryability: processor vẫn mark mọi delivery failure `FAILED` và scheduler hiện hữu có thể claim lại tới max attempts. Đây là giới hạn có chủ ý của milestone, không phải exactly-once.
+- Provider success mới `SENT`; failure không rollback import/membership. At-least-once, stale recovery, max attempts và SENT no-resend giữ nguyên. Production delivery/inbox/spam vẫn **TBD_DEPLOYMENT_SMOKE**.
+- Verification: targeted context/Gmail/invitation/import regression **70/70 PASS**. Full suite chạy **822 tests** không có Gmail failure; DEC-023 baseline vẫn fail. Một Jira diagnostic full-order error ngoài scope pass khi rerun riêng và không có source diff liên quan.
 ## Notification Bell / Firebase Admin runtime constraints — 2026-08-11
 
 - Firebase Admin Java `9.10.0` is required because delivery targets Firebase Installation IDs through `Message.Builder#setFid`; legacy registration-token storage is not introduced.

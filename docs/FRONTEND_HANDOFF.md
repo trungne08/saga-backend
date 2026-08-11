@@ -91,8 +91,8 @@ Không đưa Firebase Admin service account, private key, Gmail App Password, Co
 
 - Email invitation là side effect của Course student import/membership, không phải API gửi mail riêng.
 - HTTP import success chỉ xác nhận dữ liệu/import và số invitation enqueue; không xác nhận email đã đến inbox.
-- Delivery bất đồng bộ; lỗi Gmail/config không rollback membership.
-- Không dựng SMTP UI và không gọi `/send-mail`.
+- Delivery bất đồng bộ; lỗi Gmail API/config không rollback membership.
+- Không dựng provider-mail UI, không gọi Gmail API từ browser và không gọi `/send-mail`.
 
 ## Common errors
 

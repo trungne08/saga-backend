@@ -1469,8 +1469,8 @@ Sau khi import/membership được lưu theo contract hiện tại, backend có 
 
 - Student đã có liên kết Cognito nhận mẫu đăng nhập.
 - Student local chưa liên kết nhận hướng dẫn đăng ký/kích hoạt bằng đúng email nhận thư.
-- FE không gọi SMTP/Gmail và không có endpoint `/send-mail` hay invitation-status API công khai.
-- Trạng thái Gmail/Railway gửi thật vẫn cần deployment smoke; không hiển thị “email đã gửi thành công” chỉ từ HTTP 200 của import.
+- FE không gọi Gmail API trực tiếp và không có endpoint `/send-mail` hay invitation-status API công khai. Việc backend chuyển provider từ SMTP sang Gmail REST API không đổi API/role/session/CSRF contract của FE.
+- Trạng thái Gmail API/Railway gửi thật vẫn cần deployment smoke; không hiển thị “email đã gửi thành công” chỉ từ HTTP 200 của import.
 
 ## 4. Notification Bell
 

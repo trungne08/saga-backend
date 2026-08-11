@@ -1,3 +1,17 @@
+## DEC-073 — Gmail REST API HTTPS thay Gmail SMTP cho Student Course Invitation
+
+- Ngày: 2026-08-11; trạng thái: ACCEPTED / CONFIRMED_SOURCE_TEST, production delivery **TBD_DEPLOYMENT_SMOKE**.
+- Deployment reason: Railway Trial đã chứng minh kết nối `smtp.gmail.com:587` timeout/`MailSendException`; bằng chứng này chỉ kết luận SMTP transport không dùng được trong deployment hiện tại, không kết luận Gmail password/App Password sai. Luồng mới là Railway → Google OAuth HTTPS → Gmail API HTTPS.
+- **Decision:** giữ nguyên transactional outbox, `StudentInvitationProcessor`, composer/template và `StudentInvitationDeliveryAdapter`; production implementation chuyển sang `GmailApiStudentInvitationDeliveryAdapter`. Adapter POST OAuth refresh-token tới `https://oauth2.googleapis.com/token`, sau đó POST MIME Base64URL trong JSON `raw` tới Gmail `users.messages.send` qua HTTPS.
+- Reuse Spring `RestClient` + JDK HTTP stack và `INTEGRATION_HTTP_CONNECT_TIMEOUT`/`INTEGRATION_HTTP_READ_TIMEOUT` hiện hữu; mặc định 3/10 giây. Không provider call lúc startup, không Gmail live health probe và không thêm Google client SDK.
+- Cấu hình production dùng đúng năm biến bắt buộc: `GMAIL_API_CLIENT_ID`, `GMAIL_API_CLIENT_SECRET`, `GMAIL_API_REFRESH_TOKEN`, `GMAIL_API_SENDER_EMAIL`, `GMAIL_API_SENDER_NAME`. Thiếu bất kỳ biến nào chọn unavailable adapter nhưng backend/import vẫn start và commit bình thường. Scope cấp cho refresh token phải là least-privilege `https://www.googleapis.com/auth/gmail.send`.
+- OAuth credential là backend-only; không expose qua FE/API/Swagger/actuator. FE vẫn chỉ nhận import response/outbox enqueue semantics, không có Bearer provider token hay generic send-email endpoint.
+- Access token chỉ cache thread-safe trong memory, refresh trước expiry 60 giây và không persist. Secret/token/Authorization/form/raw MIME/raw provider response/recipient/body không được log; request body nhạy cảm được đưa vào `RestClient` dưới dạng byte array để debug log không serialize nội dung.
+- MIME giữ UTF-8 `multipart/alternative` text + HTML; FROM dùng configured sender name/email, TO dùng message recipient; header CR/LF injection bị từ chối. Chỉ Gmail send success mới mark `SENT`.
+- Network/429/5xx và 403 có reason rate/quota được phân loại retryable; invalid grant/client, malformed token response, 400/401 và 403 permission/sender là non-retryable. Outbox hiện không persist retryability, vì vậy processor vẫn mark tất cả failure `FAILED` và scheduler có thể retry tới max attempts. Không tuyên bố exactly-once: crash sau provider accept nhưng trước local `SENT` vẫn có thể tạo duplicate.
+- Audit xác nhận Spring Mail/JavaMail chỉ phục vụ adapter invitation cũ, nên `spring-boot-starter-mail`, SMTP properties và Mail health surface được loại bỏ. `MANAGEMENT_HEALTH_MAIL_ENABLED` và toàn bộ `SPRING_MAIL_*` không còn là Railway contract.
+- **Supersession:** DEC này supersede DEC-068 về provider/config/transport hiện hành. DEC-068 được giữ nguyên làm lịch sử. DEC-019 vẫn giữ nguyên toàn bộ outbox/dedup/transaction/retry/template/provisioning semantics; không đổi import business logic, authorization, session, CSRF hay `CourseService`.
+
 ## DEC-068 — Gmail SMTP là production adapter cho Student Course Invitation
 
 - **Decision:** giữ nguyên transactional outbox, `StudentInvitationProcessor` và `StudentInvitationDeliveryAdapter`; production implementation dùng Spring Boot Mail `JavaMailSender` với Gmail SMTP, MIME UTF-8 text + HTML và FROM từ configured mail username.

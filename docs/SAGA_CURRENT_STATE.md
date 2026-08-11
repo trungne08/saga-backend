@@ -359,7 +359,7 @@
 | Ưu tiên | Việc cần làm | Lý do | File liên quan | Cách kiểm chứng |
 |---|---|---|---|---|
 | P0 | Hoàn thiện import Excel validation/preview/error DTO | Scope authorization, rollback, idempotency và identity bind đã có; parser contract vẫn thiếu | `ExcelImportService`, DTO | validation/preview/row-error tests |
-| P0 | Deploy và smoke Gmail SMTP | Adapter/config source đã có; delivery thật vẫn TBD | deployment secrets/outbox/log | thư thật, inbox/spam, FAILED→SENT retry verification |
+| P0 | Deploy và smoke Gmail REST API | Adapter/config source đã có; delivery thật vẫn TBD | deployment secrets/outbox/log | thư thật, inbox/spam, FAILED→SENT retry verification |
 | P0 | Browser E2E cookie/CORS/CSRF | localhost→Railway có third-party-cookie risk | `CorsConfig`, `SecurityConfig`, profiles | login→me→csrf→mutation trên browser thật |
 | P1 | Chuẩn hóa error response | FE cần contract ổn định | `GlobalExceptionHandler`, DTO | MockMvc contract tests cho 400/404/409/500 |
 | P1 | Xác minh session deployment topology | Tránh mất session khi redeploy/scale | Railway config và session config | restart/replica test trên môi trường staging |
@@ -588,14 +588,15 @@ BASE HEAD của snapshot cũ: `0bc30be`. HEAD audit hiện hành là `4f3dee9`; 
 - **CONFIRMED_RUNTIME/SOURCE:** incident `CANONICAL_ISSUE_FETCH` với `REMOTE_SUCCEEDED` phù hợp stale outer snapshot MySQL `REPEATABLE_READ`: outer create đã đọc Project/board/local state trước child canonical upsert `REQUIRES_NEW` commit.
 - **CONFIRMED:** create và recovery Task canonical flow dùng `JiraCanonicalTaskReadService.findResponse/exists`, mỗi call là fresh `REQUIRES_NEW` read-only transaction. Chỉ complete sau confirmation; missing Task giữ recovery-required/`REMOTE_SUCCEEDED` và không POST Jira lần hai.
 - **PARTIAL:** test infrastructure hiện chỉ H2 MySQL-mode, không có Testcontainers/Docker MySQL; không tuyên bố đã tái tạo MySQL MVCC trong test.
-## Student Course Invitation Gmail SMTP — 2026-08-11
+## Student Course Invitation Gmail REST API — 2026-08-11
 
-- **IMPLEMENTED / CONFIRMED_SOURCE_TEST:** production delivery adapter dùng Spring Boot Mail `JavaMailSender`, MIME UTF-8 plain text + HTML, FROM từ mail username và CTA từ `STUDENT_INVITATION_LOGIN_URL`.
-- **FAIL-SAFE:** thiếu host/port/username/password/auth/STARTTLS hoặc sender bean thì backend vẫn start và dùng unavailable adapter. Không có default/fake credential; SMTP connection/read/write timeout đều hữu hạn.
+- **IMPLEMENTED / CONFIRMED_SOURCE_TEST:** production delivery adapter dùng OAuth 2.0 refresh-token qua HTTPS và Gmail `users.messages.send`; MIME UTF-8 plain text + HTML được gửi Base64URL trong JSON `raw`. Spring Mail/JavaMail và SMTP properties đã được loại bỏ vì audit không thấy consumer khác.
+- **FAIL-SAFE:** thiếu bất kỳ biến nào trong `GMAIL_API_CLIENT_ID`, `GMAIL_API_CLIENT_SECRET`, `GMAIL_API_REFRESH_TOKEN`, `GMAIL_API_SENDER_EMAIL`, `GMAIL_API_SENDER_NAME` thì backend vẫn start và dùng unavailable adapter. Không có default/fake credential, startup provider call hay Gmail live health probe; connect/read timeout dùng convention integration 3/10 giây mặc định.
 - **OUTBOX UNCHANGED:** `StudentInvitationProcessor` chỉ mark `SENT` sau send success; config/provider exception mark `FAILED`, retry/max-attempt/stale recovery/SENT no-resend giữ nguyên và membership đã commit không rollback.
-- **SECURITY:** linked/unlinked template không chứa password, token, UUID, Cognito subject hay provider-specific promise; log không chứa recipient/body/secret/identity.
-- **VERIFICATION:** targeted invitation/import 37/37. Full clean chạy **116 suites / 753 tests / 1 failure / 0 errors / 0 skipped**; failure duy nhất là pre-existing `CourseService#getCourseRoster` vi phạm contract DEC-023, không thuộc Gmail delivery.
-- **TBD_DEPLOYMENT_SMOKE:** Gmail production delivery, inbox/spam và outbox transition trên deployment thật chưa được xác nhận.
+- **SECURITY:** access token chỉ cache thread-safe trong process và refresh trước expiry; log không chứa recipient/body/secret/token/Authorization/form/raw MIME/raw response. Header injection bị từ chối trước network call.
+- **FAILURE POLICY:** network/429/5xx và 403 rate/quota được nhận diện retryable; invalid/revoked OAuth, malformed response, 400/401 và 403 permission/sender là non-retryable. Processor/outbox schema chưa dùng cờ này để dừng retry: mọi failure vẫn `FAILED` và retry tới max attempts theo policy cũ.
+- **VERIFICATION:** targeted context/Gmail/invitation/import regression **10 suites / 70 tests / 0 failures / 0 errors**. Full suite chạy **131 suites / 822 tests**; Gmail scope pass. Baseline DEC-023 vẫn fail như trước. Full-order còn làm lộ một `JiraBoardResolutionServiceTest` error ngoài scope; method này pass khi rerun riêng và không có source diff liên quan, nên không sửa trong milestone.
+- **TBD_DEPLOYMENT_SMOKE:** Gmail API production delivery, inbox/spam và outbox transition trên deployment thật chưa được xác nhận.
 ## Notification Bell / Firebase FID — 2026-08-11
 
 - **CONFIRMED_SOURCE_TEST:** user-owned notification persistence/read state, unread count, FID registration/revocation, FCM adapter, and durable per-installation delivery/retry are implemented. The backend starts with an unavailable delivery adapter when Firebase credentials are missing/invalid, so DB/API notification behavior remains available.

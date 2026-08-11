@@ -63,14 +63,14 @@ public class StudentInvitationProcessor {
                 deliveryAdapter.deliver(message);
                 claimService.markSent(invitationId);
                 log.info(
-                        "Student invitation delivery provider=GMAIL_SMTP stage=OUTBOX "
+                        "Student invitation delivery provider=GMAIL_API_HTTPS stage=OUTBOX "
                                 + "attempt={} result=SENT",
                         message.attemptNumber()
                 );
             } catch (StudentInvitationDeliveryUnavailableException exception) {
                 claimService.markFailed(invitationId, "DELIVERY_UNAVAILABLE");
                 log.warn(
-                        "Student invitation delivery provider=GMAIL_SMTP stage=CONFIGURATION "
+                        "Student invitation delivery provider=GMAIL_API_HTTPS stage=CONFIGURATION "
                                 + "attempt={} result=FAILED category=UNAVAILABLE "
                                 + "exceptionClass={}",
                         message.attemptNumber(),
@@ -79,16 +79,19 @@ public class StudentInvitationProcessor {
             } catch (StudentInvitationDeliveryException exception) {
                 claimService.markFailed(invitationId, "DELIVERY_FAILED");
                 log.warn(
-                        "Student invitation delivery provider=GMAIL_SMTP stage=SMTP_SEND "
-                                + "attempt={} result=FAILED category={} exceptionClass={}",
+                        "Student invitation delivery provider=GMAIL_API_HTTPS stage=HTTPS_DELIVERY "
+                                + "attempt={} result=FAILED category={} retryable={} "
+                                + "providerStatus={} exceptionClass={}",
                         message.attemptNumber(),
                         exception.getCategory(),
+                        exception.isRetryable(),
+                        exception.getHttpStatus(),
                         exception.getProviderExceptionClass()
                 );
             } catch (RuntimeException exception) {
                 claimService.markFailed(invitationId, "DELIVERY_FAILED");
                 log.warn(
-                        "Student invitation delivery provider=GMAIL_SMTP stage=DELIVERY "
+                        "Student invitation delivery provider=GMAIL_API_HTTPS stage=DELIVERY "
                                 + "attempt={} result=FAILED category=UNEXPECTED "
                                 + "exceptionClass={}",
                         message.attemptNumber(),

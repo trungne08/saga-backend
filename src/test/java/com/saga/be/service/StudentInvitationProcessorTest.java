@@ -58,13 +58,15 @@ class StudentInvitationProcessorTest {
     }
 
     @Test
-    void marksFailureAndNeverSentWhenSmtpProviderFails() {
+    void marksFailureAndNeverSentWhenGmailApiProviderFails() {
         UUID invitationId = UUID.randomUUID();
         StudentInvitationMessage message = message();
         when(claimService.claim(invitationId)).thenReturn(Optional.of(message));
         org.mockito.Mockito.doThrow(new StudentInvitationDeliveryException(
-                "SMTP_SEND",
-                new org.springframework.mail.MailSendException("provider failure")
+                "GMAIL_PROVIDER_UNAVAILABLE",
+                true,
+                503,
+                new IllegalStateException("provider failure")
         )).when(deliveryAdapter).deliver(message);
 
         processor().process(invitationId);
