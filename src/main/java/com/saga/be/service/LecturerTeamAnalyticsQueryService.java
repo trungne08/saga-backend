@@ -3,6 +3,7 @@ package com.saga.be.service;
 import com.saga.be.dto.response.LecturerAnalyticsResponses;
 import com.saga.be.dto.response.TeamMemberResponse;
 import com.saga.be.entity.PeerReview;
+import com.saga.be.entity.GitRepo;
 import com.saga.be.entity.Sprint;
 import com.saga.be.entity.Task;
 import com.saga.be.entity.Team;
@@ -10,6 +11,7 @@ import com.saga.be.entity.TeamMember;
 import com.saga.be.entity.enums.TaskStatus;
 import com.saga.be.entity.enums.TaskType;
 import com.saga.be.repository.CommitDataRepository;
+import com.saga.be.repository.GitRepoRepository;
 import com.saga.be.repository.PeerReviewRepository;
 import com.saga.be.repository.SprintRepository;
 import com.saga.be.repository.TaskRepository;
@@ -34,6 +36,7 @@ import org.springframework.web.server.ResponseStatusException;
 public class LecturerTeamAnalyticsQueryService {
     private final LecturerAnalyticsAuthorizationService authorization;
     private final TeamMemberRepository teamMemberRepository;
+    private final GitRepoRepository gitRepoRepository;
     private final TaskRepository taskRepository;
     private final CommitDataRepository commitDataRepository;
     private final SprintRepository sprintRepository;
@@ -45,9 +48,41 @@ public class LecturerTeamAnalyticsQueryService {
         Team team = authorization.requireTeam(principal, courseId, teamId);
         Page<TeamMemberResponse> members = teamMemberRepository.findByTeamId(teamId, pageable)
                 .map(TeamMemberResponse::from);
-        return new LecturerAnalyticsResponses.TeamDetail(courseId, teamId, team.getName(),
-                team.getProject() == null ? null : new LecturerAnalyticsResponses.ProjectSummary(
-                        team.getProject().getId(), team.getProject().getName()), members);
+        return new LecturerAnalyticsResponses.TeamDetail(
+                courseId,
+                teamId,
+                team.getName(),
+                projectSummary(team),
+                members
+        );
+    }
+
+    private LecturerAnalyticsResponses.ProjectSummary projectSummary(Team team) {
+        if (team.getProject() == null) {
+            return null;
+        }
+        List<LecturerAnalyticsResponses.TeamGitHubRepositoryReference> repositories = gitRepoRepository
+                .findByProjectIdAndRepositoryIdIsNotNullOrderByFullNameAscRepositoryIdAsc(
+                        team.getProject().getId()
+                )
+                .stream()
+                .map(this::repositoryReference)
+                .toList();
+        return new LecturerAnalyticsResponses.ProjectSummary(
+                team.getProject().getId(),
+                team.getProject().getName(),
+                repositories
+        );
+    }
+
+    private LecturerAnalyticsResponses.TeamGitHubRepositoryReference repositoryReference(GitRepo repository) {
+        String repositoryName = repository.getFullName() == null
+                ? repository.getName()
+                : repository.getFullName();
+        return new LecturerAnalyticsResponses.TeamGitHubRepositoryReference(
+                repository.getRepositoryId(),
+                repositoryName
+        );
     }
 
     @Transactional(readOnly = true)

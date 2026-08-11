@@ -1304,7 +1304,7 @@ STUDENT nhận 403, anonymous nhận 401.
 
 | Path | Query | Response chính |
 |---|---|---|
-| `GET /api/v1/courses/{courseId}/teams/{teamId}/detail` | `page=0&size=20`, size 1..100 | `TeamDetail`; `project` nullable, `members` là Spring `Page<TeamMemberResponse>` |
+| `GET /api/v1/courses/{courseId}/teams/{teamId}/detail` | `page=0&size=20`, size 1..100 | `TeamDetail`; `project` nullable, `project.repositories` là danh sách GitHub repository local, `members` là Spring `Page<TeamMemberResponse>` |
 | `GET /api/v1/courses/{courseId}/students/{studentId}/progress` | — | task assigned theo Project, DONE/total completion, Commit count, `TaskType` distribution và unclassified count |
 | `GET /api/v1/courses/{courseId}/students/{studentId}/activities` | `page=0&size=10` | `StudentActivities`; Commit/Document mới nhất, sort timestamp giảm dần rồi type/sourceId |
 | `GET /api/v1/courses/{courseId}/students/{studentId}/contribution-detail` | — | aggregate Contribution hiện tại của Student; không phải lịch sử Sprint |
@@ -1316,6 +1316,16 @@ STUDENT nhận 403, anonymous nhận 401.
 Mọi URL có Team/Student đều kiểm quan hệ lồng nhau với `courseId`; ID tồn tại ở
 Course khác không làm lộ dữ liệu. Recent Activities không dựng Jira transition event
 vì database chỉ giữ trạng thái hiện tại.
+
+`TeamDetail.project` giữ nguyên `null` khi Team chưa có Project. Khi có Project, shape additive là
+`{id,name,repositories:[{repositoryId,repositoryName}]}`; chưa link repository thì `repositories: []`.
+Project hỗ trợ nhiều GitHub repository nên FE phải render/chọn từ toàn bộ danh sách, không lấy phần tử đầu
+làm mặc định canonical. `repositoryId` là GitHub provider ID kiểu số (`Long`/OpenAPI `int64`), dùng trực
+tiếp cho path `/api/projects/{projectId}/github/repositories/{repositoryId}/branches|commits` và query
+`repositoryId` của Issue list. `repositoryName` là tên an toàn dạng `owner/name` đã persist. Team detail
+chỉ đọc local DB theo `fullName`, rồi `repositoryId` để giữ thứ tự deterministic; không gọi GitHub provider
+và không trả URL, installation, token hay credential. Authorization session hiện hữu không đổi: ADMIN theo
+scope hiện tại, LECTURER đúng Course, STUDENT 403.
 # P1 — Contract response/error (2026-08-07)
 
 `GET /api/v1/teams/{teamId}/sprints` trả thêm `state` (additive):
@@ -1578,3 +1588,50 @@ Backend logout hiện không tự revoke Firebase installation. Product policy �
 - Khi user chủ động tắt push hoặc xóa đăng ký device: gọi revoke bằng installation UUID đã lưu.
 - Khi logout: thực hiện `POST /api/auth/logout` theo browser navigation. Chỉ revoke trước logout nếu UI/product đã chọn rõ hành vi đó và FE vẫn còn session + CSRF hợp lệ.
 - Sau logout xóa auth/CSRF/Bell state khỏi memory; không lưu FID, cookie hoặc token thật vào log.
+## GitHub Issues và traceability — 2026-08-11
+
+Backend đã expose local read model cho màn `Project > GitHub > Issues`. Các GET dưới đây không gọi
+GitHub/Jira realtime; dữ liệu mới nhất phụ thuộc backfill/reconciliation/webhook sync hiện hữu.
+
+| Method | Route | Dùng cho FE |
+|---|---|---|
+| GET | `/api/projects/{projectId}/github/issues` | List Issue, filter, pagination, counters |
+| GET | `/api/projects/{projectId}/github/issues/{issueId}` | Issue detail + linked Task/PR/Commit + timeline |
+| POST | `/api/v1/projects/{projectId}/tasks/{taskId}/github-issues/{issueId}` | Manager link local Task–Issue |
+| DELETE | `/api/v1/projects/{projectId}/tasks/{taskId}/github-issues/{issueId}` | Manager unlink local Task–Issue |
+| GET | `/api/v1/projects/{projectId}/tasks/{taskId}/traceability` | Task → Issues → PR/Commit |
+| GET | `/api/projects/{projectId}/traceability?limit=50` | Bounded project timeline |
+
+Issue list query:
+
+- `state=OPEN|CLOSED` optional;
+- `repositoryId` optional, dùng repository ID đã trả từ Project integrations;
+- `keyword` search title hoặc exact issue number, hỗ trợ `42`/`#42`;
+- `assignedToMe=true` chỉ hợp lệ cho current Student có local profile;
+- `page` từ 0, `size` 1..100.
+
+`summary.open`, `summary.closed`, `summary.assignedToMe`, `summary.unassigned` được tính trong toàn
+Project và repository filter hiện tại, độc lập với state/keyword/assigned-to-me filter. Sort list cố
+định mới nhất trước theo external update, rồi issue number/id để pagination deterministic.
+
+Safe Issue shape gồm local `id`, `issueNumber`, `title`, `state`, repository `{repositoryId,fullName}`,
+resolved local `author`/`assignee` `{id,fullName,studentCode}` nullable, `externalUpdatedAt`, `closedAt`.
+Không có `githubIssueId`, `nodeId`, external identity ID, installation hoặc credential. Unresolved
+author/assignee được trả `null`, FE không tự map bằng login/name.
+
+Issue detail trả `linkedTasks`, `linkedPullRequests`, `linkedCommits` dưới dạng
+`{items, truncated}` và timeline có `sourceType`:
+`JIRA_TASK|GITHUB_ISSUE|GITHUB_PULL_REQUEST|GITHUB_COMMIT`. Collection/timeline tối đa 100; project
+timeline nhận `limit` 1..100. Timestamp null không xuất hiện trong timeline; không coi local
+`createdAt` là GitHub created time.
+
+Task–Issue link là **SAGA local relation**. POST không tạo/sửa GitHub Issue và không sửa Jira Task;
+duplicate POST trả `200 linked=true`. DELETE trả `204` cả khi pair đã được gỡ. Mutation dùng browser
+session + CSRF, không có actor ID/request body và không yêu cầu `Idempotency-Key`. Quyền mutation là
+exact Project Integration Manager hiện hữu: ADMIN override, Lecturer đúng Course, Student Team
+LEADER; MEMBER không được link/unlink. Read dùng Project read scope hiện hữu, gồm Student MEMBER đúng
+owning Team. Không dùng Bearer.
+
+PR/Commit relation type có `REFERENCE|CLOSING_REFERENCE|MANUAL`, nhưng current provider chưa tự
+populate authoritative relation; FE phải chấp nhận danh sách rỗng. Không suy `REFERENCE` là
+`CLOSING_REFERENCE`. GitHub Issue remote CRUD và lifecycle notification chưa có trong milestone này.

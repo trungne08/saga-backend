@@ -860,3 +860,26 @@ chặn nullable repair.
 - Deadline scan is bounded to 100 rows per page and configured by `NOTIFICATION_DEADLINE_PROCESSING_ENABLED` (default true) and `NOTIFICATION_DEADLINE_SCAN_DELAY_MS` (default 3600000). One Task exception must not stop the batch. The scheduler uses injected `Clock` and `JIRA_TIME_ZONE`, never JVM default date semantics.
 - Bell notification and durable delivery rows are committed before the existing after-commit Firebase processor runs. Zero FIDs still yields a Bell notification; multiple active FIDs yield multiple deliveries, not multiple Bell rows. Producer/FCM failure cannot change Jira `COMPLETED` or roll back canonical Task/Sprint state.
 - No automatic-notification public API exists, no request accepts actor/recipient, and `actionUrl` is null until a canonical internal FE route is confirmed. DEC-023 and Course roster/enrollment/invitation semantics remain unchanged.
+## GitHub Issue traceability constraints — 2026-08-11
+
+- V28 tạo `task_git_issue_link`, `git_issue_pull_request_link`, `git_issue_commit_link`; mỗi relation
+  unique theo pair, FK dùng `CHAR(36)` convention. Không sửa migration deployed và không drop legacy
+  `pull_request.git_issue_id`/`commit_data.git_issue_id`. Trước deploy chạy read-only
+  `docs/integrations/mysql-traceability-v28-preflight.sql` để xác nhận bốn legacy table có PK
+  `CHAR(36)`, UUID charset/collation đồng nhất, table engine tương thích FK, database defaults mà V28
+  sẽ kế thừa khớp UUID columns, và tên table/constraint V28 chưa va chạm. Source/test status là
+  **CONFIRMED_SOURCE_TEST + REQUIRED_RUNTIME_MYSQL_PREFLIGHT**; chỉ deploy V28 nguyên trạng khi
+  `V28_PREFLIGHT_READY=PASS`, mismatch thì dừng trước Flyway V28 và dùng exact runtime metadata để quyết định.
+- Task–Issue link/unlink phải gọi manager authorization trước mutation, lock Task theo project và fail
+  `TRACEABILITY_PROJECT_MISMATCH` nếu Task/Issue không cùng URL Project. Duplicate POST replay safe;
+  DELETE missing pair vẫn 204 sau khi resource/scope được validate. Không provider write.
+- Issue list tối đa 100/page, deterministic `externalUpdatedAt, issueNumber, id` descending; filter
+  `state`, exposed repository ID, title/number keyword và Student `assignedToMe`. Counters dùng DB
+  count trong project/repository scope, không full-table materialization.
+- Issue/detail/traceability response chỉ trả local UUID và UI-safe snapshot. Cấm raw
+  `githubIssueId`, `nodeId`, author/assignee external ID, installation, token/credential.
+- Task/Issue link collections và timeline tối đa 100. Project timeline fetch bounded per source rồi
+  merge bounded; timestamp null bị loại. Cấm dùng local `createdAt` làm GitHub created time.
+- Current provider không chứng minh PR–Issue/Commit–Issue relation. Không infer từ title/message;
+  normalized tables là seam, auto-sync relation **PARTIAL**. GitHub Issue remote CRUD, notification và
+  Contribution vẫn **NOT_IMPLEMENTED**. DEC-023/CourseService không đổi.

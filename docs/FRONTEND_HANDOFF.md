@@ -1,5 +1,40 @@
 # SAGA Frontend Handoff
 
+## Team detail → GitHub repository navigation
+
+`GET /api/v1/courses/{courseId}/teams/{teamId}/detail` trả additive
+`project.repositories: [{repositoryId,repositoryName}]`. `project` vẫn `null` nếu Team chưa có Project;
+nếu đã có Project nhưng chưa link GitHub thì danh sách rỗng. Một Project có thể có nhiều repository, vì
+vậy FE hiển thị repository selector và không tự pick phần tử đầu làm canonical.
+
+`repositoryId` là số `int64` dùng trực tiếp cho
+`/api/projects/{projectId}/github/repositories/{repositoryId}/branches`,
+`/commits` và filter `repositoryId` của GitHub Issue list. `repositoryName` là `owner/name` an toàn.
+Response lấy từ local DB, không chứa URL/installation/credential và không gọi GitHub provider. Quyền Team
+detail giữ nguyên ADMIN/LECTURER đúng Course; STUDENT không được mở quyền mới.
+
+## Project GitHub Issues / traceability
+
+Màn mới được backend hỗ trợ: `Project > GitHub > Issues`.
+
+- List gọi `GET /api/projects/{projectId}/github/issues` với `state`, `repositoryId`, `keyword`,
+  `assignedToMe`, `page`, `size`. Render counters `open`, `closed`, `assignedToMe`, `unassigned`.
+- Detail gọi `GET /api/projects/{projectId}/github/issues/{localIssueId}`; render metadata local,
+  linked Jira Tasks, linked PRs, linked Commits và timeline. Respect `truncated`; không tự recursive
+  fetch toàn graph.
+- Task detail gọi `GET /api/v1/projects/{projectId}/tasks/{taskId}/traceability` để render
+  Planning → Development tracking → Implementation.
+- Project activity gọi `GET /api/projects/{projectId}/traceability?limit=50`; `limit` tối đa 100.
+- Manager link/unlink bằng POST/DELETE
+  `/api/v1/projects/{projectId}/tasks/{taskId}/github-issues/{localIssueId}`. Gửi cookie và CSRF như
+  mọi unsafe browser mutation; không gửi actor, Bearer hay `Idempotency-Key`.
+- Link/unlink chỉ đổi SAGA local DB; không tự thay đổi Jira/GitHub. Duplicate link là 200 replay;
+  repeated unlink là 204.
+- `author`/`assignee` có thể null khi identity mapping chưa resolve. Không dùng provider ID ẩn để tự
+  ghép người dùng.
+- PR/Commit lists có thể rỗng vì provider authoritative auto-link còn PARTIAL. Không hiển thị
+  `REFERENCE` như “closes/fixes”. GitHub Issue create/edit/close/assign chưa có backend API.
+
 Checklist triển khai FE cho browser session, invitation email và Notification/Firebase. Tài liệu chi tiết: `docs/FRONTEND_API_INTEGRATION.md`.
 
 ## Environment

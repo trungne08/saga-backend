@@ -809,3 +809,23 @@ Không có secret hoặc thông tin đăng nhập thật trong decision log này
 - **Firebase/transactions:** SAGA Bell DB is truth; FCM remains delivery-only through existing durable `notification_delivery` and after-commit processing. Zero FIDs does not suppress Bell persistence. Producer/FCM failure cannot roll back canonical Task/Sprint or change Jira operation `COMPLETED` to failed.
 - **API/security:** no public automatic-send API exists. Existing session, CSRF, authorization, and Idempotency-Key mutation contracts are unchanged. `actionUrl` is null because no canonical internal FE route is confirmed.
 - **Unchanged/TBD:** DEC-023, roster, enrollment, invitation, Cognito, and account lifecycle policy remain unchanged. V25-V27, scheduler execution, Bell display, and real FID delivery/retry on Railway remain **TBD_DEPLOYMENT_SMOKE**.
+## DEC-072 — Traceability Jira Task đến GitHub code là explicit local graph
+
+- **Quyết định:** `Task <-> GitIssue`, `GitIssue <-> PullRequest` và `GitIssue <-> CommitData`
+  dùng normalized many-to-many link tables từ V28. Task–Issue là relation SAGA explicit do Project
+  manager link/unlink; unique pair và service check cấm cross-project. Không canonicalize bằng title,
+  description, Jira-key coincidence, issue number, commit message hoặc AI/NLP.
+- **Authorization:** mutation reuse exact Project Integration Manager rule; read reuse exact Project
+  read rule. Browser `JSESSIONID`; unsafe method cần CSRF; không Bearer, không actor ID từ request và
+  không invent `Idempotency-Key` cho local pair mutation. Duplicate link trả cùng linked state;
+  repeated unlink là 204.
+- **Read source:** local DB là source cho FE. Issue list/detail, Task traceability và bounded Project
+  timeline không gọi provider. Timeline dùng Task/GitIssue/PR external updated timestamp và Commit
+  committed timestamp; null timestamp không được đưa vào chronology, `createdAt` không đại diện
+  remote-created time.
+- **Provider boundary:** current GitHub provider snapshot không có authoritative PR/Commit linked or
+  closing-Issue relation. Normalized seams có type `REFERENCE|CLOSING_REFERENCE|MANUAL`, nhưng sync
+  không tự populate hoặc suy `#42`; trạng thái này là **PARTIAL**. Legacy nullable single FKs được giữ
+  compatibility và không phải truth mới.
+- **Ngoài scope:** không GitHub Issue CRUD/permission change/provider write, notification hay
+  Contribution từ GitIssue. DEC-023, Course roster/invitation, session/CSRF và no-Bearer giữ nguyên.

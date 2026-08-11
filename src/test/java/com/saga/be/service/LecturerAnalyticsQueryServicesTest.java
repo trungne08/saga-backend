@@ -3,12 +3,15 @@ package com.saga.be.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.saga.be.dto.response.LecturerAnalyticsResponses;
 import com.saga.be.entity.CommitData;
+import com.saga.be.entity.GitRepo;
 import com.saga.be.entity.Project;
 import com.saga.be.entity.Sprint;
 import com.saga.be.entity.Student;
@@ -19,10 +22,12 @@ import com.saga.be.entity.enums.TaskStatus;
 import com.saga.be.entity.enums.TaskType;
 import com.saga.be.repository.CommitDataRepository;
 import com.saga.be.repository.DocumentRepository;
+import com.saga.be.repository.GitRepoRepository;
 import com.saga.be.repository.PeerReviewRepository;
 import com.saga.be.repository.SprintRepository;
 import com.saga.be.repository.TaskRepository;
 import com.saga.be.repository.TeamMemberRepository;
+import com.saga.be.integration.provider.GitHubProviderClient;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -44,6 +49,64 @@ class LecturerAnalyticsQueryServicesTest {
         LecturerAnalyticsResponses.TeamDetail response = service.detail(null, f.courseId, f.teamId,
                 PageRequest.of(0, 20));
         assertNull(response.project());
+        verifyNoInteractions(f.repositories);
+    }
+
+    @Test
+    void teamDetailReturnsEmptyRepositoriesWhenProjectHasNoGitHubRepository() {
+        Fixture f = fixture(true);
+        when(f.authorization.requireTeam(any(), any(), any())).thenReturn(f.team);
+        when(f.members.findByTeamId(f.teamId, PageRequest.of(0, 20)))
+                .thenReturn(org.springframework.data.domain.Page.empty(PageRequest.of(0, 20)));
+        when(f.repositories.findByProjectIdAndRepositoryIdIsNotNullOrderByFullNameAscRepositoryIdAsc(
+                f.projectId)).thenReturn(List.of());
+
+        LecturerAnalyticsResponses.TeamDetail response = teamService(f).detail(
+                null, f.courseId, f.teamId, PageRequest.of(0, 20));
+
+        assertTrue(response.project().repositories().isEmpty());
+    }
+
+    @Test
+    void teamDetailReturnsOneDownstreamRepositoryReference() {
+        Fixture f = fixture(true);
+        when(f.authorization.requireTeam(any(), any(), any())).thenReturn(f.team);
+        when(f.members.findByTeamId(f.teamId, PageRequest.of(0, 20)))
+                .thenReturn(org.springframework.data.domain.Page.empty(PageRequest.of(0, 20)));
+        when(f.repositories.findByProjectIdAndRepositoryIdIsNotNullOrderByFullNameAscRepositoryIdAsc(
+                f.projectId)).thenReturn(List.of(repository(101L, "saga/backend")));
+
+        var reference = teamService(f).detail(null, f.courseId, f.teamId, PageRequest.of(0, 20))
+                .project().repositories().get(0);
+
+        assertEquals(101L, reference.repositoryId());
+        assertEquals("saga/backend", reference.repositoryName());
+    }
+
+    @Test
+    void teamDetailReturnsEveryRepositoryWithoutPickingTheFirst() {
+        Fixture f = fixture(true);
+        when(f.authorization.requireTeam(any(), any(), any())).thenReturn(f.team);
+        when(f.members.findByTeamId(f.teamId, PageRequest.of(0, 20)))
+                .thenReturn(org.springframework.data.domain.Page.empty(PageRequest.of(0, 20)));
+        when(f.repositories.findByProjectIdAndRepositoryIdIsNotNullOrderByFullNameAscRepositoryIdAsc(
+                f.projectId)).thenReturn(List.of(
+                        repository(101L, "saga/backend"),
+                        repository(202L, "saga/frontend")
+                ));
+
+        var references = teamService(f).detail(null, f.courseId, f.teamId, PageRequest.of(0, 20))
+                .project().repositories();
+
+        assertEquals(List.of(101L, 202L), references.stream()
+                .map(LecturerAnalyticsResponses.TeamGitHubRepositoryReference::repositoryId).toList());
+        assertEquals(2, references.size());
+    }
+
+    @Test
+    void teamDetailHasNoGitHubProviderDependency() {
+        assertTrue(java.util.Arrays.stream(LecturerTeamAnalyticsQueryService.class.getDeclaredFields())
+                .noneMatch(field -> GitHubProviderClient.class.isAssignableFrom(field.getType())));
     }
 
     @Test
@@ -144,7 +207,7 @@ class LecturerAnalyticsQueryServicesTest {
     }
 
     private LecturerTeamAnalyticsQueryService teamService(Fixture f) {
-        return new LecturerTeamAnalyticsQueryService(f.authorization, f.members, f.tasks, f.commits,
+        return new LecturerTeamAnalyticsQueryService(f.authorization, f.members, f.repositories, f.tasks, f.commits,
                 f.sprints, f.peers);
     }
 
@@ -156,14 +219,24 @@ class LecturerAnalyticsQueryServicesTest {
         Team team = id(new Team(), teamId);
         if (projectPresent) {
             Project project = id(new Project(), projectId);
+            project.setName("Project");
             team.setProject(project);
         }
         Student student = id(new Student(), studentId);
         TeamMember membership = TeamMember.builder().team(team).student(student).build();
         return new Fixture(courseId, teamId, studentId, projectId, team, membership,
                 mock(LecturerAnalyticsAuthorizationService.class), mock(TeamMemberRepository.class),
+                mock(GitRepoRepository.class),
                 mock(TaskRepository.class), mock(CommitDataRepository.class), mock(DocumentRepository.class),
                 mock(SprintRepository.class), mock(PeerReviewRepository.class));
+    }
+
+    private GitRepo repository(long repositoryId, String fullName) {
+        return GitRepo.builder()
+                .repositoryId(repositoryId)
+                .fullName(fullName)
+                .name(fullName.substring(fullName.indexOf('/') + 1))
+                .build();
     }
 
     private <T> T id(T entity, UUID id) {
@@ -173,6 +246,7 @@ class LecturerAnalyticsQueryServicesTest {
 
     private record Fixture(UUID courseId, UUID teamId, UUID studentId, UUID projectId, Team team,
                            TeamMember membership, LecturerAnalyticsAuthorizationService authorization,
-                           TeamMemberRepository members, TaskRepository tasks, CommitDataRepository commits,
+                           TeamMemberRepository members, GitRepoRepository repositories,
+                           TaskRepository tasks, CommitDataRepository commits,
                            DocumentRepository documents, SprintRepository sprints, PeerReviewRepository peers) { }
 }

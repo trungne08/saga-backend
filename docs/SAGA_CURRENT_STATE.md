@@ -622,3 +622,31 @@ BASE HEAD của snapshot cũ: `0bc30be`. HEAD audit hiện hành là `4f3dee9`; 
 - **DELIVERY/RECOVERY:** V27 recipient/event uniqueness prevents duplicate Bell rows; each active FID receives its own durable delivery row. Producer or FCM failure cannot roll back the already-completed Jira write. `actionUrl` remains null because no canonical internal FE Task/Sprint route was confirmed.
 - **VERIFICATION:** targeted Notification/Firebase/Broadcast/Jira recovery/Team authorization/Migration/CSRF regression ran **26 suites / 289 tests / 1 failure / 0 errors / 0 skipped**. Full `mvnw clean test` ran **129 suites / 795 tests / 1 failure / 0 errors / 0 skipped**. The sole failure is the unchanged `CourseRosterAndLecturerOptionsIntegrationTest#courseRosterHasTeamContractIsExplicitAndDoesNotTreatOutboxAsEnrollment`, classified **PREEXISTING_BASELINE_SOURCE_CONFLICT_WITH_DEC_023**.
 - **TBD_DEPLOYMENT_SMOKE:** Flyway V25-V27, scheduled deadline execution, Firebase FID delivery/retry, and Bell display require Railway/browser runtime verification.
+## GitHub Issue traceability milestone — 2026-08-11
+
+- **CONFIRMED:** FE có local GitHub Issue list/detail, Task-centered traceability và bounded Project
+  timeline. Task–Issue là explicit many-to-many local link, same-project only; duplicate link
+  idempotent, missing unlink idempotent, manager authorization/session/CSRF reuse exact source.
+- **CONFIRMED:** V28 là migration mới nhất và tạo ba normalized link tables; legacy single Issue FK
+  trên PullRequest/CommitData không bị xóa hoặc dùng làm nguồn truth song song.
+- **REQUIRED_RUNTIME_MYSQL_PREFLIGHT:** V28 source/test đã xác nhận shape nhưng production legacy V1
+  không nằm đầy đủ trong repository. Trước first deploy phải chạy read-only
+  `docs/integrations/mysql-traceability-v28-preflight.sql`; chỉ tiếp tục khi UUID type/charset/collation,
+  FK engine, database defaults và collision summary đều cho `V28_PREFLIGHT_READY=PASS`. Trạng thái V28 là
+  **CONFIRMED_SOURCE_TEST + REQUIRED_RUNTIME_MYSQL_PREFLIGHT**, không phải production proof.
+- **PARTIAL:** Issue–PR và Issue–Commit normalized read model đã có, nhưng current GitHub provider
+  snapshot chưa chứng minh linked/closing relation nên reconciliation chưa populate chúng.
+- **NOT_IMPLEMENTED:** GitHub remote Issue CRUD, provider permission change, lifecycle notification,
+  hoặc GitIssue contribution/analytics. GET traceability không gọi Jira/GitHub realtime.
+
+## Team detail GitHub repository references — 2026-08-11
+
+- **CONFIRMED:** `GET /api/v1/courses/{courseId}/teams/{teamId}/detail` giữ response hiện hữu và thêm
+  `project.repositories[]` gồm GitHub provider `repositoryId` kiểu `Long` cùng `repositoryName` an toàn.
+  Project–GitRepo là one-to-many; endpoint trả mọi repository có provider ID theo `fullName`, rồi
+  `repositoryId`, không pick-first. Team chưa có Project trả `project: null`; Project chưa có repository
+  trả `repositories: []`.
+- **CONFIRMED:** repository ID này dùng trực tiếp cho GitHub branches/commits path và Issue repository
+  filter hiện hữu. Team detail chỉ query local DB, không gọi provider và không expose URL, installation,
+  token hoặc credential. Authorization ADMIN/LECTURER đúng Course, STUDENT 403, session và GET/CSRF
+  semantics giữ nguyên. Đây là additive response field nên không tạo DEC mới.

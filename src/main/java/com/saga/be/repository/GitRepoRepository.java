@@ -17,6 +17,10 @@ import org.springframework.stereotype.Repository;
 public interface GitRepoRepository extends JpaRepository<GitRepo, UUID> {
     List<GitRepo> findByProjectIdOrderByFullName(UUID projectId);
 
+    List<GitRepo> findByProjectIdAndRepositoryIdIsNotNullOrderByFullNameAscRepositoryIdAsc(
+            UUID projectId
+    );
+
     Optional<GitRepo> findByProjectIdAndRepositoryId(
             UUID projectId,
             Long repositoryId

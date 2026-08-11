@@ -9,10 +9,12 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+import jakarta.persistence.LockModeType;
 
 @Repository
 public interface TaskRepository extends JpaRepository<Task, UUID>, JpaSpecificationExecutor<Task> {
@@ -23,6 +25,14 @@ public interface TaskRepository extends JpaRepository<Task, UUID>, JpaSpecificat
 
     @EntityGraph(attributePaths = {"sprint", "assignee", "reporter"})
     Optional<Task> findByIdAndProjectId(UUID id, UUID projectId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @EntityGraph(attributePaths = {"project"})
+    @Query("select task from Task task where task.id = :id and task.project.id = :projectId")
+    Optional<Task> findForTraceabilityLinkByIdAndProjectId(
+            @Param("id") UUID id,
+            @Param("projectId") UUID projectId
+    );
 
     @Query("select coalesce(sum(case when task.storyPoint is null then 1 else task.storyPoint end), 0) "
             + "from Task task where task.project.id = :projectId and task.sprint.id = :sprintId "
@@ -54,4 +64,10 @@ public interface TaskRepository extends JpaRepository<Task, UUID>, JpaSpecificat
 
     @EntityGraph(attributePaths = {"project", "sprint", "assignee"})
     List<Task> findByProjectCourseIdAndDeletedAtIsNullOrderByCreatedAtAscIdAsc(UUID courseId);
+
+    @EntityGraph(attributePaths = {"project", "assignee"})
+    List<Task> findByProjectIdAndDeletedAtIsNullAndExternalUpdatedAtIsNotNullOrderByExternalUpdatedAtDescIdDesc(
+            UUID projectId,
+            Pageable pageable
+    );
 }

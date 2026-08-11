@@ -8,16 +8,46 @@ import java.util.Map;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
 
-/** DTO chỉ đọc cho Lecturer Analytics; không lộ credential hoặc provider identifier. */
+/** DTO chỉ đọc cho Lecturer Analytics; không lộ credential hoặc provider identity nhạy cảm. */
 public final class LecturerAnalyticsResponses {
 
     private LecturerAnalyticsResponses() {
     }
 
-    public record TeamDetail(UUID courseId, UUID teamId, String teamName, ProjectSummary project,
-                             Page<TeamMemberResponse> members) { }
+    public record TeamDetail(
+            UUID courseId,
+            UUID teamId,
+            String teamName,
+            @io.swagger.v3.oas.annotations.media.Schema(
+                    description = "Project của Team; null khi Team chưa có Project."
+            )
+            ProjectSummary project,
+            Page<TeamMemberResponse> members
+    ) { }
 
-    public record ProjectSummary(UUID id, String name) { }
+    public record ProjectSummary(
+            UUID id,
+            String name,
+            @io.swagger.v3.oas.annotations.media.Schema(
+                    description = "Các GitHub repository local có provider repository ID dùng trực tiếp cho GitHub read API."
+            )
+            List<TeamGitHubRepositoryReference> repositories
+    ) {
+        public ProjectSummary {
+            repositories = repositories == null ? List.of() : List.copyOf(repositories);
+        }
+    }
+
+    public record TeamGitHubRepositoryReference(
+            @io.swagger.v3.oas.annotations.media.Schema(
+                    description = "GitHub repository ID kiểu số dùng làm path/query parameter repositoryId."
+            )
+            long repositoryId,
+            @io.swagger.v3.oas.annotations.media.Schema(
+                    description = "Tên repository an toàn dạng owner/name khi đã được persist."
+            )
+            String repositoryName
+    ) { }
 
     public record StudentProgress(UUID courseId, UUID studentId, UUID teamId, UUID projectId,
                                   long totalTasks, long completedTasks, double overallCompletionRate,

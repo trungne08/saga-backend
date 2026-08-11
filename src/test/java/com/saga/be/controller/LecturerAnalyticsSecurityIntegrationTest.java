@@ -72,13 +72,30 @@ class LecturerAnalyticsSecurityIntegrationTest {
         UUID courseId = UUID.randomUUID();
         UUID teamId = UUID.randomUUID();
         when(teamAnalytics.detail(any(), any(), any(), any())).thenReturn(
-                new LecturerAnalyticsResponses.TeamDetail(courseId, teamId, "Team", null, Page.empty()));
+                new LecturerAnalyticsResponses.TeamDetail(
+                        courseId,
+                        teamId,
+                        "Team",
+                        new LecturerAnalyticsResponses.ProjectSummary(
+                                UUID.randomUUID(),
+                                "Project",
+                                List.of(new LecturerAnalyticsResponses.TeamGitHubRepositoryReference(
+                                        101L,
+                                        "saga/backend"
+                                ))
+                        ),
+                        Page.empty()
+                ));
         mockMvc.perform(get("/api/v1/courses/{courseId}/teams/{teamId}/detail", courseId, teamId)
                         .with(authentication(auth(ApplicationRole.ADMIN, UUID.randomUUID()))))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.project.repositories[0].repositoryId").value(101))
+                .andExpect(jsonPath("$.project.repositories[0].repositoryName").value("saga/backend"))
                 .andExpect(jsonPath("$.cognitoSub").doesNotExist())
                 .andExpect(jsonPath("$.token").doesNotExist())
                 .andExpect(jsonPath("$.credential").doesNotExist())
+                .andExpect(jsonPath("$.project.repositories[0].url").doesNotExist())
+                .andExpect(jsonPath("$.project.repositories[0].installationId").doesNotExist())
                 .andExpect(jsonPath("$.version").doesNotExist());
     }
 

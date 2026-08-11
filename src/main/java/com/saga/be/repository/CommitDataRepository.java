@@ -52,4 +52,10 @@ public interface CommitDataRepository extends JpaRepository<CommitData, UUID> {
             @Param("startAt") LocalDateTime startAt,
             @Param("endExclusive") LocalDateTime endExclusive
     );
+
+    @org.springframework.data.jpa.repository.EntityGraph(attributePaths = {"repo", "author"})
+    List<CommitData> findByRepoProjectIdAndTimestampIsNotNullOrderByTimestampDescIdDesc(
+            UUID projectId,
+            Pageable pageable
+    );
 }

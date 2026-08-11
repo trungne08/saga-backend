@@ -94,7 +94,7 @@ class GeneratedOpenApiDocumentationIntegrationTest {
             }
         }
 
-        assertEquals(125, operationCount, "Cleanup metadata không được làm mất hoặc thêm API operation");
+        assertEquals(131, operationCount, "Traceability milestone phải thêm đúng sáu API operation");
         System.out.println("Generated OpenAPI operation count: " + operationCount);
         assertEquals(usedTags, documentedTags, "Global tags phải đúng bằng tập tag thực sự có operation");
         assertEquals(documentedTags.size(), root.path("tags").size(), "Global tags không được trùng tên");
@@ -105,6 +105,30 @@ class GeneratedOpenApiDocumentationIntegrationTest {
                 assertFalse("http".equalsIgnoreCase(entry.getValue().path("type").asText())
                                 && "bearer".equalsIgnoreCase(entry.getValue().path("scheme").asText()),
                         () -> "Không được sinh Bearer security scheme: " + entry.getKey()));
+
+        assertTrue(root.at("/paths/~1api~1projects~1{projectId}~1github~1issues/get").isObject());
+        assertTrue(root.at("/paths/~1api~1projects~1{projectId}~1github~1issues~1{issueId}/get").isObject());
+        assertTrue(root.at("/paths/~1api~1v1~1projects~1{projectId}~1tasks~1{taskId}~1github-issues~1{issueId}/post").isObject());
+        assertTrue(root.at("/paths/~1api~1v1~1projects~1{projectId}~1tasks~1{taskId}~1github-issues~1{issueId}/delete").isObject());
+        assertTrue(root.at("/paths/~1api~1v1~1projects~1{projectId}~1tasks~1{taskId}~1traceability/get").isObject());
+        assertTrue(root.at("/paths/~1api~1projects~1{projectId}~1traceability/get").isObject());
+        JsonNode issueProperties = root.at(
+                "/components/schemas/GitHubIssueSummaryResponse/properties"
+        );
+        assertFalse(issueProperties.has("githubIssueId"));
+        assertFalse(issueProperties.has("nodeId"));
+        assertFalse(issueProperties.has("authorExternalId"));
+        assertFalse(issueProperties.has("assigneeExternalId"));
+        JsonNode teamProjectProperties = root.at(
+                "/components/schemas/ProjectSummary/properties"
+        );
+        assertTrue(teamProjectProperties.has("repositories"));
+        JsonNode repositoryReferenceProperties = root.at(
+                "/components/schemas/TeamGitHubRepositoryReference/properties"
+        );
+        assertEquals("integer", repositoryReferenceProperties.path("repositoryId").path("type").asText());
+        assertEquals("int64", repositoryReferenceProperties.path("repositoryId").path("format").asText());
+        assertTrue(repositoryReferenceProperties.has("repositoryName"));
 
         Map<String, String> notificationEndpoints = Map.of(
                 "/api/me/notifications", "get",

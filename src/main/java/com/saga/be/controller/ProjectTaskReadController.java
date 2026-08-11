@@ -8,10 +8,13 @@ import com.saga.be.dto.request.JiraTaskAssigneeRequest;
 import com.saga.be.dto.request.JiraTaskSprintRequest;
 import com.saga.be.dto.request.JiraTaskEstimationRequest;
 import com.saga.be.dto.response.JiraTaskTransitionResponse;
+import com.saga.be.dto.response.TaskIssueLinkResponse;
+import com.saga.be.dto.response.TaskTraceabilityResponse;
 import com.saga.be.entity.enums.TaskStatus;
 import com.saga.be.security.SagaPrincipal;
 import com.saga.be.service.ProjectTaskReadService;
 import com.saga.be.service.JiraTaskWriteService;
+import com.saga.be.service.GitHubTraceabilityService;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -40,6 +43,7 @@ public class ProjectTaskReadController {
 
     private final ProjectTaskReadService taskReadService;
     private final JiraTaskWriteService taskWriteService;
+    private final GitHubTraceabilityService traceabilityService;
 
     @PostMapping
     public ResponseEntity<TaskReadResponse> createTask(
@@ -130,5 +134,47 @@ public class ProjectTaskReadController {
             @PathVariable UUID taskId
     ) {
         return ResponseEntity.ok(taskReadService.getTask(principal, projectId, taskId));
+    }
+
+    @PostMapping("/{taskId}/github-issues/{issueId}")
+    @io.swagger.v3.oas.annotations.Operation(
+            summary = "Liên kết Jira Task với GitHub Issue",
+            description = "Tạo quan hệ truy vết chỉ trong SAGA; không sửa Jira hoặc GitHub."
+    )
+    public TaskIssueLinkResponse linkGitHubIssue(
+            @AuthenticationPrincipal SagaPrincipal principal,
+            @PathVariable UUID projectId,
+            @PathVariable UUID taskId,
+            @PathVariable UUID issueId
+    ) {
+        return traceabilityService.link(principal, projectId, taskId, issueId);
+    }
+
+    @DeleteMapping("/{taskId}/github-issues/{issueId}")
+    @io.swagger.v3.oas.annotations.Operation(
+            summary = "Gỡ liên kết Jira Task khỏi GitHub Issue",
+            description = "Xóa quan hệ truy vết local; repeated unlink vẫn trả 204."
+    )
+    public ResponseEntity<Void> unlinkGitHubIssue(
+            @AuthenticationPrincipal SagaPrincipal principal,
+            @PathVariable UUID projectId,
+            @PathVariable UUID taskId,
+            @PathVariable UUID issueId
+    ) {
+        traceabilityService.unlink(principal, projectId, taskId, issueId);
+        return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/{taskId}/traceability")
+    @io.swagger.v3.oas.annotations.Operation(
+            summary = "Xem chuỗi truy vết Task đến code",
+            description = "Đọc snapshot local Task → GitHub Issue → Pull Request/Commit, không gọi provider."
+    )
+    public TaskTraceabilityResponse traceability(
+            @AuthenticationPrincipal SagaPrincipal principal,
+            @PathVariable UUID projectId,
+            @PathVariable UUID taskId
+    ) {
+        return traceabilityService.taskTraceability(principal, projectId, taskId);
     }
 }

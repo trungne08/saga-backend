@@ -240,3 +240,16 @@ Quy ước: `OAS` là response được khai báo trực tiếp trong OpenAPI; `
 |---|---|---|---|---|
 | GET | `/api/admin/users` | 200 Page | 400 pagination sai, 401 anonymous, 403 non-ADMIN | Chỉ `STUDENT`/`LECTURER`; Admin bị loại trước SQL pagination/count. `role=ADMIN` trả Page rỗng. |
 | GET | `/api/admin/audit-logs` | 200 Page | 400 pagination sai, 401 anonymous, 403 non-ADMIN | `timestamp` ISO-8601 UTC có `Z`; newest-first; không actor/IP/raw payload. |
+## GitHub Issue traceability response semantics — 2026-08-11
+
+| API/capability | Success | Deterministic error/boundary |
+|---|---|---|
+| Issue list | `200 GitHubIssueListResponse` | invalid page `400 GITHUB_ISSUE_PAGE_INVALID`; wrong repo `404 GITHUB_REPOSITORY_NOT_FOUND`; no provider call |
+| Issue detail | `200 GitHubIssueDetailResponse` | wrong project/missing Issue `404 GITHUB_ISSUE_NOT_FOUND` |
+| Link Task–Issue | `200 TaskIssueLinkResponse(linked=true)`; duplicate same pair replays | missing Task/Issue `404`; cross-project `409 TRACEABILITY_PROJECT_MISMATCH`; unauthorized `403`; CSRF required |
+| Unlink Task–Issue | `204`, including repeated missing pair | resource/project validation and authorization still apply; CSRF required |
+| Task traceability | `200 TaskTraceabilityResponse` | missing Task `404 TASK_NOT_FOUND`; collections/timeline bounded 100 |
+| Project timeline | `200 ProjectTraceabilityResponse` | `limit` outside 1..100 gives `400 TRACEABILITY_LIMIT_INVALID` |
+
+Responses never contain GitHub Issue provider ID/node ID/external identity/installation/credential.
+PR/Commit links only reflect normalized rows; current provider auto-link remains **PARTIAL**.

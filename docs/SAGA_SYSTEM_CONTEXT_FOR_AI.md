@@ -870,3 +870,25 @@ và reliability regression 20 tests đều pass.
 - Reminder scans are bounded and configured by `NOTIFICATION_DEADLINE_PROCESSING_ENABLED` / `NOTIFICATION_DEADLINE_SCAN_DELAY_MS`; injected `Clock` plus `JIRA_TIME_ZONE` supplies calendar time. V27 uniqueness combines recipient identity with task/due-revision/type semantic keys.
 - Bell persistence remains valid with zero FIDs; multiple active FIDs create multiple delivery rows for one Bell row. Existing `AFTER_COMMIT` Firebase processing keeps provider work outside mutation/reminder persistence transactions. `actionUrl` remains null pending a confirmed internal FE route.
 - Verification checkpoint: targeted scope is **26 suites / 289 tests / 1 failure / 0 errors / 0 skipped** and full clean is **129 suites / 795 tests / 1 failure / 0 errors / 0 skipped**. The only failure is the unchanged Course roster/DEC-023 source conflict, not a Notification/Jira/deadline regression.
+## GitHub Issue + Jira Task + PR/Commit traceability — 2026-08-11
+
+- **CONFIRMED:** V28 thêm normalized many-to-many `task_git_issue_link`,
+  `git_issue_pull_request_link`, `git_issue_commit_link`, mỗi bảng có unique pair và FK tới
+  các snapshot local. `Task <-> GitIssue` là explicit SAGA relation, bắt buộc cùng Project;
+  không suy từ title, description, Jira key, issue number, commit message hoặc AI/NLP.
+- **CONFIRMED:** Task–Issue link/unlink chỉ mutate local DB, reuse
+  `ProjectIntegrationAuthorizationService#requireProjectManager`: ADMIN theo override hiện hữu,
+  Lecturer là instructor của Course, Student phải là Team LEADER. POST/DELETE dùng browser session
+  và CSRF; không nhận actor ID, không yêu cầu `Idempotency-Key`, duplicate link replay 200 và
+  repeated unlink 204.
+- **CONFIRMED:** GitHub Issue list/detail và Task/Project traceability GET reuse Project read
+  authorization, chỉ đọc local DB, không gọi provider. List có bounded pagination, state/repository/
+  keyword/assigned-to-me filter và counters; response không trả GitHub issue ID, node ID, external
+  identity ID, installation hay credential. Timeline chỉ dùng canonical external timestamps có nghĩa,
+  tối đa 100 item và không dùng `BaseEntity.createdAt` như remote-created time.
+- **PARTIAL:** provider snapshots hiện không chứa authoritative PR–Issue hay Commit–Issue relation.
+  V28 giữ normalized seams với `REFERENCE|CLOSING_REFERENCE|MANUAL`, nhưng sync không auto-populate
+  và không infer title/message/`#number`. Legacy nullable `pull_request.git_issue_id` và
+  `commit_data.git_issue_id` được giữ compatibility, không phải traceability truth mới.
+- **NOT_IMPLEMENTED:** GitHub Issue remote create/edit/close/reopen/assign/label/milestone,
+  lifecycle notification và Contribution từ GitIssue. DEC-023 và `CourseService` không đổi.

@@ -35,6 +35,10 @@ public class LecturerAnalyticsController {
     private final CourseEarlyWarningQueryService earlyWarningAnalytics;
 
     @GetMapping("/teams/{teamId}/detail")
+    @io.swagger.v3.oas.annotations.Operation(
+            summary = "Xem chi tiết nhóm và Project của Course",
+            description = "Trả thành viên, Project nullable và danh sách GitHub repository local theo thứ tự ổn định; không gọi GitHub provider."
+    )
     public ResponseEntity<LecturerAnalyticsResponses.TeamDetail> teamDetail(
             @AuthenticationPrincipal SagaPrincipal principal, @PathVariable UUID courseId,
             @PathVariable UUID teamId, @RequestParam(defaultValue = "0") int page,

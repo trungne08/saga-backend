@@ -2,7 +2,10 @@ package com.saga.be.repository;
 
 import com.saga.be.entity.PullRequest;
 import java.util.Optional;
+import java.util.List;
 import java.util.UUID;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
@@ -17,5 +20,11 @@ public interface PullRequestRepository extends JpaRepository<PullRequest, UUID> 
     Optional<PullRequest> findByRepoIdAndPullNumber(
             UUID repoId,
             Integer pullNumber
+    );
+
+    @EntityGraph(attributePaths = {"repo", "author"})
+    List<PullRequest> findByRepoProjectIdAndExternalUpdatedAtIsNotNullOrderByExternalUpdatedAtDescIdDesc(
+            UUID projectId,
+            Pageable pageable
     );
 }
