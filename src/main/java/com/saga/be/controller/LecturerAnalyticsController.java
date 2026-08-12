@@ -26,7 +26,6 @@ import org.springframework.web.server.ResponseStatusException;
 @io.swagger.v3.oas.annotations.tags.Tag(name = "Đánh giá", description = "Phân tích tiến độ và hoạt động dành cho giảng viên.")
 @RequestMapping("/api/v1/courses/{courseId}")
 @RequiredArgsConstructor
-@PreAuthorize("hasAnyRole('ADMIN', 'LECTURER')")
 public class LecturerAnalyticsController {
 
     private final LecturerTeamAnalyticsQueryService teamAnalytics;
@@ -35,6 +34,7 @@ public class LecturerAnalyticsController {
     private final CourseEarlyWarningQueryService earlyWarningAnalytics;
 
     @GetMapping("/teams/{teamId}/detail")
+    @PreAuthorize("hasAnyRole('ADMIN', 'LECTURER')")
     @io.swagger.v3.oas.annotations.Operation(
             summary = "Xem chi tiết nhóm và Project của Course",
             description = "Trả thành viên, Project nullable và danh sách GitHub repository local theo thứ tự ổn định; không gọi GitHub provider."
@@ -47,6 +47,7 @@ public class LecturerAnalyticsController {
     }
 
     @GetMapping("/teams/{teamId}/overview")
+    @PreAuthorize("hasAnyRole('ADMIN', 'LECTURER')")
     @io.swagger.v3.oas.annotations.Operation(
             summary = "Xem tổng quan hoạt động của nhóm",
             description = "Trả chuỗi hoạt động theo ngày và tổng hợp theo loại activity; không gọi provider ngoài."
@@ -67,6 +68,7 @@ public class LecturerAnalyticsController {
     }
 
     @GetMapping("/students/{studentId}/activities")
+    @PreAuthorize("hasAnyRole('ADMIN', 'LECTURER', 'STUDENT')")
     public ResponseEntity<LecturerAnalyticsResponses.StudentActivities> activities(
             @AuthenticationPrincipal SagaPrincipal principal, @PathVariable UUID courseId,
             @PathVariable UUID studentId, @RequestParam(defaultValue = "0") int page,
@@ -87,13 +89,7 @@ public class LecturerAnalyticsController {
         return ResponseEntity.ok(earlyWarningAnalytics.get(principal, courseId));
     }
 
-    @GetMapping("/teams/{teamId}/interactions")
-    public ResponseEntity<LecturerAnalyticsResponses.InteractionGraph> interactions(
-            @AuthenticationPrincipal SagaPrincipal principal, @PathVariable UUID courseId,
-            @PathVariable UUID teamId) {
-        return ResponseEntity.ok(teamAnalytics.interactions(principal, courseId, teamId));
-    }
-
+    @PreAuthorize("hasAnyRole('ADMIN', 'LECTURER', 'STUDENT')")
     @GetMapping("/teams/{teamId}/students/{studentId}/interactions")
     @io.swagger.v3.oas.annotations.Operation(
             summary = "Xem mạng tương tác của một sinh viên trong nhóm",
@@ -105,6 +101,19 @@ public class LecturerAnalyticsController {
         return ResponseEntity.ok(teamAnalytics.studentInteractions(principal, courseId, teamId, studentId));
     }
 
+    @GetMapping("/teams/{teamId}/sprints/{sprintId}/burndown")
+    @PreAuthorize("hasAnyRole('ADMIN', 'LECTURER', 'STUDENT')")
+    @io.swagger.v3.oas.annotations.Operation(
+            summary = "Xem biểu đồ burndown của sprint",
+            description = "Trả đường ideal và actual remaining theo từng ngày của sprint trong team."
+    )
+    public ResponseEntity<LecturerAnalyticsResponses.BurndownChart> burndown(
+            @AuthenticationPrincipal SagaPrincipal principal, @PathVariable UUID courseId,
+            @PathVariable UUID teamId, @PathVariable UUID sprintId) {
+        return ResponseEntity.ok(teamAnalytics.burndown(principal, courseId, teamId, sprintId));
+    }
+
+    @PreAuthorize("hasAnyRole('ADMIN', 'LECTURER', 'STUDENT')")
     @GetMapping("/teams/{teamId}/heatmap")
     public ResponseEntity<LecturerAnalyticsResponses.ActivityHeatmap> heatmap(
             @AuthenticationPrincipal SagaPrincipal principal, @PathVariable UUID courseId,

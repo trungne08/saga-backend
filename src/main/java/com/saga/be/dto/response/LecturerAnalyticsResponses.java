@@ -92,6 +92,12 @@ public final class LecturerAnalyticsResponses {
     public record ActivityOverview(UUID courseId, UUID teamId, LocalDate startDate, LocalDate endDate,
                                    List<OverviewDay> days, ActivityTotals totals) { }
 
+    public record BurndownChart(UUID courseId, UUID teamId, UUID sprintId, String sprintName,
+                                LocalDate startDate, LocalDate endDate, long totalScope,
+                                List<BurndownPoint> points) { }
+
+    public record BurndownPoint(LocalDate date, long idealRemaining, long actualRemaining, long doneCount) { }
+
     public record HeatmapStudentRow(
             UUID studentId,
             String studentCode,

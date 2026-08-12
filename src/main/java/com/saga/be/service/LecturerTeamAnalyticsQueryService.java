@@ -306,6 +306,55 @@ public class LecturerTeamAnalyticsQueryService {
         return new LecturerAnalyticsResponses.SprintVelocity(courseId, teamId, List.copyOf(rows));
     }
 
+    @Transactional(readOnly = true)
+    public LecturerAnalyticsResponses.BurndownChart burndown(SagaPrincipal principal, UUID courseId,
+            UUID teamId, UUID sprintId) {
+        Team team = authorization.requireTeam(principal, courseId, teamId);
+        if (team.getProject() == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Team chưa có Project");
+        }
+        Sprint sprint = sprintRepository.findByIdAndBoardProjectIdAndDeletedAtIsNull(
+                sprintId, team.getProject().getId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy Sprint"));
+        if (sprint.getStartDate() == null || sprint.getEndDate() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Sprint thiếu startDate hoặc endDate");
+        }
+        LocalDate startDate = sprint.getStartDate().toLocalDate();
+        LocalDate endDate = sprint.getEndDate().toLocalDate();
+        if (endDate.isBefore(startDate)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Sprint endDate không được trước startDate");
+        }
+        List<Task> tasks = taskRepository.findByProjectId(team.getProject().getId()).stream()
+                .filter(task -> task != null
+                        && task.getDeletedAt() == null
+                        && task.getSprint() != null
+                        && sprintId.equals(task.getSprint().getId()))
+                .toList();
+        List<LecturerAnalyticsResponses.BurndownPoint> points = new ArrayList<>();
+        long totalScope = tasks.size();
+        for (LocalDate day = startDate; !day.isAfter(endDate); day = day.plusDays(1)) {
+            LocalDateTime endExclusive = day.plusDays(1).atStartOfDay();
+            long actualRemaining = tasks.stream().filter(task -> isOpenAt(task, endExclusive)).count();
+            long doneCount = tasks.stream().filter(task -> isDoneBy(task, endExclusive)).count();
+            points.add(new LecturerAnalyticsResponses.BurndownPoint(
+                    day,
+                    idealRemaining(totalScope, startDate, endDate, day),
+                    actualRemaining,
+                    doneCount
+            ));
+        }
+        return new LecturerAnalyticsResponses.BurndownChart(
+                courseId,
+                teamId,
+                sprintId,
+                sprint.getName(),
+                startDate,
+                endDate,
+                totalScope,
+                List.copyOf(points)
+        );
+    }
+
     private LecturerAnalyticsResponses.HeatmapStudentRow toRow(UUID studentId, StudentHeatmapAccumulator accumulator,
             LocalDate startDate, LocalDate endDate) {
         List<LecturerAnalyticsResponses.HeatmapCell> cells = new ArrayList<>();
@@ -361,6 +410,40 @@ public class LecturerTeamAnalyticsQueryService {
             return sqlDate.toLocalDate();
         }
         throw new IllegalArgumentException("Không thể chuyển giá trị ngày: " + value);
+    }
+
+    private boolean isOpenAt(Task task, LocalDateTime endExclusive) {
+        LocalDateTime createdAt = task.getCreatedAt();
+        if (createdAt != null && !createdAt.isBefore(endExclusive)) {
+            return false;
+        }
+        LocalDateTime completedAt = completedAt(task);
+        return completedAt == null || !completedAt.isBefore(endExclusive);
+    }
+
+    private boolean isDoneBy(Task task, LocalDateTime endExclusive) {
+        LocalDateTime completedAt = completedAt(task);
+        return completedAt != null && completedAt.isBefore(endExclusive);
+    }
+
+    private LocalDateTime completedAt(Task task) {
+        if (task.getResolvedAt() != null) {
+            return task.getResolvedAt();
+        }
+        if (task.getStatus() == TaskStatus.DONE) {
+            return task.getUpdatedAt() != null ? task.getUpdatedAt() : task.getCreatedAt();
+        }
+        return null;
+    }
+
+    private long idealRemaining(long totalScope, LocalDate startDate, LocalDate endDate, LocalDate day) {
+        long totalDays = java.time.temporal.ChronoUnit.DAYS.between(startDate, endDate) + 1;
+        if (totalDays <= 1) {
+            return 0L;
+        }
+        long dayIndex = java.time.temporal.ChronoUnit.DAYS.between(startDate, day);
+        double remaining = totalScope * (double) (totalDays - 1 - dayIndex) / (double) (totalDays - 1);
+        return Math.max(0L, Math.round(remaining));
     }
 
     private List<Comment> loadProjectComments(UUID projectId) {

@@ -291,6 +291,40 @@ class LecturerAnalyticsQueryServicesTest {
     }
 
     @Test
+    void burndownUsesCreatedAndResolvedDatesToTrackRemainingWork() {
+        Fixture f = fixture(true);
+        UUID sprintId = UUID.randomUUID();
+        Sprint sprint = id(new Sprint(), sprintId);
+        sprint.setStartDate(LocalDateTime.of(2026, 8, 1, 0, 0));
+        sprint.setEndDate(LocalDateTime.of(2026, 8, 3, 23, 59));
+        Task doneTask = Task.builder().sprint(sprint).status(TaskStatus.DONE).build();
+        ReflectionTestUtils.setField(doneTask, "createdAt", LocalDateTime.of(2026, 8, 1, 8, 0));
+        ReflectionTestUtils.setField(doneTask, "resolvedAt", LocalDateTime.of(2026, 8, 2, 10, 0));
+        Task openTask = Task.builder().sprint(sprint).status(TaskStatus.IN_PROGRESS).build();
+        ReflectionTestUtils.setField(openTask, "createdAt", LocalDateTime.of(2026, 8, 2, 11, 0));
+
+        when(f.authorization.requireTeam(any(), any(), any())).thenReturn(f.team);
+        when(f.sprints.findByIdAndBoardProjectIdAndDeletedAtIsNull(sprintId, f.projectId))
+                .thenReturn(java.util.Optional.of(sprint));
+        when(f.tasks.findByProjectId(f.projectId)).thenReturn(List.of(doneTask, openTask));
+
+        LecturerAnalyticsResponses.BurndownChart chart = teamService(f)
+                .burndown(null, f.courseId, f.teamId, sprintId);
+
+        assertEquals(2, chart.totalScope());
+        assertEquals(3, chart.points().size());
+        assertEquals(2, chart.points().get(0).idealRemaining());
+        assertEquals(1, chart.points().get(0).actualRemaining());
+        assertEquals(0, chart.points().get(0).doneCount());
+        assertEquals(1, chart.points().get(1).idealRemaining());
+        assertEquals(1, chart.points().get(1).actualRemaining());
+        assertEquals(1, chart.points().get(1).doneCount());
+        assertEquals(0, chart.points().get(2).idealRemaining());
+        assertEquals(1, chart.points().get(2).actualRemaining());
+        assertEquals(1, chart.points().get(2).doneCount());
+    }
+
+    @Test
     void activitiesUseDeterministicSourceIdSecondaryOrder() {
         Fixture f = fixture(true);
         UUID firstId = UUID.fromString("00000000-0000-0000-0000-000000000001");
