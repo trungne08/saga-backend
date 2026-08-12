@@ -1,5 +1,24 @@
 # SAGA Frontend Handoff
 
+## Student Team Leader — Contribution read
+
+Student có exact `RoleInTeam.LEADER` gọi API hiện hữu của chính Team:
+
+```ts
+fetch(`/api/v1/teams/${teamId}/contribution-evaluation`, {
+  credentials: "include",
+});
+```
+
+GET không cần CSRF và không dùng Bearer. ADMIN xem mọi Team; LECTURER chỉ Team thuộc Course mình
+phụ trách; Student chỉ LEADER của exact Team. MEMBER, MENTOR, Leader Team khác và Student không
+membership nhận 403; backend là authority, UI ẩn/hiện không thay authorization.
+
+FE có thể render `member.fullName`, `member.studentCode`, `member.finalContributionPercentage`
+và các metric/breakdown/warnings Contribution hiện hữu. Response không chứa email, Cognito subject,
+reviewer/comment, token, credential hoặc raw Jira/GitHub payload. Đây là current aggregate, không
+phải historical snapshot. Leader không được mở UI/API contribution override hay slice-weight mutation.
+
 ## Team detail → GitHub repository navigation
 
 `GET /api/v1/courses/{courseId}/teams/{teamId}/detail` trả additive
@@ -61,6 +80,7 @@ Không đưa Firebase Admin service account, private key, Gmail App Password, Co
 |---|---|---|---|
 | Current user | `GET /api/auth/me` | Authenticated | App boot/sau login |
 | CSRF | `GET /api/auth/csrf` | Authenticated | Trước mutation |
+| Team contribution | `GET /api/v1/teams/{teamId}/contribution-evaluation` | ADMIN; LECTURER đúng Course; STUDENT exact Team LEADER | Xem current aggregate, không CSRF |
 | Course grouping import | `POST /api/v1/courses/{courseId}/import-students` | ADMIN hoặc LECTURER phụ trách | Upload XLSX |
 | Admin Course import | `POST /api/v1/courses/{courseId}/admin-import-students-template` | ADMIN | Upload XLSX 5 cột |
 | Bell list | `GET /api/me/notifications?page=0&size=20` | ADMIN/LECTURER/STUDENT | App boot, refresh, sau FCM |

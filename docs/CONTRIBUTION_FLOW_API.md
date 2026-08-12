@@ -264,11 +264,15 @@ Team/Sprint, không chỉ review của chính mình.
 
 `GET /api/v1/teams/{teamId}/contribution-evaluation`
 
-**Controller role annotation:** ADMIN, LECTURER.
+**Controller role annotation:** ADMIN, LECTURER, STUDENT.
 
-**Effective service authorization:** `evaluate(teamId)` hiện không nhận principal
-và không kiểm Course/Team ownership. Đây là known backend risk; FE không được dựa
-vào behavior này để truy cập Team ngoài scope.
+**Effective service authorization:** ADMIN xem mọi Team; LECTURER chỉ Team thuộc Course
+mình phụ trách; STUDENT chỉ khi `SagaPrincipal.localProfileId` có exact `TeamMember` role
+`LEADER` của chính `teamId` đang yêu cầu. MEMBER, MENTOR, Student không membership và
+Leader Team khác nhận `403`; anonymous `401`; Team không tồn tại `404`.
+
+`LEADER` là `RoleInTeam`, không phải application role. FE không gửi actor ID và không tự
+quyết định quyền bằng UI.
 
 **Response**
 ```json
@@ -311,10 +315,13 @@ vào behavior này để truy cập Team ngoài scope.
 **Ghi chú**
 - Đây là **current aggregate** tính từ dữ liệu hiện tại, không phải historical
   committed snapshot theo thời điểm bắt đầu Sprint.
-- `finalContributionPercentage` là % cuối cùng để hiển thị cho giảng viên.
+- `finalContributionPercentage` là % cuối cùng để hiển thị cho ADMIN, Lecturer đúng Course hoặc
+  Student LEADER đúng Team theo authorization ở trên.
 - `code/document/design` là breakdown theo slice.
 - `taskContributionPercentage` là % contribution phần task sau normalize.
 - Response DTO thực tế chỉ gồm các field trong `TeamContributionMemberResponse`.
+- Privacy audit: response không có email, Cognito subject, provider credential, raw Peer Review
+  comment/reviewer identity, token, internal secret hoặc raw Jira/GitHub payload.
 
 ---
 
@@ -468,7 +475,7 @@ của Course chứa Team. Với LECTURER, actor lấy từ principal; với ADMI
 1. Student gọi `GET .../peer-reviews/candidates`
 2. Student submit `POST .../peer-reviews`
 3. Lecturer xem `GET .../peer-reviews`
-4. Lecturer xem `GET .../contribution-evaluation`
+4. Lecturer đúng Course hoặc Student LEADER đúng Team xem `GET .../contribution-evaluation`
 5. Lecturer nếu cần thì gửi `POST .../contribution-slice-weight-requests`
 6. Admin duyệt `PUT .../decision`
 7. Lecturer/admin có thể dùng `POST .../contribution-override` khi cần chỉnh tay có lý do
@@ -528,8 +535,9 @@ Các điểm dưới đây là behavior/risk hiện tại, chưa được mô t�
 - **PARTIAL — Student visibility:** Student thuộc Team hiện đọc được toàn bộ review
   của Team/Sprint, gồm identity và comment; anonymity/privacy policy chưa được
   repository chứng minh.
-- **PARTIAL — Contribution ownership:** evaluation và current slice-weight GET chưa
-  kiểm lecturer ownership trong service.
+- **RESOLVED — Contribution evaluation ownership:** evaluation đã bind principal, scope Lecturer
+  theo Course instructor và Student theo exact Team LEADER. Current slice-weight GET vẫn là risk
+  riêng, không thay đổi trong milestone này.
 - **PARTIAL — Actor binding:** slice-weight request lấy `lecturerId`, decision lấy
   `adminId`, và một nhánh contribution override lấy `lecturerId` từ request body.
   FE không được khai thác hoặc coi đây là authorization contract ổn định.

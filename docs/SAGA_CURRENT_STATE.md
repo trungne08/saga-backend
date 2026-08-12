@@ -651,3 +651,15 @@ BASE HEAD của snapshot cũ: `0bc30be`. HEAD audit hiện hành là `4f3dee9`; 
   filter hiện hữu. Team detail chỉ query local DB, không gọi provider và không expose URL, installation,
   token hoặc credential. Authorization ADMIN/LECTURER đúng Course, STUDENT 403, session và GET/CSRF
   semantics giữ nguyên. Đây là additive response field nên không tạo DEC mới.
+## Student Team Leader Contribution read — 2026-08-12
+
+- **IMPLEMENTED / CONFIRMED_SOURCE_TEST:** existing
+  `GET /api/v1/teams/{teamId}/contribution-evaluation` nhận principal từ browser session.
+  ADMIN đọc mọi Team; LECTURER phải là `team.course.instructor`; STUDENT phải có exact
+  membership `teamId + localProfileId + RoleInTeam.LEADER`.
+- MEMBER, MENTOR, Student không membership, cross-Team Leader và Lecturer Course khác đều 403;
+  anonymous 401; Team thiếu 404. Không tạo `ROLE_LEADER` và không nhận actor ID từ request.
+- Response privacy audit PASS và DTO giữ nguyên. Calculation/current aggregate, override,
+  slice-weight và Peer Review behavior không đổi. Targeted regression 53/53 PASS. Full clean chạy
+  132 suites / 831 tests / 1 failure / 0 errors / 0 skipped; failure duy nhất là baseline DEC-023
+  trong `CourseRosterAndLecturerOptionsIntegrationTest`, không có diff `CourseService`.

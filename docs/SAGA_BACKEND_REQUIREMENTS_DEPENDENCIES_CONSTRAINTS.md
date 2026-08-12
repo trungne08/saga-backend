@@ -884,3 +884,15 @@ chặn nullable repair.
 - Current provider không chứng minh PR–Issue/Commit–Issue relation. Không infer từ title/message;
   normalized tables là seam, auto-sync relation **PARTIAL**. GitHub Issue remote CRUD, notification và
   Contribution vẫn **NOT_IMPLEMENTED**. DEC-023/CourseService không đổi.
+## Contribution read authorization constraints — 2026-08-12
+
+- Exact route là `GET /api/v1/teams/{teamId}/contribution-evaluation`; không tạo route mới.
+- Principal chỉ lấy từ authenticated `SagaPrincipal`; identity authority là `localProfileId`.
+  ADMIN đọc mọi Team. LECTURER chỉ khi `team.course.instructor.id` bằng local profile ID.
+  STUDENT chỉ khi repository xác nhận exact `teamId + studentId + RoleInTeam.LEADER`.
+- MEMBER, MENTOR, Student không membership và Leader Team khác phải 403. Team thiếu giữ 404;
+  anonymous 401. Không pick membership đầu tiên hoặc cấp quyền chỉ vì cùng Course/Project.
+- Response được phép giữ nguyên sau privacy audit; cấm bổ sung email, Cognito subject,
+  reviewer/comment, token, credential, secret hoặc raw Jira/GitHub payload cho Leader.
+- Đây là read-only grant. Không mở override/slice-weight/Peer Review mutation và không sửa bất kỳ
+  arithmetic, normalization, evidence, warning hay current-aggregate semantic nào.

@@ -843,3 +843,20 @@ Không có secret hoặc thông tin đăng nhập thật trong decision log này
   compatibility và không phải truth mới.
 - **Ngoài scope:** không GitHub Issue CRUD/permission change/provider write, notification hay
   Contribution từ GitIssue. DEC-023, Course roster/invitation, session/CSRF và no-Bearer giữ nguyên.
+## DEC-074 — Student Team Leader chỉ đọc Contribution của chính Team
+
+- Ngày: 2026-08-12; trạng thái: ACCEPTED / CONFIRMED_SOURCE_TEST.
+- Quyết định: reuse `GET /api/v1/teams/{teamId}/contribution-evaluation`. Controller cho
+  `ADMIN|LECTURER|STUDENT` đi qua coarse gate; service lấy actor duy nhất từ
+  `SagaPrincipal.localProfileId` và enforce ADMIN global, LECTURER là instructor của Course,
+  hoặc STUDENT có exact `TeamMember` role `LEADER` của Team đang yêu cầu.
+- `LEADER` không trở thành application role/Cognito group. MEMBER, MENTOR, Student không thuộc
+  Team và Leader Team khác fail 403, kể cả cùng Course. Resource Team thiếu giữ 404.
+- Privacy audit cho phép reuse DTO: chỉ có định danh học vụ tối thiểu và Contribution aggregate;
+  không có email, Cognito subject, reviewer/comment, token, credential, secret hay raw provider
+  payload. Không tạo response phân nhánh theo role.
+- Quyền mới chỉ là read. `POST contribution-override`, Course slice-weight mutation, Peer Review
+  mutation và toàn bộ công thức/normalization Contribution giữ nguyên.
+- Evidence: targeted Contribution/authorization regressions 53/53 PASS. Full clean chạy
+  132 suites / 831 tests / 1 failure / 0 errors / 0 skipped; failure duy nhất là baseline DEC-023
+  ngoài scope và `CourseService` không có diff.

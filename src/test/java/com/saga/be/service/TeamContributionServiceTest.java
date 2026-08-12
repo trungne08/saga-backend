@@ -156,7 +156,7 @@ class TeamContributionServiceTest {
         reviewTwo.setReviewee(studentTwo);
         reviewTwo.setStarRating(1);
 
-        when(teamRepository.findById(teamId)).thenReturn(java.util.Optional.of(team));
+        when(teamRepository.findWithCourseAndInstructorById(teamId)).thenReturn(java.util.Optional.of(team));
         when(teamMemberRepository.findByTeamId(teamId)).thenReturn(List.of(memberOne, memberTwo));
         when(taskRepository.findByProjectId(projectId)).thenReturn(List.of(taskOne, taskTwo));
         when(documentRepository.findByProjectId(projectId)).thenReturn(List.of());
@@ -181,7 +181,10 @@ class TeamContributionServiceTest {
                 .thenReturn(List.of(review, reviewTwo));
         when(sprintRepository.findByBoardProjectIdOrderByStartDateAsc(projectId)).thenReturn(List.of(sprint));
 
-        TeamContributionEvaluationResponse response = service.evaluate(teamId);
+        TeamContributionEvaluationResponse response = service.evaluate(
+                principal(ApplicationRole.ADMIN, UUID.randomUUID()),
+                teamId
+        );
 
         assertEquals(teamId, response.teamId());
         assertEquals(2, response.members().size());
@@ -255,7 +258,7 @@ class TeamContributionServiceTest {
         designDocument.setAuthor(studentTwo);
         designDocument.setType(DocumentType.DESIGN);
 
-        when(teamRepository.findById(teamId)).thenReturn(java.util.Optional.of(team));
+        when(teamRepository.findWithCourseAndInstructorById(teamId)).thenReturn(java.util.Optional.of(team));
         when(teamMemberRepository.findByTeamId(teamId)).thenReturn(List.of(memberOne, memberTwo));
         when(taskRepository.findByProjectId(projectId)).thenReturn(List.of());
         when(documentRepository.findByProjectId(projectId)).thenReturn(List.of(designDocument));
@@ -267,7 +270,10 @@ class TeamContributionServiceTest {
                 .thenReturn(List.of());
         when(sprintRepository.findByBoardProjectIdOrderByStartDateAsc(projectId)).thenReturn(List.of());
 
-        TeamContributionEvaluationResponse response = service.evaluate(teamId);
+        TeamContributionEvaluationResponse response = service.evaluate(
+                principal(ApplicationRole.ADMIN, UUID.randomUUID()),
+                teamId
+        );
 
         var alice = response.members().stream()
                 .filter(member -> member.studentId().equals(studentOneId))

@@ -5,6 +5,9 @@ import com.saga.be.dto.response.ContributionOverrideResponse;
 import com.saga.be.dto.response.TeamContributionEvaluationResponse;
 import com.saga.be.security.SagaPrincipal;
 import com.saga.be.service.TeamContributionService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -26,11 +29,24 @@ public class TeamContributionController {
     private final TeamContributionService teamContributionService;
 
     @GetMapping("/{teamId}/contribution-evaluation")
-    @PreAuthorize("hasAnyRole('ADMIN', 'LECTURER')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'LECTURER', 'STUDENT')")
+    @Operation(
+            summary = "View a team's current contribution evaluation",
+            description = "ADMIN may read any Team; LECTURER only a Team in a Course they instruct; "
+                    + "STUDENT only when their exact TeamMember role for this Team is LEADER. "
+                    + "MEMBER and MENTOR are not permitted."
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Current contribution aggregate"),
+            @ApiResponse(responseCode = "401", description = "Authentication is required"),
+            @ApiResponse(responseCode = "403", description = "Not permitted to read this Team's contribution"),
+            @ApiResponse(responseCode = "404", description = "Team does not exist")
+    })
     public ResponseEntity<TeamContributionEvaluationResponse> getContributionEvaluation(
+            @AuthenticationPrincipal SagaPrincipal principal,
             @PathVariable UUID teamId
     ) {
-        return ResponseEntity.ok(teamContributionService.evaluate(teamId));
+        return ResponseEntity.ok(teamContributionService.evaluate(principal, teamId));
     }
 
     @PostMapping("/{teamId}/contribution-override")

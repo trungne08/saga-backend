@@ -17,6 +17,7 @@ import com.saga.be.entity.Team;
 import com.saga.be.entity.TeamMember;
 import com.saga.be.entity.enums.DocumentType;
 import com.saga.be.entity.enums.PolicyOverrideStatus;
+import com.saga.be.entity.enums.RoleInTeam;
 import com.saga.be.entity.enums.TaskStatus;
 import com.saga.be.repository.CommitDataRepository;
 import com.saga.be.repository.DocumentRepository;
@@ -41,6 +42,7 @@ import java.util.Objects;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
@@ -69,10 +71,21 @@ public class TeamContributionService {
     private final LecturerRepository lecturerRepository;
 
     @Transactional(readOnly = true)
-    public TeamContributionEvaluationResponse evaluate(UUID teamId) {
+    public TeamContributionEvaluationResponse evaluate(SagaPrincipal principal, UUID teamId) {
+        Team team = teamRepository.findWithCourseAndInstructorById(teamId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Team not found"));
+        requireContributionReadAccess(principal, team);
+        return evaluate(teamId, team);
+    }
+
+    @Transactional(readOnly = true)
+    TeamContributionEvaluationResponse evaluate(UUID teamId) {
         Team team = teamRepository.findById(teamId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Team not found"));
+        return evaluate(teamId, team);
+    }
 
+    private TeamContributionEvaluationResponse evaluate(UUID teamId, Team team) {
         UUID projectId = team.getProject() != null ? team.getProject().getId() : null;
         List<TeamMember> members = teamMemberRepository.findByTeamId(teamId);
 
@@ -311,6 +324,33 @@ public class TeamContributionService {
         }
 
         return new TeamContributionEvaluationResponse(teamId, projectId, LocalDateTime.now(), result);
+    }
+
+    private void requireContributionReadAccess(SagaPrincipal principal, Team team) {
+        if (principal == null || principal.localProfileId() == null) {
+            throw new AccessDeniedException("Authentication is required");
+        }
+        if (principal.applicationRole() == ApplicationRole.ADMIN) {
+            return;
+        }
+        if (principal.applicationRole() == ApplicationRole.LECTURER
+                && team.getCourse() != null
+                && team.getCourse().getInstructor() != null
+                && Objects.equals(
+                        principal.localProfileId(),
+                        team.getCourse().getInstructor().getId()
+                )) {
+            return;
+        }
+        if (principal.applicationRole() == ApplicationRole.STUDENT
+                && teamMemberRepository.existsByTeamIdAndStudentIdAndRoleInTeam(
+                        team.getId(),
+                        principal.localProfileId(),
+                        RoleInTeam.LEADER
+                )) {
+            return;
+        }
+        throw new AccessDeniedException("You do not have access to this Team's contribution evaluation");
     }
 
     @Transactional

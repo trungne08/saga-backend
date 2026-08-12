@@ -10,6 +10,8 @@ Tài liệu này mô tả **đúng theo code hiện tại** cách hệ thống t
 - `GET /api/v1/teams/{teamId}/contribution-evaluation`
 - Controller: `TeamContributionController#getContributionEvaluation`
 - Service thực thi chính: `TeamContributionService#evaluate`
+- Quyền đọc: ADMIN mọi Team; LECTURER chỉ Course mình phụ trách; STUDENT chỉ exact
+  `RoleInTeam.LEADER` của chính Team. MEMBER/MENTOR/cross-Team Leader bị từ chối.
 
 ### API override % đóng góp theo từng sinh viên
 - `POST /api/v1/teams/{teamId}/contribution-override`

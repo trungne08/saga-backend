@@ -202,8 +202,8 @@ FE hiển thị hướng dẫn reconnect/re-consent; không diễn giải lỗi 
 - **CONFIRMED:** Contribution evaluation là aggregate theo dữ liệu hiện tại, không
   phải historical committed snapshot. FE không tự suy ra công thức từ assessment
   endpoint và không nhận provider payload, token hoặc credential.
-- **TBD:** Các backend risk về ownership, actor binding và production migration được
-  ghi rõ trong contract; chúng chưa được xem là đã khắc phục.
+- **PARTIAL:** Ownership của GET contribution-evaluation đã được khắc phục và test; các risk
+  actor-binding của slice-weight/decision cùng production migration vẫn được ghi riêng trong contract.
 
 Tài liệu này được đối chiếu với controller, DTO, Security, CORS, exception
 handler và integration service hiện tại của backend. Không coi tài liệu này là
@@ -1274,17 +1274,29 @@ Contribution API dùng session. Tất cả mutation phải gửi CSRF; GET khôn
 
 | Method | Exact path | Role annotation | Effective behavior | Success |
 | --- | --- | --- | --- | --- |
-| GET | `/api/v1/teams/{teamId}/contribution-evaluation` | ADMIN, LECTURER | Trả current aggregate; service hiện chưa kiểm ownership theo principal | `200 TeamContributionEvaluationResponse` |
+| GET | `/api/v1/teams/{teamId}/contribution-evaluation` | ADMIN, LECTURER, STUDENT | ADMIN mọi Team; LECTURER chỉ Course mình phụ trách; STUDENT chỉ exact `RoleInTeam.LEADER` của chính Team. MEMBER/MENTOR/cross-Team Leader 403 | `200 TeamContributionEvaluationResponse` |
 | POST | `/api/v1/teams/{teamId}/contribution-override` | ADMIN, LECTURER | ADMIN mọi Team; LECTURER phải là Course instructor | `200 ContributionOverrideResponse` |
 | GET | `/api/v1/courses/{courseId}/contribution-slice-weights` | ADMIN, LECTURER | Service hiện chưa kiểm ownership theo principal | `200 CourseContributionSliceWeightResponse` |
 | POST | `/api/v1/courses/{courseId}/contribution-slice-weight-requests` | LECTURER | Body `lecturerId` phải là instructor; chưa bind actor hoàn toàn với principal | `200 CourseContributionSliceWeightRequestResponse` |
 | GET | `/api/v1/courses/contribution-slice-weight-requests` | ADMIN, LECTURER | ADMIN xem theo filter; LECTURER được scope theo principal/Course của mình | `200` danh sách request |
 | PUT | `/api/v1/courses/contribution-slice-weight-requests/{requestId}/decision` | ADMIN | Decision dùng `adminId` nullable từ body | `200 CourseContributionSliceWeightRequestResponse` |
 
-Các ownership/actor-binding behavior chưa chặt ở trên là known backend risks. FE
-không được khai thác, giả định chúng là authorization contract ổn định hoặc tự gửi
-ID actor thay cho identity của phiên. Contribution evaluation chỉ là current
-aggregate; không hiển thị nó như historical committed snapshot.
+Contribution evaluation đã bind actor từ `SagaPrincipal.localProfileId`; FE không gửi actor ID
+và backend 403 là authority. Các actor-binding risk còn lại trong bảng thuộc slice-weight/decision,
+không áp dụng cho GET evaluation. Evaluation chỉ là current aggregate; không hiển thị nó như
+historical committed snapshot.
+
+Leader gọi:
+
+```ts
+fetch(`/api/v1/teams/${teamId}/contribution-evaluation`, {
+  credentials: "include",
+});
+```
+
+GET không cần CSRF và không dùng Bearer. FE có thể render `member.fullName`,
+`member.studentCode`, `member.finalContributionPercentage` cùng các metric Contribution hiện hữu.
+Response không có email, Cognito subject, reviewer/comment, token, credential hoặc raw provider payload.
 
 ## Lecturer Analytics read APIs — 2026-08-05
 

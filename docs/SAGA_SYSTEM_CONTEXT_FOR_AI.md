@@ -892,3 +892,20 @@ và reliability regression 20 tests đều pass.
   `commit_data.git_issue_id` được giữ compatibility, không phải traceability truth mới.
 - **NOT_IMPLEMENTED:** GitHub Issue remote create/edit/close/reopen/assign/label/milestone,
   lifecycle notification và Contribution từ GitIssue. DEC-023 và `CourseService` không đổi.
+## Update 2026-08-12 — Student Team Leader đọc Contribution của chính Team
+
+- **CONFIRMED_SOURCE_TEST:** `GET /api/v1/teams/{teamId}/contribution-evaluation` cho phép
+  `ADMIN` xem mọi Team, `LECTURER` chỉ xem Team thuộc Course mình phụ trách, và `STUDENT`
+  chỉ khi tồn tại exact `TeamMember(teamId, SagaPrincipal.localProfileId, role=LEADER)`.
+  `MEMBER`, `MENTOR`, Student không có membership và Leader Team khác đều nhận 403.
+- `LEADER` vẫn là `RoleInTeam`, không phải application role/Cognito group. Controller chỉ mở
+  coarse gate `ADMIN|LECTURER|STUDENT`; service resolve Team rồi enforce exact scope. Team thiếu
+  giữ 404. Browser vẫn dùng `JSESSIONID`; GET không CSRF và không Bearer.
+- Privacy audit PASS: response giữ nguyên `teamId`, `projectId`, `evaluatedAt`, `members`; mỗi
+  member chỉ có `studentId`, `fullName`, `studentCode`, Contribution scores/percentages,
+  `peerReviewScore`, task metrics, `finalContributionPercentage`, `evidenceCount`,
+  `sprintBreakdowns`, `warnings`. Không có email, Cognito subject, reviewer/comment, token,
+  credential, secret hoặc raw Jira/GitHub payload.
+- Công thức/normalization/override/slice weight/Peer Review không đổi. POST override vẫn chỉ
+  `ADMIN|LECTURER`. Targeted authorization/calculation/override/slice-weight/roster/Peer Review
+  regressions: 53/53 PASS.
