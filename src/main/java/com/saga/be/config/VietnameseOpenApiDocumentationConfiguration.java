@@ -116,6 +116,7 @@ public class VietnameseOpenApiDocumentationConfiguration {
             summary("LecturerAnalyticsController#contributionDetail", "Xem chi tiết đóng góp của sinh viên"),
             summary("LecturerAnalyticsController#earlyWarnings", "Xem cảnh báo sớm của khóa học"),
             summary("LecturerAnalyticsController#interactions", "Xem tương tác giữa các thành viên nhóm"),
+            summary("LecturerAnalyticsController#studentInteractions", "Xem mạng tương tác của một sinh viên trong nhóm"),
             summary("LecturerAnalyticsController#heatmap", "Xem bản đồ nhiệt hoạt động của nhóm"),
             summary("LecturerAnalyticsController#overview", "Xem tổng quan hoạt động theo ngày của nhóm"),
             summary("LecturerAnalyticsController#velocity", "Xem vận tốc Sprint của nhóm"),
@@ -290,14 +291,15 @@ public class VietnameseOpenApiDocumentationConfiguration {
         });
     }
 
-    @SuppressWarnings({"rawtypes", "unchecked"})
     private void documentSchemaProperties(String schemaName, Schema<?> schema) {
-        if (schema.getProperties() == null) {
+        Map<?, ?> properties = schema.getProperties();
+        if (properties == null) {
             return;
         }
-        ((Map<String, Schema>) schema.getProperties()).forEach((name, property) -> {
+        properties.forEach((name, value) -> {
+            Schema<?> property = (Schema<?>) value;
             if (isBlank(property.getDescription())) {
-                property.setDescription(schemaPropertyDescription(schemaName, name));
+                property.setDescription(schemaPropertyDescription(schemaName, String.valueOf(name)));
             }
             if ("FirebaseInstallationRegistrationRequest".equals(schemaName)
                     && "firebaseInstallationId".equals(name)) {

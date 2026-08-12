@@ -11,9 +11,11 @@ import static org.mockito.Mockito.when;
 
 import com.saga.be.dto.response.LecturerAnalyticsResponses;
 import com.saga.be.entity.CommitData;
+import com.saga.be.entity.Comment;
 import com.saga.be.entity.GitRepo;
 import com.saga.be.entity.Project;
 import com.saga.be.entity.Sprint;
+import com.saga.be.entity.PeerReview;
 import com.saga.be.entity.Student;
 import com.saga.be.entity.Task;
 import com.saga.be.entity.Team;
@@ -246,6 +248,46 @@ class LecturerAnalyticsQueryServicesTest {
         assertEquals(17, overview.days().get(1).totalScore());
         assertEquals(25, overview.totals().totalScore());
         assertEquals(15, overview.totals().totalActivities());
+    }
+
+    @Test
+    void studentInteractionsAggregateReviewCommentAssignmentAndCommitEdges() {
+        Fixture f = fixture(true);
+        UUID studentBId = UUID.randomUUID();
+        UUID studentCId = UUID.randomUUID();
+        Student studentA = f.membership.getStudent();
+        Student studentB = id(new Student(), studentBId);
+        Student studentC = id(new Student(), studentCId);
+        TeamMember memberA = TeamMember.builder().team(f.team).student(studentA).build();
+        TeamMember memberB = TeamMember.builder().team(f.team).student(studentB).build();
+        TeamMember memberC = TeamMember.builder().team(f.team).student(studentC).build();
+        PeerReview review = PeerReview.builder().reviewer(studentA).reviewee(studentB).build();
+        Comment parent = Comment.builder().author(studentA).build();
+        Comment reply = Comment.builder().author(studentB).parentComment(parent).build();
+        Task assignedTask = Task.builder().project(f.team.getProject()).reporter(studentA).assignee(studentC).build();
+        CommitData commit = CommitData.builder().task(assignedTask).author(studentB).build();
+
+        when(f.authorization.requireTeam(any(), any(), any())).thenReturn(f.team);
+        when(f.members.findByTeamIdAndStudentId(f.teamId, f.studentId)).thenReturn(java.util.Optional.of(f.membership));
+        when(f.members.findByTeamId(f.teamId)).thenReturn(List.of(memberA, memberB, memberC));
+        when(f.peers.findBySprintBoardProjectIdOrderByCreatedAtAscIdAsc(f.projectId)).thenReturn(List.of(review));
+        when(f.comments.findByTaskProjectIdOrderByCreatedAtAscIdAsc(f.projectId)).thenReturn(List.of(reply));
+        when(f.comments.findByPullRequestRepoProjectIdOrderByCreatedAtAscIdAsc(f.projectId)).thenReturn(List.of());
+        when(f.comments.findByGitIssueRepoProjectIdOrderByCreatedAtAscIdAsc(f.projectId)).thenReturn(List.of());
+        when(f.tasks.findByProjectId(f.projectId)).thenReturn(List.of(assignedTask));
+        when(f.commits.findByProjectId(f.projectId)).thenReturn(List.of(commit));
+
+        LecturerAnalyticsResponses.StudentInteractionGraph graph = teamService(f)
+                .studentInteractions(null, f.courseId, f.teamId, f.studentId);
+
+        assertEquals(3, graph.nodes().size());
+        assertEquals(f.studentId, graph.nodes().get(0).studentId());
+        assertEquals(3, graph.nodes().get(0).degree());
+        assertEquals(4, graph.edges().size());
+        assertTrue(graph.edges().stream().anyMatch(edge -> "ASSIGNED_TO".equals(edge.sourceType())));
+        assertTrue(graph.edges().stream().anyMatch(edge -> "COMMENTED_ON".equals(edge.sourceType())));
+        assertTrue(graph.edges().stream().anyMatch(edge -> "COLLABORATED_WITH".equals(edge.sourceType())));
+        assertTrue(graph.edges().stream().anyMatch(edge -> "REVIEWED".equals(edge.sourceType())));
     }
 
     @Test

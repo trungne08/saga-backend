@@ -2,6 +2,8 @@ package com.saga.be.service;
 
 import com.saga.be.dto.response.LecturerAnalyticsResponses;
 import com.saga.be.dto.response.TeamMemberResponse;
+import com.saga.be.entity.Comment;
+import com.saga.be.entity.CommitData;
 import com.saga.be.entity.PeerReview;
 import com.saga.be.entity.GitRepo;
 import com.saga.be.entity.Sprint;
@@ -96,7 +98,7 @@ public class LecturerTeamAnalyticsQueryService {
     public LecturerAnalyticsResponses.InteractionGraph interactions(SagaPrincipal principal, UUID courseId,
             UUID teamId) {
         Team team = authorization.requireTeam(principal, courseId, teamId);
-        List<TeamMember> members = teamMemberRepository.findByTeamId(teamId);
+        List<TeamMember> members = new ArrayList<>(teamMemberRepository.findByTeamId(teamId));
         List<LecturerAnalyticsResponses.InteractionNode> nodes = members.stream().map(member ->
                 new LecturerAnalyticsResponses.InteractionNode(member.getStudent().getId(),
                         member.getStudent().getStudentCode(), member.getStudent().getFullName())).toList();
@@ -119,6 +121,61 @@ public class LecturerTeamAnalyticsQueryService {
                     "PEER_REVIEW", entry.getValue(), true);
         }).toList();
         return new LecturerAnalyticsResponses.InteractionGraph(nodes, edges);
+    }
+
+    @Transactional(readOnly = true)
+    public LecturerAnalyticsResponses.StudentInteractionGraph studentInteractions(SagaPrincipal principal,
+            UUID courseId, UUID teamId, UUID studentId) {
+        Team team = authorization.requireTeam(principal, courseId, teamId);
+        teamMemberRepository.findByTeamIdAndStudentId(teamId, studentId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy Student trong Team"));
+
+        List<TeamMember> members = new ArrayList<>(teamMemberRepository.findByTeamId(teamId));
+        members.sort(Comparator.comparing(
+                (TeamMember member) -> !member.getStudent().getId().equals(studentId))
+                .thenComparing(member -> member.getStudent().getStudentCode(),
+                        Comparator.nullsLast(String.CASE_INSENSITIVE_ORDER))
+                .thenComparing(member -> member.getStudent().getFullName(),
+                        Comparator.nullsLast(String.CASE_INSENSITIVE_ORDER))
+                .thenComparing(member -> member.getStudent().getId()));
+
+        Map<UUID, StudentInteractionAccumulator> accumulators = new LinkedHashMap<>();
+        for (TeamMember member : members) {
+            accumulators.put(member.getStudent().getId(), new StudentInteractionAccumulator(
+                    member.getStudent().getStudentCode(), member.getStudent().getFullName()));
+        }
+
+        Map<InteractionKey, Long> edgeCounts = new HashMap<>();
+        if (team.getProject() != null && !accumulators.isEmpty()) {
+            UUID projectId = team.getProject().getId();
+            List<UUID> memberIds = new ArrayList<>(accumulators.keySet());
+            collectPeerReviewInteractions(edgeCounts, accumulators,
+                    peerReviewRepository.findBySprintBoardProjectIdOrderByCreatedAtAscIdAsc(projectId), memberIds);
+            collectCommentInteractions(edgeCounts, accumulators, loadProjectComments(projectId), memberIds);
+            collectTaskInteractions(edgeCounts, accumulators, taskRepository.findByProjectId(projectId), memberIds);
+            collectCommitInteractions(edgeCounts, accumulators, commitDataRepository.findByProjectId(projectId), memberIds);
+        }
+
+        List<LecturerAnalyticsResponses.StudentInteractionNode> nodes = accumulators.entrySet().stream()
+                .map(entry -> new LecturerAnalyticsResponses.StudentInteractionNode(
+                        entry.getKey(),
+                        entry.getValue().studentCode,
+                        entry.getValue().fullName,
+                        entry.getValue().degree()))
+                .toList();
+        List<LecturerAnalyticsResponses.StudentInteractionEdge> edges = edgeCounts.entrySet().stream()
+                .sorted(Map.Entry.<InteractionKey, Long>comparingByKey(
+                        Comparator.comparing((InteractionKey key) -> key.sourceType())
+                                .thenComparing((InteractionKey key) -> key.fromStudentId())
+                                .thenComparing((InteractionKey key) -> key.toStudentId())))
+                .map(entry -> new LecturerAnalyticsResponses.StudentInteractionEdge(
+                        entry.getKey().fromStudentId(),
+                        entry.getKey().toStudentId(),
+                        entry.getKey().sourceType(),
+                        entry.getValue(),
+                        true))
+                .toList();
+        return new LecturerAnalyticsResponses.StudentInteractionGraph(courseId, teamId, studentId, nodes, edges);
     }
 
     @Transactional(readOnly = true)
@@ -306,6 +363,93 @@ public class LecturerTeamAnalyticsQueryService {
         throw new IllegalArgumentException("Không thể chuyển giá trị ngày: " + value);
     }
 
+    private List<Comment> loadProjectComments(UUID projectId) {
+        List<Comment> comments = new ArrayList<>();
+        comments.addAll(commentRepository.findByTaskProjectIdOrderByCreatedAtAscIdAsc(projectId));
+        comments.addAll(commentRepository.findByPullRequestRepoProjectIdOrderByCreatedAtAscIdAsc(projectId));
+        comments.addAll(commentRepository.findByGitIssueRepoProjectIdOrderByCreatedAtAscIdAsc(projectId));
+        return comments;
+    }
+
+    private void collectPeerReviewInteractions(Map<InteractionKey, Long> edgeCounts,
+            Map<UUID, StudentInteractionAccumulator> accumulators, List<PeerReview> reviews,
+            List<UUID> memberIds) {
+        for (PeerReview review : reviews) {
+            if (review.getReviewer() == null || review.getReviewee() == null) {
+                continue;
+            }
+            UUID from = review.getReviewer().getId();
+            UUID to = review.getReviewee().getId();
+            if (!memberIds.contains(from) || !memberIds.contains(to) || from.equals(to)) {
+                continue;
+            }
+            addInteraction(edgeCounts, accumulators, from, to, "REVIEWED");
+        }
+    }
+
+    private void collectCommentInteractions(Map<InteractionKey, Long> edgeCounts,
+            Map<UUID, StudentInteractionAccumulator> accumulators, List<Comment> comments,
+            List<UUID> memberIds) {
+        for (Comment comment : comments) {
+            if (comment.getAuthor() == null || comment.getParentComment() == null
+                    || comment.getParentComment().getAuthor() == null) {
+                continue;
+            }
+            UUID from = comment.getAuthor().getId();
+            UUID to = comment.getParentComment().getAuthor().getId();
+            if (!memberIds.contains(from) || !memberIds.contains(to) || from.equals(to)) {
+                continue;
+            }
+            addInteraction(edgeCounts, accumulators, from, to, "COMMENTED_ON");
+        }
+    }
+
+    private void collectTaskInteractions(Map<InteractionKey, Long> edgeCounts,
+            Map<UUID, StudentInteractionAccumulator> accumulators, List<Task> tasks,
+            List<UUID> memberIds) {
+        for (Task task : tasks) {
+            if (task.getReporter() == null || task.getAssignee() == null) {
+                continue;
+            }
+            UUID from = task.getReporter().getId();
+            UUID to = task.getAssignee().getId();
+            if (!memberIds.contains(from) || !memberIds.contains(to) || from.equals(to)) {
+                continue;
+            }
+            addInteraction(edgeCounts, accumulators, from, to, "ASSIGNED_TO");
+        }
+    }
+
+    private void collectCommitInteractions(Map<InteractionKey, Long> edgeCounts,
+            Map<UUID, StudentInteractionAccumulator> accumulators, List<CommitData> commits,
+            List<UUID> memberIds) {
+        for (CommitData commit : commits) {
+            if (commit.getTask() == null || commit.getAuthor() == null || commit.getTask().getAssignee() == null) {
+                continue;
+            }
+            UUID from = commit.getAuthor().getId();
+            UUID to = commit.getTask().getAssignee().getId();
+            if (!memberIds.contains(from) || !memberIds.contains(to) || from.equals(to)) {
+                continue;
+            }
+            addInteraction(edgeCounts, accumulators, from, to, "COLLABORATED_WITH");
+        }
+    }
+
+    private void addInteraction(Map<InteractionKey, Long> edgeCounts,
+            Map<UUID, StudentInteractionAccumulator> accumulators, UUID from, UUID to, String sourceType) {
+        InteractionKey key = new InteractionKey(sourceType, from, to);
+        edgeCounts.put(key, edgeCounts.getOrDefault(key, 0L) + 1L);
+        StudentInteractionAccumulator fromAccumulator = accumulators.get(from);
+        if (fromAccumulator != null) {
+            fromAccumulator.degree++;
+        }
+        StudentInteractionAccumulator toAccumulator = accumulators.get(to);
+        if (toAccumulator != null) {
+            toAccumulator.degree++;
+        }
+    }
+
     private enum HeatmapActivity {
         COMMIT,
         PEER_REVIEW,
@@ -385,6 +529,23 @@ public class LecturerTeamAnalyticsQueryService {
             comments += other.comments;
             documents += other.documents;
             tasks += other.tasks;
+        }
+    }
+
+    private record InteractionKey(String sourceType, UUID fromStudentId, UUID toStudentId) { }
+
+    private static final class StudentInteractionAccumulator {
+        private final String studentCode;
+        private final String fullName;
+        private long degree;
+
+        private StudentInteractionAccumulator(String studentCode, String fullName) {
+            this.studentCode = studentCode;
+            this.fullName = fullName;
+        }
+
+        private long degree() {
+            return degree;
         }
     }
 }

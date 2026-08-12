@@ -122,6 +122,7 @@ class LecturerAnalyticsSecurityIntegrationTest {
                 "/api/v1/courses/%s/students/%s/contribution-detail".formatted(courseId, studentId),
                 "/api/v1/courses/%s/early-warnings".formatted(courseId),
                 "/api/v1/courses/%s/teams/%s/interactions".formatted(courseId, teamId),
+                "/api/v1/courses/%s/teams/%s/students/%s/interactions".formatted(courseId, teamId, studentId),
                 "/api/v1/courses/%s/teams/%s/overview?startDate=2026-08-01&endDate=2026-08-02".formatted(courseId, teamId),
                 "/api/v1/courses/%s/teams/%s/heatmap?startDate=2026-08-01&endDate=2026-08-02".formatted(courseId, teamId),
                 "/api/v1/courses/%s/teams/%s/sprints/velocity".formatted(courseId, teamId)

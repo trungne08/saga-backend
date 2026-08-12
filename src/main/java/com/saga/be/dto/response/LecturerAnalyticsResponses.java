@@ -76,6 +76,15 @@ public final class LecturerAnalyticsResponses {
     public record InteractionEdge(UUID fromStudentId, UUID toStudentId, String sourceType,
                                   long sourceCount, boolean directed) { }
 
+    public record StudentInteractionGraph(UUID courseId, UUID teamId, UUID studentId,
+                                          List<StudentInteractionNode> nodes,
+                                          List<StudentInteractionEdge> edges) { }
+
+    public record StudentInteractionNode(UUID studentId, String studentCode, String fullName, long degree) { }
+
+    public record StudentInteractionEdge(UUID fromStudentId, UUID toStudentId, String sourceType,
+                                         long sourceCount, boolean directed) { }
+
     public record ActivityHeatmap(UUID courseId, UUID teamId, UUID studentId, LocalDate startDate,
                                   LocalDate endDate, List<HeatmapStudentRow> students,
                                   List<HeatmapDay> days) { }

@@ -94,6 +94,17 @@ public class LecturerAnalyticsController {
         return ResponseEntity.ok(teamAnalytics.interactions(principal, courseId, teamId));
     }
 
+    @GetMapping("/teams/{teamId}/students/{studentId}/interactions")
+    @io.swagger.v3.oas.annotations.Operation(
+            summary = "Xem mạng tương tác của một sinh viên trong nhóm",
+            description = "Trả graph tương tác quanh một sinh viên, gồm review, comment reply, assignment và commit hợp tác."
+    )
+    public ResponseEntity<LecturerAnalyticsResponses.StudentInteractionGraph> studentInteractions(
+            @AuthenticationPrincipal SagaPrincipal principal, @PathVariable UUID courseId,
+            @PathVariable UUID teamId, @PathVariable UUID studentId) {
+        return ResponseEntity.ok(teamAnalytics.studentInteractions(principal, courseId, teamId, studentId));
+    }
+
     @GetMapping("/teams/{teamId}/heatmap")
     public ResponseEntity<LecturerAnalyticsResponses.ActivityHeatmap> heatmap(
             @AuthenticationPrincipal SagaPrincipal principal, @PathVariable UUID courseId,

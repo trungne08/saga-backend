@@ -6,6 +6,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -36,4 +37,46 @@ public interface CommentRepository extends JpaRepository<Comment, UUID> {
             @Param("startAt") LocalDateTime startAt,
             @Param("endExclusive") LocalDateTime endExclusive
     );
+
+    @EntityGraph(attributePaths = {
+            "author",
+            "parentComment",
+            "parentComment.author",
+            "task",
+            "task.assignee",
+            "task.reporter",
+            "pullRequest",
+            "pullRequest.repo",
+            "gitIssue",
+            "gitIssue.repo"
+    })
+    List<Comment> findByTaskProjectIdOrderByCreatedAtAscIdAsc(UUID projectId);
+
+    @EntityGraph(attributePaths = {
+            "author",
+            "parentComment",
+            "parentComment.author",
+            "task",
+            "task.assignee",
+            "task.reporter",
+            "pullRequest",
+            "pullRequest.repo",
+            "gitIssue",
+            "gitIssue.repo"
+    })
+    List<Comment> findByPullRequestRepoProjectIdOrderByCreatedAtAscIdAsc(UUID projectId);
+
+    @EntityGraph(attributePaths = {
+            "author",
+            "parentComment",
+            "parentComment.author",
+            "task",
+            "task.assignee",
+            "task.reporter",
+            "pullRequest",
+            "pullRequest.repo",
+            "gitIssue",
+            "gitIssue.repo"
+    })
+    List<Comment> findByGitIssueRepoProjectIdOrderByCreatedAtAscIdAsc(UUID projectId);
 }
