@@ -122,6 +122,51 @@ public class LecturerTeamAnalyticsQueryService {
     }
 
     @Transactional(readOnly = true)
+    public LecturerAnalyticsResponses.ActivityOverview overview(SagaPrincipal principal, UUID courseId,
+            UUID teamId, LocalDate startDate, LocalDate endDate) {
+        Team team = authorization.requireTeam(principal, courseId, teamId);
+        if (startDate.isAfter(endDate)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "startDate không được sau endDate");
+        }
+        Map<LocalDate, HeatmapBucket> dayBuckets = new HashMap<>();
+        if (team.getProject() != null) {
+            UUID projectId = team.getProject().getId();
+            List<UUID> studentIds = teamMemberRepository.findDistinctStudentIdsByTeamId(teamId);
+            if (!studentIds.isEmpty()) {
+                LocalDateTime startAt = startDate.atStartOfDay();
+                LocalDateTime endExclusive = endDate.plusDays(1).atStartOfDay();
+                merge(dayBuckets, commitDataRepository.aggregateDailyCountsByProjectAndAuthorIds(
+                        projectId, studentIds, startAt, endExclusive), HeatmapActivity.COMMIT);
+                merge(dayBuckets, peerReviewRepository.aggregateDailyCountsByProjectAndReviewerIds(
+                        projectId, studentIds, startAt, endExclusive), HeatmapActivity.PEER_REVIEW);
+                merge(dayBuckets, commentRepository.aggregateDailyCountsByProjectAndAuthorIds(
+                        projectId, studentIds, startAt, endExclusive), HeatmapActivity.COMMENT);
+                merge(dayBuckets, documentRepository.aggregateDailyCountsByProjectAndAuthorIds(
+                        projectId, studentIds, startAt, endExclusive), HeatmapActivity.DOCUMENT);
+                merge(dayBuckets, taskRepository.aggregateDailyCountsByProjectAndAssigneeIds(
+                        projectId, studentIds, startAt, endExclusive), HeatmapActivity.TASK);
+            }
+        }
+        List<LecturerAnalyticsResponses.OverviewDay> days = new ArrayList<>();
+        HeatmapBucket totals = HeatmapBucket.empty();
+        for (LocalDate day = startDate; !day.isAfter(endDate); day = day.plusDays(1)) {
+            HeatmapBucket bucket = dayBuckets.getOrDefault(day, HeatmapBucket.empty());
+            totals.add(bucket);
+            days.add(new LecturerAnalyticsResponses.OverviewDay(day, bucket.commits, bucket.peerReviews,
+                    bucket.comments, bucket.documents, bucket.tasks, bucket.totalActivities(), bucket.totalScore()));
+        }
+        return new LecturerAnalyticsResponses.ActivityOverview(
+                courseId,
+                teamId,
+                startDate,
+                endDate,
+                List.copyOf(days),
+                new LecturerAnalyticsResponses.ActivityTotals(totals.commits, totals.peerReviews, totals.comments,
+                        totals.documents, totals.tasks, totals.totalActivities(), totals.totalScore())
+        );
+    }
+
+    @Transactional(readOnly = true)
     public LecturerAnalyticsResponses.ActivityHeatmap heatmap(SagaPrincipal principal, UUID courseId,
             UUID teamId, UUID studentId, LocalDate startDate, LocalDate endDate) {
         Team team = authorization.requireTeam(principal, courseId, teamId);
@@ -243,6 +288,14 @@ public class LecturerTeamAnalyticsQueryService {
         }
     }
 
+    private void merge(Map<LocalDate, HeatmapBucket> dayBuckets, List<Object[]> rows, HeatmapActivity activity) {
+        for (Object[] row : rows) {
+            LocalDate date = toLocalDate(row[1]);
+            long count = ((Number) row[2]).longValue();
+            dayBuckets.computeIfAbsent(date, ignored -> HeatmapBucket.empty()).add(activity, count);
+        }
+    }
+
     private LocalDate toLocalDate(Object value) {
         if (value instanceof LocalDate localDate) {
             return localDate;
@@ -324,6 +377,14 @@ public class LecturerTeamAnalyticsQueryService {
 
         private long totalScore() {
             return commits * 3 + peerReviews * 2 + comments + documents + tasks * 2;
+        }
+
+        private void add(HeatmapBucket other) {
+            commits += other.commits;
+            peerReviews += other.peerReviews;
+            comments += other.comments;
+            documents += other.documents;
+            tasks += other.tasks;
         }
     }
 }

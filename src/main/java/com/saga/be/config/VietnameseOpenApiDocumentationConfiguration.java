@@ -117,6 +117,7 @@ public class VietnameseOpenApiDocumentationConfiguration {
             summary("LecturerAnalyticsController#earlyWarnings", "Xem cảnh báo sớm của khóa học"),
             summary("LecturerAnalyticsController#interactions", "Xem tương tác giữa các thành viên nhóm"),
             summary("LecturerAnalyticsController#heatmap", "Xem bản đồ nhiệt hoạt động của nhóm"),
+            summary("LecturerAnalyticsController#overview", "Xem tổng quan hoạt động theo ngày của nhóm"),
             summary("LecturerAnalyticsController#velocity", "Xem vận tốc Sprint của nhóm"),
             summary("MyCourseTeamController#getMyCourseTeamMembers", "Xem thành viên nhóm của tôi trong khóa học"),
             summary("MyFirebaseInstallationController#register", "Đăng ký trình duyệt hiện tại để nhận thông báo đẩy"),

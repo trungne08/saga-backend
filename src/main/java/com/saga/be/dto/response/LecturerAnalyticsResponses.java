@@ -80,6 +80,9 @@ public final class LecturerAnalyticsResponses {
                                   LocalDate endDate, List<HeatmapStudentRow> students,
                                   List<HeatmapDay> days) { }
 
+    public record ActivityOverview(UUID courseId, UUID teamId, LocalDate startDate, LocalDate endDate,
+                                   List<OverviewDay> days, ActivityTotals totals) { }
+
     public record HeatmapStudentRow(
             UUID studentId,
             String studentCode,
@@ -107,6 +110,27 @@ public final class LecturerAnalyticsResponses {
 
     public record HeatmapDay(
             LocalDate date,
+            long commits,
+            long peerReviews,
+            long comments,
+            long documents,
+            long tasks,
+            long totalActivities,
+            long totalScore
+    ) { }
+
+    public record OverviewDay(
+            LocalDate date,
+            long commits,
+            long peerReviews,
+            long comments,
+            long documents,
+            long tasks,
+            long totalActivities,
+            long totalScore
+    ) { }
+
+    public record ActivityTotals(
             long commits,
             long peerReviews,
             long comments,

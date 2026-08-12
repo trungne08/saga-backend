@@ -46,6 +46,19 @@ public class LecturerAnalyticsController {
         return ResponseEntity.ok(teamAnalytics.detail(principal, courseId, teamId, pageRequest(page, size)));
     }
 
+    @GetMapping("/teams/{teamId}/overview")
+    @io.swagger.v3.oas.annotations.Operation(
+            summary = "Xem tổng quan hoạt động của nhóm",
+            description = "Trả chuỗi hoạt động theo ngày và tổng hợp theo loại activity; không gọi provider ngoài."
+    )
+    public ResponseEntity<LecturerAnalyticsResponses.ActivityOverview> overview(
+            @AuthenticationPrincipal SagaPrincipal principal, @PathVariable UUID courseId,
+            @PathVariable UUID teamId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+        return ResponseEntity.ok(teamAnalytics.overview(principal, courseId, teamId, startDate, endDate));
+    }
+
     @GetMapping("/students/{studentId}/progress")
     public ResponseEntity<LecturerAnalyticsResponses.StudentProgress> progress(
             @AuthenticationPrincipal SagaPrincipal principal, @PathVariable UUID courseId,

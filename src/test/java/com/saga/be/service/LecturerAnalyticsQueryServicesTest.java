@@ -210,6 +210,45 @@ class LecturerAnalyticsQueryServicesTest {
     }
 
     @Test
+    void overviewAggregatesTeamActivityAcrossAllMembers() {
+        Fixture f = fixture(true);
+        LocalDate start = LocalDate.of(2026, 8, 1);
+        LocalDate end = LocalDate.of(2026, 8, 2);
+        when(f.authorization.requireTeam(any(), any(), any())).thenReturn(f.team);
+        when(f.members.findDistinctStudentIdsByTeamId(f.teamId)).thenReturn(List.of(f.studentId));
+        when(f.commits.aggregateDailyCountsByProjectAndAuthorIds(any(), any(), any(), any()))
+                .thenReturn(List.<Object[]>of(
+                        new Object[]{f.studentId, start, 2L}
+                ));
+        when(f.peers.aggregateDailyCountsByProjectAndReviewerIds(any(), any(), any(), any()))
+                .thenReturn(List.<Object[]>of(
+                        new Object[]{f.studentId, start, 1L}
+                ));
+        when(f.comments.aggregateDailyCountsByProjectAndAuthorIds(any(), any(), any(), any()))
+                .thenReturn(List.<Object[]>of(
+                        new Object[]{f.studentId, end, 3L}
+                ));
+        when(f.documents.aggregateDailyCountsByProjectAndAuthorIds(any(), any(), any(), any()))
+                .thenReturn(List.<Object[]>of(
+                        new Object[]{f.studentId, end, 4L}
+                ));
+        when(f.tasks.aggregateDailyCountsByProjectAndAssigneeIds(any(), any(), any(), any()))
+                .thenReturn(List.<Object[]>of(
+                        new Object[]{f.studentId, end, 5L}
+                ));
+
+        LecturerAnalyticsResponses.ActivityOverview overview = teamService(f)
+                .overview(null, f.courseId, f.teamId, start, end);
+
+        assertEquals(2, overview.days().size());
+        assertEquals(8, overview.days().get(0).totalScore());
+        assertEquals(3, overview.days().get(0).totalActivities());
+        assertEquals(17, overview.days().get(1).totalScore());
+        assertEquals(25, overview.totals().totalScore());
+        assertEquals(15, overview.totals().totalActivities());
+    }
+
+    @Test
     void activitiesUseDeterministicSourceIdSecondaryOrder() {
         Fixture f = fixture(true);
         UUID firstId = UUID.fromString("00000000-0000-0000-0000-000000000001");
