@@ -1,3 +1,13 @@
+## DEC-074 — External Jira issue delete dùng authenticated tombstone; generic sync sở hữu estimation projection
+
+- Ngày: 2026-08-13; trạng thái: ACCEPTED / CONFIRMED_SOURCE_TEST; runtime **TBD_DEPLOYMENT_SMOKE**.
+- Context: webhook registration đã gồm issue create/update/delete, nhưng processor cũ gửi cả ba vào updated-window search. Cách đó hydrate được create/update nếu delivery + window thành công, nhưng issue đã delete không còn trong search để tombstone. Generic search cũ chỉ discovery Sprint field nên không bao giờ project Story Point dù canonical per-mutation GET đã hỗ trợ parser J1I.
+- Quyết định create/update: giữ authenticated encrypted deduplicated receipt → shared canonical reconciliation. Không parse raw webhook thành canonical Task. Scheduler/manual reconciliation tiếp tục là fallback.
+- Quyết định estimation: mỗi Jira sync discovery exact estimation field từ board configuration, yêu cầu field đó trong search và đánh dấu projection authoritative chỉ khi provider thật sự trả property. Whole non-negative string/number dùng normalization DEC-065. Explicit null replace/clear local; omitted property giữ local để tránh accidental clear. Không hardcode field ID.
+- Quyết định delete: sau authentication, dedup và board resolution, `jira:issue_deleted` chỉ dùng minimal issue ID hoặc key để lookup Task trong đúng owning Project rồi set `deletedAt` UTC theo DEC-035. Stable ID thắng; key chỉ fallback khi ID thiếu. Unknown/already tombstoned là controlled no-op; không hard-delete/cascade hoặc cross-project lookup.
+- Ordering: `JiraIssueUpsertService` không bao giờ clear `deletedAt`. Vì vậy delete tombstone là monotonic đối với generic canonical snapshots và snapshot cũ chạy sau delete không resurrect Task. Không thêm remote event-version ordering hoặc schema/migration.
+- Diagnostics/operations: log chỉ receipt ID, local board ID, event/result và sync stage/count/category; không raw payload, external issue identity, token/secret. Existing Admin health được mở rộng local-only với latest safe receipt summary và latest Jira webhook-maintenance result. Mỗi maintenance attempt persist `SyncJobLog OTHER` stage `WEBHOOK_MAINTENANCE`, nên `/sync-history` có evidence success/failure mà không provider-live call. Targeted Jira/webhook/admin regression pass **13 suites / 184 tests / 0 failures / 0 errors / 0 skipped**. Full clean chạy **134 suites / 848 tests / 2 failures / 0 errors / 0 skipped**: baseline Course roster/DEC-023 đã biết và một notification ordering failure ngoài scope; notification suite rerun riêng pass **8/8**.
+
 ## DEC-073 — Gmail REST API HTTPS thay Gmail SMTP cho Student Course Invitation
 
 - Ngày: 2026-08-11; trạng thái: ACCEPTED / CONFIRMED_SOURCE_TEST, production delivery **TBD_DEPLOYMENT_SMOKE**.

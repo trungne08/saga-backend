@@ -1122,6 +1122,29 @@ public class JiraProviderClientImpl implements JiraProviderClient {
             String nextPageToken,
             String sprintFieldId
     ) {
+        return searchIssues(
+                accessToken,
+                cloudId,
+                projectKey,
+                lowerBoundUtc,
+                capturedUpperBoundUtc,
+                nextPageToken,
+                null,
+                sprintFieldId
+        );
+    }
+
+    @Override
+    public JiraIssuePage searchIssues(
+            String accessToken,
+            String cloudId,
+            String projectKey,
+            Instant lowerBoundUtc,
+            Instant capturedUpperBoundUtc,
+            String nextPageToken,
+            String estimationFieldId,
+            String sprintFieldId
+    ) {
         ZoneId jiraZoneId = jiraZoneId();
         LocalDateTime lowerBoundForJql = JiraSyncWindow.lowerBoundForJql(
                 lowerBoundUtc,
@@ -1150,7 +1173,7 @@ public class JiraProviderClientImpl implements JiraProviderClient {
                 )
                 .queryParam("jql", jql)
                 .queryParam("maxResults", 100)
-                .queryParam("fields", issueFields(null, sprintFieldId));
+                .queryParam("fields", issueFields(estimationFieldId, sprintFieldId));
         if (nextPageToken != null && !nextPageToken.isBlank()) {
             builder.queryParam("nextPageToken", nextPageToken);
         }
@@ -1161,7 +1184,7 @@ public class JiraProviderClientImpl implements JiraProviderClient {
             throw providerResponseInvalid();
         }
         List<JiraIssueSnapshot> snapshots = new ArrayList<>();
-        issues.forEach(issue -> snapshots.add(toIssue(issue, null, sprintFieldId)));
+        issues.forEach(issue -> snapshots.add(toIssue(issue, estimationFieldId, sprintFieldId)));
         String next = text(response, "nextPageToken");
         return new JiraIssuePage(
                 snapshots,
@@ -1812,6 +1835,10 @@ public class JiraProviderClientImpl implements JiraProviderClient {
     ) {
         JsonNode fields = issue.path("fields");
         JsonNode sprint = sprintValue(fields, sprintFieldId);
+        JsonNode estimation = estimationFieldId == null
+                ? null
+                : fields.get(estimationFieldId);
+        boolean storyPointsAuthoritative = estimation != null;
         String updatedText = text(fields, "updated");
         LocalDateTime updatedAt = parseDateOrDateTime(updatedText);
         Instant updatedAtUtc = parseInstant(updatedText);
@@ -1825,7 +1852,9 @@ public class JiraProviderClientImpl implements JiraProviderClient {
                 nestedText(fields, "issuetype", "name"),
                 nestedText(fields, "status", "name"),
                 nestedText(fields, "priority", "name"),
-                estimationFieldId == null ? null : estimationValue(fields.path(estimationFieldId)),
+                !storyPointsAuthoritative || estimation.isNull()
+                        ? null
+                        : estimationValue(estimation),
                 nestedText(fields, "assignee", "accountId"),
                 nestedText(fields, "reporter", "accountId"),
                 parseDateOrDateTime(text(fields, "duedate")),
@@ -1838,7 +1867,8 @@ public class JiraProviderClientImpl implements JiraProviderClient {
                 updatedAtUtc,
                 labels(fields.path("labels")),
                 description(fields.path("description")),
-                components(fields.path("components"))
+                components(fields.path("components")),
+                storyPointsAuthoritative
         );
     }
 

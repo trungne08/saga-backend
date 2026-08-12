@@ -1,5 +1,14 @@
 ## J1J Update Priority business contract — 2026-08-10
 
+## Jira Web sync correctness — 2026-08-13
+
+Không có frontend endpoint hay auth flow mới. Jira Web gửi provider webhook tới backend; FE không gọi/replay webhook và vẫn đọc Task local bằng browser session.
+
+- Issue created/updated: authenticated webhook tạo durable deduplicated receipt rồi kích hoạt canonical Jira reconciliation. Scheduler/manual sync là fallback; UI có thể theo dõi safe state qua `/api/projects/{projectId}/sync-status`, `/sync-history` và Admin local integration health.
+- Story Point: generic reconciliation tự discovery estimation field theo board và request exact field; FE không gửi/nhập `customfield_*`. Giá trị Jira whole non-negative như `5`, `5.0`, `"5"`, `"5.0"` map về integer. Canonical null clear local; field provider omit không làm mất giá trị cũ.
+- Issue deleted trực tiếp trên Jira Web: authenticated delete receipt tombstone Task local; Task biến khỏi active list/detail. Duplicate/unknown delete là no-op có kiểm soát và không ảnh hưởng Project khác. Backend không hard-delete Contribution/Peer Review/history.
+- Admin health local-only có thêm `latestWebhookReceipt` cho Jira/GitHub và `latestWebhookMaintenance` cho Jira; sync history có maintenance job `OTHER` với safe stage/category. Đây là persisted diagnostics, không phải provider-live ping. Runtime delivery trên Jira Cloud/Railway vẫn `TBD_DEPLOYMENT_SMOKE`; FE không gửi Bearer, provider token, secret hoặc raw Jira payload.
+
 Normal FE cập nhật priority bằng business enum, không lấy hoặc hardcode Jira numeric/provider ID:
 
 ```json

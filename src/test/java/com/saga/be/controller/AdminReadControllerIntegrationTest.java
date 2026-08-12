@@ -19,6 +19,7 @@ import com.saga.be.entity.JiraBoard;
 import com.saga.be.entity.Lecturer;
 import com.saga.be.entity.Project;
 import com.saga.be.entity.Student;
+import com.saga.be.entity.SyncJobLog;
 import com.saga.be.entity.SystemAuditLog;
 import com.saga.be.entity.Team;
 import com.saga.be.entity.WebhookReceipt;
@@ -26,6 +27,8 @@ import com.saga.be.entity.enums.AccountStatus;
 import com.saga.be.entity.enums.GitHubInstallationStatus;
 import com.saga.be.entity.enums.IntegrationStatus;
 import com.saga.be.entity.enums.IntegrationProvider;
+import com.saga.be.entity.enums.SyncJobStatus;
+import com.saga.be.entity.enums.SyncJobType;
 import com.saga.be.entity.enums.WebhookReceiptStatus;
 import com.saga.be.integration.provider.GitHubProviderClient;
 import com.saga.be.integration.provider.JiraProviderClient;
@@ -37,6 +40,7 @@ import com.saga.be.repository.JiraBoardRepository;
 import com.saga.be.repository.LecturerRepository;
 import com.saga.be.repository.ProjectRepository;
 import com.saga.be.repository.StudentRepository;
+import com.saga.be.repository.SyncJobLogRepository;
 import com.saga.be.repository.SystemAuditLogRepository;
 import com.saga.be.repository.TeamRepository;
 import com.saga.be.repository.WebhookReceiptRepository;
@@ -78,6 +82,7 @@ class AdminReadControllerIntegrationTest {
     @Autowired private GitRepoRepository gitRepoRepository;
     @Autowired private GitHubInstallationRepository gitHubInstallationRepository;
     @Autowired private WebhookReceiptRepository webhookReceiptRepository;
+    @Autowired private SyncJobLogRepository syncJobLogRepository;
     @MockitoBean private SystemAuditLogRepository systemAuditLogRepository;
     @MockitoBean private JiraProviderClient jiraProviderClient;
     @MockitoBean private GitHubProviderClient gitHubProviderClient;
@@ -91,6 +96,7 @@ class AdminReadControllerIntegrationTest {
     @AfterEach
     void cleanupAndVerifyProviderIsolation() {
         webhookReceiptRepository.deleteAll();
+        syncJobLogRepository.deleteAll();
         gitRepoRepository.deleteAll();
         gitHubInstallationRepository.deleteAll();
         jiraBoardRepository.deleteAll();
@@ -237,7 +243,7 @@ class AdminReadControllerIntegrationTest {
         Course course = courseRepository.saveAndFlush(Course.builder().courseCode("HEALTH").name("Health Course").build());
         Project jiraProject = projectRepository.saveAndFlush(Project.builder().course(course).name("Jira Project").build());
         Project gitHubProject = projectRepository.saveAndFlush(Project.builder().course(course).name("GitHub Project").build());
-        jiraBoardRepository.saveAndFlush(JiraBoard.builder().project(jiraProject)
+        JiraBoard jiraBoard = jiraBoardRepository.saveAndFlush(JiraBoard.builder().project(jiraProject)
                 .connectionStatus(IntegrationStatus.ACTIVE).webhookId("stored-webhook-id")
                 .lastSyncedAt(LocalDateTime.of(2026, 8, 9, 8, 0))
                 .encryptedAccessToken("never-return-token").encryptedRefreshToken("never-return-refresh").build());
@@ -251,12 +257,25 @@ class AdminReadControllerIntegrationTest {
                 .lastSyncedAt(LocalDateTime.of(2026, 8, 9, 9, 0)).url("https://never-return.example/repo").build());
         gitRepoRepository.saveAndFlush(GitRepo.builder().project(gitHubProject).installation(installation)
                 .name("repo-b").connectionStatus(IntegrationStatus.DEGRADED).build());
-        webhookReceiptRepository.saveAndFlush(WebhookReceipt.builder().provider(IntegrationProvider.JIRA)
+        WebhookReceipt jiraReceipt = webhookReceiptRepository.saveAndFlush(WebhookReceipt.builder().provider(IntegrationProvider.JIRA)
                 .deliveryId("jira-delivery").eventType("issue_updated").payloadCiphertext("never-return-payload")
-                .receiptStatus(WebhookReceiptStatus.COMPLETED).build());
+                .receiptStatus(WebhookReceiptStatus.COMPLETED)
+                .processedAt(LocalDateTime.of(2026, 8, 9, 8, 5)).build());
         webhookReceiptRepository.saveAndFlush(WebhookReceipt.builder().provider(IntegrationProvider.GITHUB)
                 .deliveryId("github-delivery").eventType("push").payloadCiphertext("never-return-payload")
                 .receiptStatus(WebhookReceiptStatus.FAILED).build());
+        syncJobLogRepository.saveAndFlush(SyncJobLog.builder()
+                .targetSystem("JIRA")
+                .targetId(jiraBoard.getId())
+                .jobType(SyncJobType.OTHER)
+                .status(SyncJobStatus.FAILED)
+                .errorCategory("JIRA_WEBHOOK_PROVIDER_UNAVAILABLE")
+                .failureStage("WEBHOOK_MAINTENANCE")
+                .startedAt(LocalDateTime.of(2026, 8, 9, 8, 10))
+                .completedAt(LocalDateTime.of(2026, 8, 9, 8, 11))
+                .itemsProcessed(0)
+                .itemsFailed(1)
+                .build());
 
         String response = mockMvc.perform(get("/api/admin/integrations/health")
                         .with(authentication(authenticationFor(ApplicationRole.ADMIN))))
@@ -269,6 +288,17 @@ class AdminReadControllerIntegrationTest {
                 .andExpect(jsonPath("$.jira.connectionStatuses[3].count").value(1))
                 .andExpect(jsonPath("$.jira.storedWebhookIdCount").value(1))
                 .andExpect(jsonPath("$.jira.latestLastSyncedAt").value("2026-08-09T08:00:00"))
+                .andExpect(jsonPath("$.jira.latestWebhookReceipt.receiptId").value(jiraReceipt.getId().toString()))
+                .andExpect(jsonPath("$.jira.latestWebhookReceipt.eventType").value("issue_updated"))
+                .andExpect(jsonPath("$.jira.latestWebhookReceipt.status").value("COMPLETED"))
+                .andExpect(jsonPath("$.jira.latestWebhookReceipt.receivedAt").isNotEmpty())
+                .andExpect(jsonPath("$.jira.latestWebhookReceipt.processedAt").value("2026-08-09T08:05:00"))
+                .andExpect(jsonPath("$.jira.latestWebhookMaintenance.status").value("FAILED"))
+                .andExpect(jsonPath("$.jira.latestWebhookMaintenance.jiraBoardId")
+                        .value(jiraBoard.getId().toString()))
+                .andExpect(jsonPath("$.jira.latestWebhookMaintenance.occurredAt").value("2026-08-09T08:11:00"))
+                .andExpect(jsonPath("$.jira.latestWebhookMaintenance.safeErrorCode")
+                        .value("JIRA_WEBHOOK_PROVIDER_UNAVAILABLE"))
                 .andExpect(jsonPath("$.jira.webhookReceiptStatuses[2].count").value(1))
                 .andExpect(jsonPath("$.gitHub.enabled").value(false))
                 .andExpect(jsonPath("$.gitHub.linkedProjectCount").value(1))
@@ -277,6 +307,8 @@ class AdminReadControllerIntegrationTest {
                 .andExpect(jsonPath("$.gitHub.installationStatuses[0].status").value("ACTIVE"))
                 .andExpect(jsonPath("$.gitHub.installationStatuses[0].count").value(1))
                 .andExpect(jsonPath("$.gitHub.latestLastSyncedAt").value("2026-08-09T09:00:00"))
+                .andExpect(jsonPath("$.gitHub.latestWebhookReceipt.eventType").value("push"))
+                .andExpect(jsonPath("$.gitHub.latestWebhookReceipt.status").value("FAILED"))
                 .andExpect(jsonPath("$.gitHub.webhookReceiptStatuses[3].count").value(1))
                 .andReturn().getResponse().getContentAsString();
 

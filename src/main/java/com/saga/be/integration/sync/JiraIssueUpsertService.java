@@ -128,7 +128,7 @@ public class JiraIssueUpsertService {
         task.setType(taskType(issue.issueType()));
         task.setStatus(taskStatus(issue.status()));
         task.setPriority(priority(issue.priority()));
-        if (issue.storyPoints() != null) {
+        if (issue.storyPointsAuthoritative()) {
             task.setStoryPoint(issue.storyPoints());
         }
         task.setDueDate(issue.dueDate());

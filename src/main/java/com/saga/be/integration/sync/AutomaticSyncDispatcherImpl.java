@@ -255,6 +255,15 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
                     token,
                     board.getCloudId()
             );
+            stage = JiraSyncStage.DISCOVER_ESTIMATION_FIELD;
+            String estimationFieldId = board.getJiraBoardId() == null
+                    || board.getJiraBoardId().isBlank()
+                    ? null
+                    : jiraClient.estimationFieldId(
+                            token,
+                            board.getCloudId(),
+                            board.getJiraBoardId()
+                    );
             String nextPageToken = null;
             boolean lastPage;
             Set<String> seenPageTokens = new HashSet<>();
@@ -265,7 +274,7 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
             int issuesAfterUpperBoundFilter = 0;
             do {
                 stage = JiraSyncStage.SEARCH_ISSUES;
-                JiraIssuePage page = sprintFieldId == null
+                JiraIssuePage page = estimationFieldId == null && sprintFieldId == null
                         ? jiraClient.searchIssues(
                                 token,
                                 board.getCloudId(),
@@ -274,6 +283,16 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
                                 capturedUpperBound,
                                 nextPageToken
                         )
+                        : estimationFieldId == null
+                        ? jiraClient.searchIssues(
+                                token,
+                                board.getCloudId(),
+                                board.getProjectKey(),
+                                effectiveLowerBound,
+                                capturedUpperBound,
+                                nextPageToken,
+                                sprintFieldId
+                        )
                         : jiraClient.searchIssues(
                                 token,
                                 board.getCloudId(),
@@ -281,6 +300,7 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
                                 effectiveLowerBound,
                                 capturedUpperBound,
                                 nextPageToken,
+                                estimationFieldId,
                                 sprintFieldId
                         );
                 issuesFetchedFromProvider += page.issues().size();
@@ -1041,6 +1061,7 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
         LOAD_CREDENTIAL,
         REFRESH_TOKEN,
         DISCOVER_SPRINT_FIELD,
+        DISCOVER_ESTIMATION_FIELD,
         SEARCH_ISSUES,
         UPSERT_ISSUES,
         HYDRATE_SPRINTS,

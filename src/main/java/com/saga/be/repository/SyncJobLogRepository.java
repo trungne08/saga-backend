@@ -42,6 +42,11 @@ public interface SyncJobLogRepository extends JpaRepository<SyncJobLog, UUID> {
             SyncJobType jobType
     );
 
+    Optional<SyncJobLog> findTopByTargetSystemAndFailureStageOrderByStartedAtDescIdDesc(
+            String targetSystem,
+            String failureStage
+    );
+
     List<SyncJobLog> findByStatusIn(Collection<
             com.saga.be.entity.enums.SyncJobStatus> statuses);
 

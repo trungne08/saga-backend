@@ -1,3 +1,11 @@
+## Ràng buộc J1K Jira external Web Task sync — 2026-08-13
+
+- Jira dynamic webhook phải giữ exact registered events: `jira:issue_created`, `jira:issue_updated`, `jira:issue_deleted`, `comment_created`, `comment_updated`, `comment_deleted`, `sprint_created`, `sprint_updated`, `sprint_deleted`, `sprint_started`, `sprint_closed`. Provider request chỉ được xử lý sau JWT/board-secret authentication, durable encrypted receipt và `(provider, delivery_id)` dedup.
+- Issue create/update webhook không được dùng raw payload làm canonical Task; nó trigger shared reconciliation. Scheduler/manual sync phải reuse cùng canonical provider search/upsert path.
+- Generic Jira search phải discovery estimation field theo external board ID, request đúng field cùng Sprint discovery và không hardcode `customfield_*`. Whole non-negative string/number normalize exact về integer. Explicit returned null có quyền clear local; omitted property không được clear. Fractional/negative/blank/non-numeric/object/array/overflow fail `JIRA_RESPONSE_INVALID`.
+- Issue delete webhook chỉ dùng minimal stable issue ID, hoặc issue key khi ID thiếu, và phải scope lookup bằng Project của authenticated JiraBoard. Success đặt `Task.deletedAt` UTC; already tombstoned/unknown no-op, không hard-delete/cascade/cross-project. Generic upsert không clear tombstone nên stale canonical snapshot không resurrect Task.
+- Diagnostics không chứa raw webhook payload, issue title/key, credential, token hoặc secret. Health/sync history tiếp tục local-only; health trả latest safe receipt summary và latest persisted Jira webhook-maintenance result. Maintenance attempt phải persist safe `SyncJobLog OTHER`/`WEBHOOK_MAINTENANCE` để operator phân biệt success/failure; không error message/raw exception/provider-live call. Không migration, Bearer, session/CSRF, OAuth scope hoặc `CourseService` change.
+
 ## Ràng buộc J1J Jira Task provider-ID ownership — 2026-08-10
 
 - Normal Update Priority nhận duy nhất business `priority`; `priorityId` chỉ là backward-compatible advanced Jira provider override. Hai field cùng có mặt là `400 JIRA_PRIORITY_INVALID` trước write-operation claim và provider I/O.

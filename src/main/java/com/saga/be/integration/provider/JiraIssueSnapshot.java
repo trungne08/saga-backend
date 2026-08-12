@@ -26,12 +26,44 @@ public record JiraIssueSnapshot(
         Instant updatedAtUtc,
         List<String> labels,
         String description,
-        List<TaskComponentSnapshot> components
+        List<TaskComponentSnapshot> components,
+        boolean storyPointsAuthoritative
 ) {
 
     public JiraIssueSnapshot {
         labels = labels == null ? List.of() : List.copyOf(labels);
         components = components == null ? List.of() : List.copyOf(components);
+    }
+
+    public JiraIssueSnapshot(
+            String id,
+            String key,
+            String title,
+            String issueType,
+            String status,
+            String priority,
+            Integer storyPoints,
+            String assigneeAccountId,
+            String reporterAccountId,
+            LocalDateTime dueDate,
+            LocalDateTime createdAt,
+            LocalDateTime updatedAt,
+            LocalDateTime resolvedAt,
+            String resolution,
+            String sprintId,
+            String sprintName,
+            Instant updatedAtUtc,
+            List<String> labels,
+            String description,
+            List<TaskComponentSnapshot> components
+    ) {
+        this(
+                id, key, title, issueType, status, priority, storyPoints,
+                assigneeAccountId, reporterAccountId, dueDate, createdAt,
+                updatedAt, resolvedAt, resolution, sprintId, sprintName,
+                updatedAtUtc, labels, description, components,
+                storyPoints != null
+        );
     }
 
     public JiraIssueSnapshot(
@@ -57,7 +89,7 @@ public record JiraIssueSnapshot(
                 id, key, title, issueType, status, priority, storyPoints,
                 assigneeAccountId, reporterAccountId, dueDate, createdAt,
                 updatedAt, resolvedAt, resolution, sprintId, sprintName,
-                updatedAtUtc, List.of(), null, List.of()
+                updatedAtUtc, List.of(), null, List.of(), storyPoints != null
         );
     }
 
@@ -85,7 +117,7 @@ public record JiraIssueSnapshot(
                 id, key, title, issueType, status, priority, storyPoints,
                 assigneeAccountId, reporterAccountId, dueDate, createdAt,
                 updatedAt, resolvedAt, resolution, sprintId, sprintName,
-                updatedAtUtc, labels, null, List.of()
+                updatedAtUtc, labels, null, List.of(), storyPoints != null
         );
     }
 
@@ -112,7 +144,7 @@ public record JiraIssueSnapshot(
                 assigneeAccountId, reporterAccountId, dueDate, createdAt,
                 updatedAt, resolvedAt, resolution, sprintId, sprintName,
                 updatedAt == null ? null : updatedAt.toInstant(ZoneOffset.UTC),
-                List.of(), null, List.of()
+                List.of(), null, List.of(), storyPoints != null
         );
     }
 }

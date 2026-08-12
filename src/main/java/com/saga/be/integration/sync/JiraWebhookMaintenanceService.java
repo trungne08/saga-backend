@@ -2,11 +2,16 @@ package com.saga.be.integration.sync;
 
 import com.saga.be.config.IntegrationUrlResolver;
 import com.saga.be.entity.JiraBoard;
+import com.saga.be.entity.SyncJobLog;
 import com.saga.be.entity.enums.IntegrationStatus;
+import com.saga.be.entity.enums.SyncJobStatus;
+import com.saga.be.entity.enums.SyncJobType;
+import com.saga.be.exception.IntegrationException;
 import com.saga.be.integration.project.JiraCredentialService;
 import com.saga.be.integration.provider.JiraProviderClient;
 import com.saga.be.integration.provider.JiraWebhookRegistration;
 import com.saga.be.repository.JiraBoardRepository;
+import com.saga.be.repository.SyncJobLogRepository;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -25,18 +30,21 @@ public class JiraWebhookMaintenanceService {
     private final JiraCredentialService credentialService;
     private final JiraProviderClient jiraClient;
     private final IntegrationUrlResolver urlResolver;
+    private final SyncJobLogRepository syncJobLogRepository;
     private final SecureRandom random = new SecureRandom();
 
     public JiraWebhookMaintenanceService(
             JiraBoardRepository boardRepository,
             JiraCredentialService credentialService,
             JiraProviderClient jiraClient,
-            IntegrationUrlResolver urlResolver
+            IntegrationUrlResolver urlResolver,
+            SyncJobLogRepository syncJobLogRepository
     ) {
         this.boardRepository = boardRepository;
         this.credentialService = credentialService;
         this.jiraClient = jiraClient;
         this.urlResolver = urlResolver;
+        this.syncJobLogRepository = syncJobLogRepository;
     }
 
     public void refresh(UUID boardId) {
@@ -65,12 +73,40 @@ public class JiraWebhookMaintenanceService {
             }
             board.setWebhookExpiresAt(LocalDateTime.now().plusDays(29));
             boardRepository.saveAndFlush(board);
+            recordMaintenance(boardId, SyncJobStatus.COMPLETED, null);
         } catch (RuntimeException exception) {
             compensateCreatedWebhook(board, token, registration);
             board.setConnectionStatus(IntegrationStatus.DEGRADED);
             board.setConsecutiveFailures(board.getConsecutiveFailures() + 1);
             boardRepository.saveAndFlush(board);
+            recordMaintenance(boardId, SyncJobStatus.FAILED, categoryOf(exception));
         }
+    }
+
+    private void recordMaintenance(
+            UUID boardId,
+            SyncJobStatus status,
+            String safeErrorCode
+    ) {
+        LocalDateTime now = LocalDateTime.now();
+        syncJobLogRepository.saveAndFlush(SyncJobLog.builder()
+                .targetSystem("JIRA")
+                .targetId(boardId)
+                .jobType(SyncJobType.OTHER)
+                .status(status)
+                .errorCategory(safeErrorCode)
+                .failureStage("WEBHOOK_MAINTENANCE")
+                .startedAt(now)
+                .completedAt(now)
+                .itemsProcessed(status == SyncJobStatus.COMPLETED ? 1 : 0)
+                .itemsFailed(status == SyncJobStatus.FAILED ? 1 : 0)
+                .build());
+    }
+
+    private String categoryOf(RuntimeException exception) {
+        return exception instanceof IntegrationException integrationException
+                ? integrationException.getCode()
+                : "UNEXPECTED_WEBHOOK_MAINTENANCE_FAILURE";
     }
 
     private void compensateCreatedWebhook(

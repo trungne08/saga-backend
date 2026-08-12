@@ -1115,8 +1115,55 @@ class JiraProviderClientImplTest {
     }
 
     @Test
+    void genericSearchRequestsDiscoveredEstimationFieldAndProjectsItsValue() {
+        Fixture fixture = fixture();
+        fixture.server.expect(request -> {
+            String query = URLDecoder.decode(
+                    request.getURI().getRawQuery(), StandardCharsets.UTF_8
+            );
+            assertThat(query)
+                    .contains("customfield_story_points")
+                    .contains("customfield_sprint");
+        }).andRespond(json("""
+                {"isLast":true,"issues":[{
+                  "id":"10452","key":"SDP-42","fields":{
+                    "summary":"Canonical issue",
+                    "updated":"2026-07-31T00:30:57.360+0700",
+                    "customfield_story_points":"5.0"
+                  }
+                }]}
+                """));
+
+        JiraIssueSnapshot issue = fixture.client.searchIssues(
+                "ACCESS_TOKEN_SECRET",
+                CLOUD_ID,
+                "SDP",
+                null,
+                Instant.parse("2026-07-31T00:31:02Z"),
+                null,
+                "customfield_story_points",
+                "customfield_sprint"
+        ).issues().get(0);
+
+        assertEquals(5, issue.storyPoints());
+        assertThat(issue.storyPointsAuthoritative()).isTrue();
+        fixture.server.verify();
+    }
+
+    @Test
+    void requestedNullEstimationIsAuthoritativeButOmittedFieldIsNot() {
+        JiraIssueSnapshot requestedNull = canonicalEstimation("null");
+        JiraIssueSnapshot omitted = canonicalEstimation(null);
+
+        assertThat(requestedNull.storyPoints()).isNull();
+        assertThat(requestedNull.storyPointsAuthoritative()).isTrue();
+        assertThat(omitted.storyPoints()).isNull();
+        assertThat(omitted.storyPointsAuthoritative()).isFalse();
+    }
+
+    @Test
     void rejectsNonWholeOrMissingCanonicalEstimationValues() {
-        for (String value : Arrays.asList("\"5.5\"", "\"abc\"", "\"\"", "-1", "2147483648", "{}", "[]", null)) {
+        for (String value : Arrays.asList("\"5.5\"", "\"abc\"", "\"\"", "-1", "2147483648", "{}", "[]")) {
             assertEquals("JIRA_RESPONSE_INVALID", assertThrows(IntegrationException.class,
                     () -> canonicalEstimation(value)).getCode());
         }

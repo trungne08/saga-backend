@@ -217,4 +217,25 @@ public interface JiraProviderClient {
                 nextPageToken
         );
     }
+
+    default JiraIssuePage searchIssues(
+            String accessToken,
+            String cloudId,
+            String projectKey,
+            Instant lowerBoundUtc,
+            Instant capturedUpperBoundUtc,
+            String nextPageToken,
+            String estimationFieldId,
+            String sprintFieldId
+    ) {
+        return searchIssues(
+                accessToken,
+                cloudId,
+                projectKey,
+                lowerBoundUtc,
+                capturedUpperBoundUtc,
+                nextPageToken,
+                sprintFieldId
+        );
+    }
 }

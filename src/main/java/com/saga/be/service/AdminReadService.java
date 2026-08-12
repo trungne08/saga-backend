@@ -12,7 +12,9 @@ import com.saga.be.entity.Course;
 import com.saga.be.entity.GitRepo;
 import com.saga.be.entity.JiraBoard;
 import com.saga.be.entity.Project;
+import com.saga.be.entity.SyncJobLog;
 import com.saga.be.entity.Team;
+import com.saga.be.entity.WebhookReceipt;
 import com.saga.be.entity.enums.AccountStatus;
 import com.saga.be.entity.enums.GitHubInstallationStatus;
 import com.saga.be.entity.enums.IntegrationStatus;
@@ -28,6 +30,7 @@ import com.saga.be.repository.JiraBoardRepository;
 import com.saga.be.repository.LecturerRepository;
 import com.saga.be.repository.ProjectRepository;
 import com.saga.be.repository.StudentRepository;
+import com.saga.be.repository.SyncJobLogRepository;
 import com.saga.be.repository.SystemAuditLogRepository;
 import com.saga.be.repository.TeamRepository;
 import com.saga.be.repository.WebhookReceiptRepository;
@@ -67,6 +70,7 @@ public class AdminReadService {
     private final GitRepoRepository gitRepoRepository;
     private final GitHubInstallationRepository gitHubInstallationRepository;
     private final WebhookReceiptRepository webhookReceiptRepository;
+    private final SyncJobLogRepository syncJobLogRepository;
     private final IntegrationAvailability integrationAvailability;
 
     @Transactional(readOnly = true)
@@ -101,6 +105,8 @@ public class AdminReadService {
                         connectionStatusCounts(jiraBoardRepository::countByConnectionStatus),
                         jiraBoardRepository.countByWebhookIdIsNotNull(),
                         jiraBoardRepository.findLatestLastSyncedAt(),
+                        latestWebhookReceipt(IntegrationProvider.JIRA),
+                        latestWebhookMaintenance(),
                         webhookReceiptStatusCounts(IntegrationProvider.JIRA)
                 ),
                 new AdminIntegrationHealthResponse.GitHubLocalState(
@@ -109,6 +115,7 @@ public class AdminReadService {
                         connectionStatusCounts(gitRepoRepository::countByConnectionStatus),
                         installationStatusCounts(),
                         gitRepoRepository.findLatestLastSyncedAt(),
+                        latestWebhookReceipt(IntegrationProvider.GITHUB),
                         webhookReceiptStatusCounts(IntegrationProvider.GITHUB)
                 )
         );
@@ -173,6 +180,48 @@ public class AdminReadService {
                 .map(status -> new AdminIntegrationHealthResponse.WebhookReceiptStatusCount(
                         status, webhookReceiptRepository.countByProviderAndReceiptStatus(provider, status)))
                 .toList();
+    }
+
+    private AdminIntegrationHealthResponse.WebhookReceiptSummary latestWebhookReceipt(
+            IntegrationProvider provider
+    ) {
+        return webhookReceiptRepository.findTopByProviderOrderByCreatedAtDescIdDesc(provider)
+                .map(this::webhookReceiptSummary)
+                .orElse(null);
+    }
+
+    private AdminIntegrationHealthResponse.WebhookReceiptSummary webhookReceiptSummary(
+            WebhookReceipt receipt
+    ) {
+        return new AdminIntegrationHealthResponse.WebhookReceiptSummary(
+                receipt.getId(),
+                receipt.getEventType(),
+                receipt.getReceiptStatus(),
+                receipt.getCreatedAt(),
+                receipt.getProcessedAt(),
+                receipt.getErrorCategory()
+        );
+    }
+
+    private AdminIntegrationHealthResponse.WebhookMaintenanceResult latestWebhookMaintenance() {
+        return syncJobLogRepository
+                .findTopByTargetSystemAndFailureStageOrderByStartedAtDescIdDesc(
+                        "JIRA",
+                        "WEBHOOK_MAINTENANCE"
+                )
+                .map(this::webhookMaintenanceResult)
+                .orElse(null);
+    }
+
+    private AdminIntegrationHealthResponse.WebhookMaintenanceResult webhookMaintenanceResult(
+            SyncJobLog job
+    ) {
+        return new AdminIntegrationHealthResponse.WebhookMaintenanceResult(
+                job.getTargetId(),
+                job.getStatus(),
+                job.getCompletedAt() == null ? job.getStartedAt() : job.getCompletedAt(),
+                job.getErrorCategory()
+        );
     }
 
     private void validatePage(int page, int size) {

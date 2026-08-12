@@ -271,6 +271,35 @@ class AutomaticSyncDispatcherImplTest {
     }
 
     @Test
+    void jiraReconciliationDiscoversAndProjectsBoardEstimationField() {
+        board.setJiraBoardId("35");
+        JiraIssueSnapshot estimated = new JiraIssueSnapshot(
+                "1", "SAGA-1", "Estimated task", "Task", "To Do", "Medium",
+                5, null, null, null,
+                LocalDateTime.parse("2026-08-04T04:00:00"),
+                LocalDateTime.parse("2026-08-04T05:00:00"),
+                null, null, null, null,
+                Instant.parse("2026-08-04T05:00:00Z"),
+                List.of(), null, List.of(), true
+        );
+        when(jiraClient.estimationFieldId("token", "cloud-id", "35"))
+                .thenReturn("customfield_story_points");
+        when(jiraClient.searchIssues(
+                eq("token"), eq("cloud-id"), eq("SAGA"), any(), any(), eq(null),
+                eq("customfield_story_points"), isNull()
+        )).thenReturn(new JiraIssuePage(List.of(estimated), null, true));
+
+        dispatcher.syncJira(boardId, SyncJobType.RECONCILIATION);
+
+        verify(jiraClient).estimationFieldId("token", "cloud-id", "35");
+        verify(jiraClient).searchIssues(
+                eq("token"), eq("cloud-id"), eq("SAGA"), any(), any(), eq(null),
+                eq("customfield_story_points"), isNull()
+        );
+        verify(jiraUpsertService).upsert(boardId, estimated);
+    }
+
+    @Test
     void jiraSyncHydratesEachDistinctIssueSprintExactlyOnce() {
         JiraIssueSnapshot first = issueInSprint("1", "42", "Sprint 42");
         JiraIssueSnapshot second = issueInSprint("2", "42", "Sprint 42");

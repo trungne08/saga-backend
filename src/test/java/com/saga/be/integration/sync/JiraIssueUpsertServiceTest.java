@@ -259,6 +259,50 @@ class JiraIssueUpsertServiceTest {
     }
 
     @Test
+    void authoritativeNullStoryPointClearsLocalValue() {
+        Task existing = Task.builder().storyPoint(8).build();
+        when(taskRepository.findByProjectIdAndExternalId(projectId, "jira-10001"))
+                .thenReturn(Optional.of(existing));
+        when(taskRepository.saveAndFlush(existing)).thenReturn(existing);
+
+        service.upsert(boardId, storyPointSnapshot(null, true));
+
+        assertEquals(null, existing.getStoryPoint());
+    }
+
+    @Test
+    void omittedStoryPointProjectionPreservesLocalValue() {
+        Task existing = Task.builder().storyPoint(8).build();
+        when(taskRepository.findByProjectIdAndExternalId(projectId, "jira-10001"))
+                .thenReturn(Optional.of(existing));
+        when(taskRepository.saveAndFlush(existing)).thenReturn(existing);
+
+        service.upsert(boardId, storyPointSnapshot(null, false));
+
+        assertEquals(8, existing.getStoryPoint());
+    }
+
+    @Test
+    void canonicalSnapshotCannotResurrectWebhookTombstone() {
+        LocalDateTime deletedAt = LocalDateTime.parse("2026-08-13T04:05:06");
+        Task existing = Task.builder()
+                .externalId("jira-10001")
+                .deletedAt(deletedAt)
+                .build();
+        when(taskRepository.findByProjectIdAndExternalId(projectId, "jira-10001"))
+                .thenReturn(Optional.of(existing));
+        when(taskRepository.saveAndFlush(existing)).thenReturn(existing);
+
+        service.upsert(boardId, snapshot(
+                "jira-10001",
+                "In Progress",
+                LocalDateTime.parse("2026-08-13T04:06:00")
+        ));
+
+        assertEquals(deletedAt, existing.getDeletedAt());
+    }
+
+    @Test
     void duplicateInsertFromConcurrentReconciliationReloadsAndAppliesCanonicalSnapshot() {
         Task raced = new Task();
         when(taskRepository.findByProjectIdAndExternalId(projectId, "jira-10001"))
@@ -354,6 +398,36 @@ class JiraIssueUpsertServiceTest {
                 labels,
                 description,
                 components
+        );
+    }
+
+    private JiraIssueSnapshot storyPointSnapshot(
+            Integer storyPoints,
+            boolean authoritative
+    ) {
+        LocalDateTime updatedAt = LocalDateTime.parse("2026-08-13T04:05:06");
+        return new JiraIssueSnapshot(
+                "jira-10001",
+                "SAGA-1",
+                "task title",
+                "Task",
+                "To Do",
+                "Medium",
+                storyPoints,
+                null,
+                null,
+                null,
+                updatedAt.minusDays(1),
+                updatedAt,
+                null,
+                null,
+                null,
+                null,
+                updatedAt.toInstant(java.time.ZoneOffset.UTC),
+                List.of(),
+                null,
+                List.of(),
+                authoritative
         );
     }
 }

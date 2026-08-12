@@ -20,6 +20,8 @@ import jakarta.persistence.LockModeType;
 public interface TaskRepository extends JpaRepository<Task, UUID>, JpaSpecificationExecutor<Task> {
     Optional<Task> findByProjectIdAndExternalId(UUID projectId, String externalId);
 
+    Optional<Task> findByProjectIdAndExternalKey(UUID projectId, String externalKey);
+
     @EntityGraph(attributePaths = {"sprint", "assignee", "reporter"})
     Page<Task> findAll(Specification<Task> specification, Pageable pageable);
 
