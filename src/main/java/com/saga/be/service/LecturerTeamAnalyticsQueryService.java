@@ -11,6 +11,8 @@ import com.saga.be.entity.TeamMember;
 import com.saga.be.entity.enums.TaskStatus;
 import com.saga.be.entity.enums.TaskType;
 import com.saga.be.repository.CommitDataRepository;
+import com.saga.be.repository.CommentRepository;
+import com.saga.be.repository.DocumentRepository;
 import com.saga.be.repository.GitRepoRepository;
 import com.saga.be.repository.PeerReviewRepository;
 import com.saga.be.repository.SprintRepository;
@@ -18,8 +20,11 @@ import com.saga.be.repository.TaskRepository;
 import com.saga.be.repository.TeamMemberRepository;
 import com.saga.be.security.SagaPrincipal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -39,6 +44,8 @@ public class LecturerTeamAnalyticsQueryService {
     private final GitRepoRepository gitRepoRepository;
     private final TaskRepository taskRepository;
     private final CommitDataRepository commitDataRepository;
+    private final DocumentRepository documentRepository;
+    private final CommentRepository commentRepository;
     private final SprintRepository sprintRepository;
     private final PeerReviewRepository peerReviewRepository;
 
@@ -102,7 +109,8 @@ public class LecturerTeamAnalyticsQueryService {
                 memberIds, team.getProject().getId())) {
             if (review.getReviewer() != null && review.getReviewee() != null
                     && memberIds.contains(review.getReviewer().getId())) {
-                counts.merge(review.getReviewer().getId() + ":" + review.getReviewee().getId(), 1L, Long::sum);
+                String key = review.getReviewer().getId() + ":" + review.getReviewee().getId();
+                counts.put(key, counts.getOrDefault(key, 0L) + 1L);
             }
         }
         List<LecturerAnalyticsResponses.InteractionEdge> edges = counts.entrySet().stream().map(entry -> {
@@ -120,25 +128,54 @@ public class LecturerTeamAnalyticsQueryService {
         if (startDate.isAfter(endDate)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "startDate không được sau endDate");
         }
-        if (studentId != null && !teamMemberRepository.existsByTeamIdAndStudentId(teamId, studentId)) {
+        List<TeamMember> members = studentId == null
+                ? new ArrayList<>(teamMemberRepository.findByTeamId(teamId))
+                : teamMemberRepository.findByTeamIdAndStudentId(teamId, studentId)
+                .map(member -> new ArrayList<>(List.of(member)))
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy Student trong Team"));
+        if (studentId != null && members.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy Student trong Team");
         }
-        Map<LocalDate, Long> counts = new HashMap<>();
-        if (team.getProject() != null) {
-            for (Object[] row : commitDataRepository.aggregateDailyCounts(team.getProject().getId(), studentId,
-                    startDate.atStartOfDay(), endDate.plusDays(1).atStartOfDay())) {
-                LocalDate day = row[0] instanceof LocalDate localDate
-                        ? localDate : ((java.sql.Date) row[0]).toLocalDate();
-                counts.put(day, ((Number) row[1]).longValue());
-            }
+        members.sort(Comparator.comparing(
+                (TeamMember member) -> member.getStudent().getStudentCode(),
+                Comparator.nullsLast(String.CASE_INSENSITIVE_ORDER)
+        ).thenComparing(
+                (TeamMember member) -> member.getStudent().getFullName(),
+                Comparator.nullsLast(String.CASE_INSENSITIVE_ORDER)
+        ).thenComparing(member -> member.getStudent().getId()));
+        Map<UUID, StudentHeatmapAccumulator> studentBuckets = new LinkedHashMap<>();
+        for (TeamMember member : members) {
+            studentBuckets.put(member.getStudent().getId(), new StudentHeatmapAccumulator(member.getStudent().getStudentCode(),
+                    member.getStudent().getFullName()));
         }
+        Map<LocalDate, HeatmapBucket> dayBuckets = new HashMap<>();
+        if (team.getProject() != null && !studentBuckets.isEmpty()) {
+            UUID projectId = team.getProject().getId();
+            List<UUID> studentIds = new ArrayList<>(studentBuckets.keySet());
+            LocalDateTime startAt = startDate.atStartOfDay();
+            LocalDateTime endExclusive = endDate.plusDays(1).atStartOfDay();
+            merge(studentBuckets, dayBuckets, commitDataRepository.aggregateDailyCountsByProjectAndAuthorIds(
+                    projectId, studentIds, startAt, endExclusive), HeatmapActivity.COMMIT);
+            merge(studentBuckets, dayBuckets, peerReviewRepository.aggregateDailyCountsByProjectAndReviewerIds(
+                    projectId, studentIds, startAt, endExclusive), HeatmapActivity.PEER_REVIEW);
+            merge(studentBuckets, dayBuckets, commentRepository.aggregateDailyCountsByProjectAndAuthorIds(
+                    projectId, studentIds, startAt, endExclusive), HeatmapActivity.COMMENT);
+            merge(studentBuckets, dayBuckets, documentRepository.aggregateDailyCountsByProjectAndAuthorIds(
+                    projectId, studentIds, startAt, endExclusive), HeatmapActivity.DOCUMENT);
+            merge(studentBuckets, dayBuckets, taskRepository.aggregateDailyCountsByProjectAndAssigneeIds(
+                    projectId, studentIds, startAt, endExclusive), HeatmapActivity.TASK);
+        }
+        List<LecturerAnalyticsResponses.HeatmapStudentRow> rows = studentBuckets.entrySet().stream()
+                .map(entry -> toRow(entry.getKey(), entry.getValue(), startDate, endDate))
+                .toList();
         List<LecturerAnalyticsResponses.HeatmapDay> days = new ArrayList<>();
         for (LocalDate day = startDate; !day.isAfter(endDate); day = day.plusDays(1)) {
-            long count = counts.getOrDefault(day, 0L);
-            days.add(new LecturerAnalyticsResponses.HeatmapDay(day, count, count));
+            HeatmapBucket bucket = dayBuckets.getOrDefault(day, HeatmapBucket.empty());
+            days.add(new LecturerAnalyticsResponses.HeatmapDay(day, bucket.commits, bucket.peerReviews,
+                    bucket.comments, bucket.documents, bucket.tasks, bucket.totalActivities(), bucket.totalScore()));
         }
         return new LecturerAnalyticsResponses.ActivityHeatmap(courseId, teamId, studentId,
-                startDate, endDate, List.copyOf(days));
+                startDate, endDate, rows, List.copyOf(days));
     }
 
     @Transactional(readOnly = true)
@@ -155,9 +192,9 @@ public class LecturerTeamAnalyticsQueryService {
                     && sprint.getId().equals(task.getSprint().getId())).toList();
             long done = sprintTasks.stream().filter(task -> task.getStatus() == TaskStatus.DONE).count();
             int planned = sprintTasks.stream().filter(task -> task.getStoryPoint() != null)
-                    .mapToInt(Task::getStoryPoint).sum();
+                    .mapToInt(task -> task.getStoryPoint()).sum();
             int completed = sprintTasks.stream().filter(task -> task.getStatus() == TaskStatus.DONE)
-                    .filter(task -> task.getStoryPoint() != null).mapToInt(Task::getStoryPoint).sum();
+                    .filter(task -> task.getStoryPoint() != null).mapToInt(task -> task.getStoryPoint()).sum();
             long withoutPoints = sprintTasks.stream().filter(task -> task.getStoryPoint() == null).count();
             long bugs = sprintTasks.stream().filter(task -> task.getType() == TaskType.BUG).count();
             rows.add(new LecturerAnalyticsResponses.SprintVelocityItem(sprint.getId(), sprint.getName(),
@@ -165,5 +202,128 @@ public class LecturerTeamAnalyticsQueryService {
                     withoutPoints, bugs));
         }
         return new LecturerAnalyticsResponses.SprintVelocity(courseId, teamId, List.copyOf(rows));
+    }
+
+    private LecturerAnalyticsResponses.HeatmapStudentRow toRow(UUID studentId, StudentHeatmapAccumulator accumulator,
+            LocalDate startDate, LocalDate endDate) {
+        List<LecturerAnalyticsResponses.HeatmapCell> cells = new ArrayList<>();
+        HeatmapBucket zero = HeatmapBucket.empty();
+        for (LocalDate day = startDate; !day.isAfter(endDate); day = day.plusDays(1)) {
+            HeatmapBucket bucket = accumulator.byDate.getOrDefault(day, zero);
+            cells.add(new LecturerAnalyticsResponses.HeatmapCell(day, bucket.commits, bucket.peerReviews,
+                    bucket.comments, bucket.documents, bucket.tasks, bucket.totalActivities(), bucket.totalScore()));
+        }
+        return new LecturerAnalyticsResponses.HeatmapStudentRow(
+                studentId,
+                accumulator.studentCode,
+                accumulator.fullName,
+                accumulator.commits,
+                accumulator.peerReviews,
+                accumulator.comments,
+                accumulator.documents,
+                accumulator.tasks,
+                accumulator.totalActivities(),
+                accumulator.totalScore(),
+                List.copyOf(cells)
+        );
+    }
+
+    private void merge(Map<UUID, StudentHeatmapAccumulator> studentBuckets, Map<LocalDate, HeatmapBucket> dayBuckets,
+            List<Object[]> rows, HeatmapActivity activity) {
+        for (Object[] row : rows) {
+            UUID studentId = (UUID) row[0];
+            LocalDate date = toLocalDate(row[1]);
+            long count = ((Number) row[2]).longValue();
+            StudentHeatmapAccumulator studentBucket = studentBuckets.get(studentId);
+            if (studentBucket == null) {
+                continue;
+            }
+            studentBucket.add(date, activity, count);
+            dayBuckets.computeIfAbsent(date, ignored -> HeatmapBucket.empty()).add(activity, count);
+        }
+    }
+
+    private LocalDate toLocalDate(Object value) {
+        if (value instanceof LocalDate localDate) {
+            return localDate;
+        }
+        if (value instanceof java.sql.Date sqlDate) {
+            return sqlDate.toLocalDate();
+        }
+        throw new IllegalArgumentException("Không thể chuyển giá trị ngày: " + value);
+    }
+
+    private enum HeatmapActivity {
+        COMMIT,
+        PEER_REVIEW,
+        COMMENT,
+        DOCUMENT,
+        TASK
+    }
+
+    private static final class StudentHeatmapAccumulator {
+        private final String studentCode;
+        private final String fullName;
+        private final Map<LocalDate, HeatmapBucket> byDate = new HashMap<>();
+        private long commits;
+        private long peerReviews;
+        private long comments;
+        private long documents;
+        private long tasks;
+
+        private StudentHeatmapAccumulator(String studentCode, String fullName) {
+            this.studentCode = studentCode;
+            this.fullName = fullName;
+        }
+
+        private void add(LocalDate date, HeatmapActivity activity, long count) {
+            HeatmapBucket bucket = byDate.computeIfAbsent(date, ignored -> HeatmapBucket.empty());
+            bucket.add(activity, count);
+            switch (activity) {
+                case COMMIT -> commits += count;
+                case PEER_REVIEW -> peerReviews += count;
+                case COMMENT -> comments += count;
+                case DOCUMENT -> documents += count;
+                case TASK -> tasks += count;
+            }
+        }
+
+        private long totalActivities() {
+            return commits + peerReviews + comments + documents + tasks;
+        }
+
+        private long totalScore() {
+            return commits * 3 + peerReviews * 2 + comments + documents + tasks * 2;
+        }
+    }
+
+    private static final class HeatmapBucket {
+        private long commits;
+        private long peerReviews;
+        private long comments;
+        private long documents;
+        private long tasks;
+
+        private static HeatmapBucket empty() {
+            return new HeatmapBucket();
+        }
+
+        private void add(HeatmapActivity activity, long count) {
+            switch (activity) {
+                case COMMIT -> commits += count;
+                case PEER_REVIEW -> peerReviews += count;
+                case COMMENT -> comments += count;
+                case DOCUMENT -> documents += count;
+                case TASK -> tasks += count;
+            }
+        }
+
+        private long totalActivities() {
+            return commits + peerReviews + comments + documents + tasks;
+        }
+
+        private long totalScore() {
+            return commits * 3 + peerReviews * 2 + comments + documents + tasks * 2;
+        }
     }
 }

@@ -77,9 +77,44 @@ public final class LecturerAnalyticsResponses {
                                   long sourceCount, boolean directed) { }
 
     public record ActivityHeatmap(UUID courseId, UUID teamId, UUID studentId, LocalDate startDate,
-                                  LocalDate endDate, List<HeatmapDay> days) { }
+                                  LocalDate endDate, List<HeatmapStudentRow> students,
+                                  List<HeatmapDay> days) { }
 
-    public record HeatmapDay(LocalDate date, long commits, long totalActivities) { }
+    public record HeatmapStudentRow(
+            UUID studentId,
+            String studentCode,
+            String fullName,
+            long commits,
+            long peerReviews,
+            long comments,
+            long documents,
+            long tasks,
+            long totalActivities,
+            long totalScore,
+            List<HeatmapCell> cells
+    ) { }
+
+    public record HeatmapCell(
+            LocalDate date,
+            long commits,
+            long peerReviews,
+            long comments,
+            long documents,
+            long tasks,
+            long totalActivities,
+            long totalScore
+    ) { }
+
+    public record HeatmapDay(
+            LocalDate date,
+            long commits,
+            long peerReviews,
+            long comments,
+            long documents,
+            long tasks,
+            long totalActivities,
+            long totalScore
+    ) { }
 
     public record SprintVelocity(UUID courseId, UUID teamId, List<SprintVelocityItem> sprints) { }
 

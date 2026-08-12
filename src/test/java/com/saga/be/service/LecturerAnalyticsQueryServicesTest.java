@@ -21,6 +21,7 @@ import com.saga.be.entity.TeamMember;
 import com.saga.be.entity.enums.TaskStatus;
 import com.saga.be.entity.enums.TaskType;
 import com.saga.be.repository.CommitDataRepository;
+import com.saga.be.repository.CommentRepository;
 import com.saga.be.repository.DocumentRepository;
 import com.saga.be.repository.GitRepoRepository;
 import com.saga.be.repository.PeerReviewRepository;
@@ -99,7 +100,7 @@ class LecturerAnalyticsQueryServicesTest {
                 .project().repositories();
 
         assertEquals(List.of(101L, 202L), references.stream()
-                .map(LecturerAnalyticsResponses.TeamGitHubRepositoryReference::repositoryId).toList());
+                .map(reference -> reference.repositoryId()).toList());
         assertEquals(2, references.size());
     }
 
@@ -152,13 +153,60 @@ class LecturerAnalyticsQueryServicesTest {
         LocalDate start = LocalDate.of(2026, 8, 1);
         LocalDate end = LocalDate.of(2026, 8, 3);
         when(f.authorization.requireTeam(any(), any(), any())).thenReturn(f.team);
-        when(f.commits.aggregateDailyCounts(f.projectId, null, start.atStartOfDay(), end.plusDays(1).atStartOfDay()))
-                .thenReturn(List.<Object[]>of(new Object[]{start, 2L}, new Object[]{end, 1L}));
+        when(f.members.findByTeamId(f.teamId)).thenReturn(List.of(f.membership));
+        when(f.commits.aggregateDailyCountsByProjectAndAuthorIds(any(), any(), any(), any()))
+                .thenReturn(List.<Object[]>of(
+                        new Object[]{f.studentId, start, 2L},
+                        new Object[]{f.studentId, end, 1L}
+                ));
+        when(f.peers.aggregateDailyCountsByProjectAndReviewerIds(any(), any(), any(), any())).thenReturn(List.of());
+        when(f.comments.aggregateDailyCountsByProjectAndAuthorIds(any(), any(), any(), any())).thenReturn(List.of());
+        when(f.documents.aggregateDailyCountsByProjectAndAuthorIds(any(), any(), any(), any())).thenReturn(List.of());
+        when(f.tasks.aggregateDailyCountsByProjectAndAssigneeIds(any(), any(), any(), any())).thenReturn(List.of());
         var rows = teamService(f).heatmap(null, f.courseId, f.teamId, null, start, end).days();
         assertEquals(3, rows.size());
         assertEquals(2, rows.get(0).commits());
         assertEquals(0, rows.get(1).commits());
         assertEquals(1, rows.get(2).commits());
+    }
+
+    @Test
+    void heatmapAggregatesMultipleSourcesIntoRowsAndScores() {
+        Fixture f = fixture(true);
+        LocalDate start = LocalDate.of(2026, 8, 1);
+        LocalDate end = LocalDate.of(2026, 8, 2);
+        when(f.authorization.requireTeam(any(), any(), any())).thenReturn(f.team);
+        when(f.members.findByTeamId(f.teamId)).thenReturn(List.of(f.membership));
+        when(f.commits.aggregateDailyCountsByProjectAndAuthorIds(any(), any(), any(), any()))
+                .thenReturn(List.<Object[]>of(
+                        new Object[]{f.studentId, start, 2L}
+                ));
+        when(f.peers.aggregateDailyCountsByProjectAndReviewerIds(any(), any(), any(), any()))
+                .thenReturn(List.<Object[]>of(
+                        new Object[]{f.studentId, start, 1L}
+                ));
+        when(f.comments.aggregateDailyCountsByProjectAndAuthorIds(any(), any(), any(), any()))
+                .thenReturn(List.<Object[]>of(
+                        new Object[]{f.studentId, end, 3L}
+                ));
+        when(f.documents.aggregateDailyCountsByProjectAndAuthorIds(any(), any(), any(), any()))
+                .thenReturn(List.<Object[]>of(
+                        new Object[]{f.studentId, end, 4L}
+                ));
+        when(f.tasks.aggregateDailyCountsByProjectAndAssigneeIds(any(), any(), any(), any()))
+                .thenReturn(List.<Object[]>of(
+                        new Object[]{f.studentId, end, 5L}
+                ));
+
+        LecturerAnalyticsResponses.ActivityHeatmap heatmap = teamService(f)
+                .heatmap(null, f.courseId, f.teamId, null, start, end);
+
+        assertEquals(1, heatmap.students().size());
+        assertEquals(15, heatmap.students().get(0).totalActivities());
+        assertEquals(25, heatmap.students().get(0).totalScore());
+        assertEquals(2, heatmap.students().get(0).cells().size());
+        assertEquals(12, heatmap.days().get(1).totalActivities());
+        assertEquals(17, heatmap.days().get(1).totalScore());
     }
 
     @Test
@@ -208,7 +256,7 @@ class LecturerAnalyticsQueryServicesTest {
 
     private LecturerTeamAnalyticsQueryService teamService(Fixture f) {
         return new LecturerTeamAnalyticsQueryService(f.authorization, f.members, f.repositories, f.tasks, f.commits,
-                f.sprints, f.peers);
+                f.documents, f.comments, f.sprints, f.peers);
     }
 
     private Fixture fixture(boolean projectPresent) {
@@ -228,7 +276,7 @@ class LecturerAnalyticsQueryServicesTest {
                 mock(LecturerAnalyticsAuthorizationService.class), mock(TeamMemberRepository.class),
                 mock(GitRepoRepository.class),
                 mock(TaskRepository.class), mock(CommitDataRepository.class), mock(DocumentRepository.class),
-                mock(SprintRepository.class), mock(PeerReviewRepository.class));
+                mock(CommentRepository.class), mock(SprintRepository.class), mock(PeerReviewRepository.class));
     }
 
     private GitRepo repository(long repositoryId, String fullName) {
@@ -248,5 +296,5 @@ class LecturerAnalyticsQueryServicesTest {
                            TeamMember membership, LecturerAnalyticsAuthorizationService authorization,
                            TeamMemberRepository members, GitRepoRepository repositories,
                            TaskRepository tasks, CommitDataRepository commits,
-                           DocumentRepository documents, SprintRepository sprints, PeerReviewRepository peers) { }
+                           DocumentRepository documents, CommentRepository comments, SprintRepository sprints, PeerReviewRepository peers) { }
 }

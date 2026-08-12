@@ -1,17 +1,16 @@
 package com.saga.be.repository;
 
 import com.saga.be.entity.CommitData;
+import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
-import org.springframework.stereotype.Repository;
-import java.time.LocalDateTime;
-import org.springframework.data.domain.Pageable;
 
-@Repository
 public interface CommitDataRepository extends JpaRepository<CommitData, UUID> {
     Optional<CommitData> findByRepoIdAndShaHash(UUID repoId, String shaHash);
 
@@ -49,6 +48,23 @@ public interface CommitDataRepository extends JpaRepository<CommitData, UUID> {
     List<Object[]> aggregateDailyCounts(
             @Param("projectId") UUID projectId,
             @Param("studentId") UUID studentId,
+            @Param("startAt") LocalDateTime startAt,
+            @Param("endExclusive") LocalDateTime endExclusive
+    );
+
+    @Query("""
+            select commit.author.id, function('date', commit.timestamp), count(commit)
+            from CommitData commit
+            where commit.repo.project.id = :projectId
+              and commit.author.id in :authorIds
+              and commit.timestamp >= :startAt
+              and commit.timestamp < :endExclusive
+            group by commit.author.id, function('date', commit.timestamp)
+            order by commit.author.id, function('date', commit.timestamp)
+            """)
+    List<Object[]> aggregateDailyCountsByProjectAndAuthorIds(
+            @Param("projectId") UUID projectId,
+            @Param("authorIds") Collection<UUID> authorIds,
             @Param("startAt") LocalDateTime startAt,
             @Param("endExclusive") LocalDateTime endExclusive
     );
