@@ -1,6 +1,8 @@
 package com.saga.be.repository;
 
 import com.saga.be.entity.Task;
+import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -13,10 +15,8 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
-import org.springframework.stereotype.Repository;
 import jakarta.persistence.LockModeType;
 
-@Repository
 public interface TaskRepository extends JpaRepository<Task, UUID>, JpaSpecificationExecutor<Task> {
     Optional<Task> findByProjectIdAndExternalId(UUID projectId, String externalId);
 
@@ -71,5 +71,22 @@ public interface TaskRepository extends JpaRepository<Task, UUID>, JpaSpecificat
     List<Task> findByProjectIdAndDeletedAtIsNullAndExternalUpdatedAtIsNotNullOrderByExternalUpdatedAtDescIdDesc(
             UUID projectId,
             Pageable pageable
+    );
+
+    @Query("""
+            select task.assignee.id, function('date', coalesce(task.updatedAt, task.createdAt)), count(task)
+            from Task task
+            where task.project.id = :projectId
+              and task.assignee.id in :assigneeIds
+              and coalesce(task.updatedAt, task.createdAt) >= :startAt
+              and coalesce(task.updatedAt, task.createdAt) < :endExclusive
+            group by task.assignee.id, function('date', coalesce(task.updatedAt, task.createdAt))
+            order by task.assignee.id, function('date', coalesce(task.updatedAt, task.createdAt))
+            """)
+    List<Object[]> aggregateDailyCountsByProjectAndAssigneeIds(
+            @Param("projectId") UUID projectId,
+            @Param("assigneeIds") Collection<UUID> assigneeIds,
+            @Param("startAt") LocalDateTime startAt,
+            @Param("endExclusive") LocalDateTime endExclusive
     );
 }

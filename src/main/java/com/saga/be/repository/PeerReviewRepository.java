@@ -1,15 +1,16 @@
 package com.saga.be.repository;
 
 import com.saga.be.entity.PeerReview;
+import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.stereotype.Repository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
-@Repository
 public interface PeerReviewRepository extends JpaRepository<PeerReview, UUID> {
         List<PeerReview> findByRevieweeId(UUID revieweeId);
 
@@ -39,9 +40,30 @@ public interface PeerReviewRepository extends JpaRepository<PeerReview, UUID> {
 
         List<PeerReview> findByRevieweeIdAndSprintBoardProjectId(UUID revieweeId, UUID projectId);
 
+        @EntityGraph(attributePaths = { "sprint", "reviewer", "reviewee" })
+        List<PeerReview> findBySprintBoardProjectIdOrderByCreatedAtAscIdAsc(UUID projectId);
+
         @EntityGraph(attributePaths = {"sprint", "reviewer", "reviewee"})
         List<PeerReview> findBySprintBoardProjectCourseIdAndSprintDeletedAtIsNullOrderByCreatedAtAscIdAsc(
                         UUID courseId
+        );
+
+        @Query("""
+                select peerReview.reviewer.id, function('date', peerReview.createdAt), count(peerReview)
+                from PeerReview peerReview
+                join peerReview.sprint sprint
+                where sprint.board.project.id = :projectId
+                  and peerReview.reviewer.id in :reviewerIds
+                  and peerReview.createdAt >= :startAt
+                  and peerReview.createdAt < :endExclusive
+                group by peerReview.reviewer.id, function('date', peerReview.createdAt)
+                order by peerReview.reviewer.id, function('date', peerReview.createdAt)
+                """)
+        List<Object[]> aggregateDailyCountsByProjectAndReviewerIds(
+                        @Param("projectId") UUID projectId,
+                        @Param("reviewerIds") Collection<UUID> reviewerIds,
+                        @Param("startAt") LocalDateTime startAt,
+                        @Param("endExclusive") LocalDateTime endExclusive
         );
 
         boolean existsBySprintBoardProjectCourseIdAndReviewerId(UUID courseId, UUID reviewerId);

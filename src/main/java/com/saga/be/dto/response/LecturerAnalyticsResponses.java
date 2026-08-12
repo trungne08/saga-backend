@@ -76,10 +76,84 @@ public final class LecturerAnalyticsResponses {
     public record InteractionEdge(UUID fromStudentId, UUID toStudentId, String sourceType,
                                   long sourceCount, boolean directed) { }
 
-    public record ActivityHeatmap(UUID courseId, UUID teamId, UUID studentId, LocalDate startDate,
-                                  LocalDate endDate, List<HeatmapDay> days) { }
+    public record StudentInteractionGraph(UUID courseId, UUID teamId, UUID studentId,
+                                          List<StudentInteractionNode> nodes,
+                                          List<StudentInteractionEdge> edges) { }
 
-    public record HeatmapDay(LocalDate date, long commits, long totalActivities) { }
+    public record StudentInteractionNode(UUID studentId, String studentCode, String fullName, long degree) { }
+
+    public record StudentInteractionEdge(UUID fromStudentId, UUID toStudentId, String sourceType,
+                                         long sourceCount, boolean directed) { }
+
+    public record ActivityHeatmap(UUID courseId, UUID teamId, UUID studentId, LocalDate startDate,
+                                  LocalDate endDate, List<HeatmapStudentRow> students,
+                                  List<HeatmapDay> days) { }
+
+    public record ActivityOverview(UUID courseId, UUID teamId, LocalDate startDate, LocalDate endDate,
+                                   List<OverviewDay> days, ActivityTotals totals) { }
+
+    public record BurndownChart(UUID courseId, UUID teamId, UUID sprintId, String sprintName,
+                                LocalDate startDate, LocalDate endDate, long totalScope,
+                                List<BurndownPoint> points) { }
+
+    public record BurndownPoint(LocalDate date, long idealRemaining, long actualRemaining, long doneCount) { }
+
+    public record HeatmapStudentRow(
+            UUID studentId,
+            String studentCode,
+            String fullName,
+            long commits,
+            long peerReviews,
+            long comments,
+            long documents,
+            long tasks,
+            long totalActivities,
+            long totalScore,
+            List<HeatmapCell> cells
+    ) { }
+
+    public record HeatmapCell(
+            LocalDate date,
+            long commits,
+            long peerReviews,
+            long comments,
+            long documents,
+            long tasks,
+            long totalActivities,
+            long totalScore
+    ) { }
+
+    public record HeatmapDay(
+            LocalDate date,
+            long commits,
+            long peerReviews,
+            long comments,
+            long documents,
+            long tasks,
+            long totalActivities,
+            long totalScore
+    ) { }
+
+    public record OverviewDay(
+            LocalDate date,
+            long commits,
+            long peerReviews,
+            long comments,
+            long documents,
+            long tasks,
+            long totalActivities,
+            long totalScore
+    ) { }
+
+    public record ActivityTotals(
+            long commits,
+            long peerReviews,
+            long comments,
+            long documents,
+            long tasks,
+            long totalActivities,
+            long totalScore
+    ) { }
 
     public record SprintVelocity(UUID courseId, UUID teamId, List<SprintVelocityItem> sprints) { }
 
