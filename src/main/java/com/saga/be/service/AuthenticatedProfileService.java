@@ -136,7 +136,11 @@ public class AuthenticatedProfileService {
         if (!subjectMatches.isEmpty()) {
             ProfileReference match = subjectMatches.get(0);
             requireExpectedRole(match, ApplicationRole.STUDENT);
-            return updateStudent((Student) match.entity(), identity, extractedStudentCode);
+            return synchronizeLinkedStudent(
+                    (Student) match.entity(),
+                    identity,
+                    extractedStudentCode
+            );
         }
 
         List<ProfileReference> emailMatches = findByEmail(identity.email());
@@ -167,6 +171,26 @@ public class AuthenticatedProfileService {
             );
         }
         return bindImportedStudent(studentByEmail.getId(), identity, extractedStudentCode);
+    }
+
+    private AuthenticatedProfile synchronizeLinkedStudent(
+            Student subjectMatch,
+            AuthenticatedIdentity identity,
+            String extractedStudentCode
+    ) {
+        Student student = studentRepository.findForIdentityBindingById(subjectMatch.getId())
+                .orElseThrow(() -> new IdentityConflictException(
+                        "The linked Student profile no longer exists"
+                ));
+        if (!Objects.equals(student.getCognitoSub(), identity.cognitoSub())) {
+            throw new IdentityConflictException(
+                    "The Cognito subject is no longer linked to the expected Student"
+            );
+        }
+        if (student.getAccountStatus() == AccountStatus.PENDING) {
+            student.setAccountStatus(AccountStatus.ACTIVE);
+        }
+        return updateStudent(student, identity, extractedStudentCode);
     }
 
     private AuthenticatedProfile bindImportedStudent(
@@ -377,7 +401,7 @@ public class AuthenticatedProfileService {
                         .email(identity.email())
                         .fullName(identity.fullName())
                         .studentCode(extractedStudentCode)
-                        .accountStatus(AccountStatus.PENDING)
+                        .accountStatus(AccountStatus.ACTIVE)
                         .build();
                 yield toProfile(studentRepository.saveAndFlush(student));
             }

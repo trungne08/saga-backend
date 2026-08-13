@@ -52,7 +52,6 @@ public class CourseStudentManagementService {
     ) {
         Course course = authorizationService.requireImportAccess(principal, courseId);
         Student student = resolveOrCreateStudent(request);
-        invitationOutboxService.enqueueForCourse(student, course);
 
         TeamMember membership = null;
         String group = normalizeGroup(request.group());
@@ -62,6 +61,7 @@ public class CourseStudentManagementService {
         if (group != null) {
             membership = assignStudentToGroup(course, student, group, toRole(request.leader()), true);
         }
+        invitationOutboxService.enqueueForCourse(student, course);
         return response(
                 "COURSE_STUDENT_MANUAL_ADD",
                 "Added student to course successfully",
@@ -100,8 +100,8 @@ public class CourseStudentManagementService {
             );
         }
 
-        invitationOutboxService.enqueueForCourse(student, course);
         TeamMember membership = assignStudentToGroup(course, student, group, toRole(request.leader()), false);
+        invitationOutboxService.enqueueForCourse(student, course);
         return response(
                 "COURSE_STUDENT_TEAM_UPDATE",
                 "Student group updated successfully",

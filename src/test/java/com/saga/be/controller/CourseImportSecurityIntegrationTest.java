@@ -15,6 +15,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.saga.be.OAuth2TestConfiguration;
 import com.saga.be.entity.Course;
 import com.saga.be.entity.Lecturer;
+import com.saga.be.entity.Student;
 import com.saga.be.entity.enums.AccountStatus;
 import com.saga.be.entity.enums.RoleInTeam;
 import com.saga.be.config.StudentInvitationProperties;
@@ -525,6 +526,38 @@ class CourseImportSecurityIntegrationTest {
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.teamId").isEmpty());
+    }
+
+    @Test
+    void manualGroupedProvisioningDoesNotUseMembershipToActivateLegacyPendingStudent() throws Exception {
+        Lecturer owner = createLecturer();
+        Course course = createCourse(owner);
+        Student linkedPending = studentRepository.saveAndFlush(Student.builder()
+                .cognitoSub("manual-linked-subject")
+                .studentCode("SE020004")
+                .email("manual-linked@example.test")
+                .fullName("Manual Linked Student")
+                .accountStatus(AccountStatus.PENDING)
+                .build());
+        Authentication lecturer = authenticationFor(ApplicationRole.LECTURER, owner.getId());
+        Cookie csrfCookie = csrfCookie(lecturer);
+
+        mockMvc.perform(post(MANUAL_ADD_PATH, course.getId())
+                        .with(authentication(lecturer))
+                        .cookie(csrfCookie)
+                        .header("X-XSRF-TOKEN", csrfCookie.getValue())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"studentCode":"SE020004","email":"manual-linked@example.test","fullName":"Manual Linked Student","group":"10","leader":true}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.studentId").value(linkedPending.getId().toString()))
+                .andExpect(jsonPath("$.roleInTeam").value("LEADER"));
+
+        assertEquals(AccountStatus.PENDING, studentRepository.findById(linkedPending.getId())
+                .orElseThrow().getAccountStatus());
+        assertEquals(1, teamMemberRepository.findByStudentId(linkedPending.getId()).size());
+        assertEquals(1, invitationRepository.count());
     }
 
     @Test

@@ -57,7 +57,7 @@ class AuthenticatedProfileServiceTest {
     private AuthenticatedProfileService profileService;
 
     @Test
-    void createsANewPendingStudentWithExtractedStudentCode() {
+    void createsANewActiveStudentAfterSuccessfulAuthentication() {
         String subject = "new-student-subject";
         String email = "trungtdse170506@fpt.edu.vn";
         UUID profileId = UUID.randomUUID();
@@ -83,10 +83,10 @@ class AuthenticatedProfileServiceTest {
         assertEquals(email, savedStudent.getEmail());
         assertEquals("New Student", savedStudent.getFullName());
         assertEquals("SE170506", savedStudent.getStudentCode());
-        assertEquals(AccountStatus.PENDING, savedStudent.getAccountStatus());
+        assertEquals(AccountStatus.ACTIVE, savedStudent.getAccountStatus());
         assertEquals(profileId, profile.localProfileId());
         assertEquals(ApplicationRole.STUDENT, profile.role());
-        assertEquals(AccountStatus.PENDING, profile.accountStatus());
+        assertEquals(AccountStatus.ACTIVE, profile.accountStatus());
         verify(adminRepository, never()).saveAndFlush(any(Admin.class));
         verify(lecturerRepository, never()).saveAndFlush(any(Lecturer.class));
     }
@@ -107,6 +107,8 @@ class AuthenticatedProfileServiceTest {
         when(adminRepository.findByCognitoSub(subject)).thenReturn(Optional.empty());
         when(lecturerRepository.findByCognitoSub(subject)).thenReturn(Optional.empty());
         when(studentRepository.findByCognitoSub(subject)).thenReturn(Optional.of(existing));
+        when(studentRepository.findForIdentityBindingById(existing.getId()))
+                .thenReturn(Optional.of(existing));
         when(studentRepository.saveAndFlush(existing)).thenReturn(existing);
 
         profileService.synchronize(new AuthenticatedIdentity(
@@ -136,6 +138,8 @@ class AuthenticatedProfileServiceTest {
         when(adminRepository.findByCognitoSub(subject)).thenReturn(Optional.empty());
         when(lecturerRepository.findByCognitoSub(subject)).thenReturn(Optional.empty());
         when(studentRepository.findByCognitoSub(subject)).thenReturn(Optional.of(existing));
+        when(studentRepository.findForIdentityBindingById(existing.getId()))
+                .thenReturn(Optional.of(existing));
         when(studentRepository.saveAndFlush(existing)).thenReturn(existing);
 
         profileService.synchronize(new AuthenticatedIdentity(
@@ -166,6 +170,8 @@ class AuthenticatedProfileServiceTest {
         when(adminRepository.findByCognitoSub(subject)).thenReturn(Optional.empty());
         when(lecturerRepository.findByCognitoSub(subject)).thenReturn(Optional.empty());
         when(studentRepository.findByCognitoSub(subject)).thenReturn(Optional.of(existing));
+        when(studentRepository.findForIdentityBindingById(existing.getId()))
+                .thenReturn(Optional.of(existing));
         StudentCodeConflictException exception = assertThrows(
                 StudentCodeConflictException.class,
                 () -> profileService.synchronize(new AuthenticatedIdentity(

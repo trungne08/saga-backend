@@ -48,12 +48,13 @@ For application role `STUDENT`:
 2. If no subject match exists, OIDC already requires a verified email. Normalize that email and extract the code with the existing `StudentCodeExtractor` rule.
 3. Find by normalized email and by normalized student code. Bind only when both refer to one Student, that Student has no subject, and the new subject is not owned by another profile.
 4. Lock the Student row in the binding transaction. Write `cognitoSub`; change only `PENDING` to `ACTIVE`; retain email, code, TeamMember and every role.
-5. If neither email nor code matches, retain the historical behaviour of creating a new `PENDING` Student. Any partial match remains a conflict; no ambiguous profile is created.
+5. If neither email nor code matches, the accepted STUDENT authentication creates a new `ACTIVE` Student with that subject and no TeamMember. Any partial match remains a conflict; no ambiguous profile is created.
 
 | Situation | Result |
 |---|---|
 | Email and code identify one unlinked Student | bind subject; `PENDING -> ACTIVE` |
 | Existing matching subject | reuse same local profile id |
+| No local email/code/subject match | create linked `ACTIVE` Student; no TeamMember |
 | Email match only / code match only | 409 conflict |
 | Email and code identify different Students | 409 conflict |
 | Target Student has another subject | 409 conflict |
@@ -154,12 +155,25 @@ duplicate normalized row, partial identity và cross-profile email đều bị c
 400, local identity conflict 409, không partial success. Không thay parser/semantics Course
 import; invitation chỉ do Course/Team flow tạo và không phải enrollment.
 
+## Student account lifecycle V2 convergence — 2026-08-14
+
+Two legitimate ordering variants now converge without manual Admin activation:
+
+1. **Import first, login later:** Course provisioning creates/reuses the unlinked PENDING Student and TeamMember and enqueues an invitation. Exact verified email + extracted student code bind the Cognito subject under a pessimistic Student lock and change only PENDING to ACTIVE.
+2. **Login/register first, import later:** accepted authentication creates the linked ACTIVE Student with no membership. A later exact Course import/manual provisioning reuses that Student, preserves ACTIVE, creates or validates TeamMember and enqueues the invitation.
+
+Account lifecycle is independent from Course enrollment. Successful accepted authentication is the authority for ACTIVE; Course membership remains represented only by `Student -> TeamMember -> Team -> Course`. No enrollment-status model exists. Invitation rows are informational delivery/history and are never identity, activation or enrollment evidence.
+
+For historical stuck rows, existing-subject login locks the same Student and recovers `PENDING -> ACTIVE` without requiring membership. Login never creates membership. An unlinked imported placeholder remains PENDING until exact first login; ACTIVE stays ACTIVE; INACTIVE/SUSPENDED remain blocked and are not reactivated. TeamMember identity, LEADER/MEMBER/MENTOR role and memberships across Courses are preserved.
+
+There is no invitation token/click activation and no normal-flow requirement for Admin PATCH ACTIVE. Cognito role/group/Lambda behavior, browser session/CSRF, request-time AccountStatus enforcement and Course read behavior remain unchanged.
+
 ## Course import I1 hardened contract — 2026-08-09
 
 `POST /api/v1/courses/{courseId}/import-students` là Course provisioning flow, độc lập với M7 Admin global import. Request là `multipart/form-data` với field `file`; FE gửi browser cookie/session và CSRF, không bearer. Success vẫn là `200` text `Import danh sách sinh viên thành công!`.
 
 Workbook là `.xlsx`, tối đa 1 MiB; sheet đầu tiên có header exact theo thứ tự: `Class`, `RollNumber`, `Email`, `MemberCode`, `FullName`, `Group`, `Leader`. Header có thiếu/thừa/sai case/sai thứ tự bị từ chối. Mọi formula ở header, data và cell extra bị reject, không được evaluate. Tối đa 1.000 data rows; `RollNumber`, `Email`, `FullName` phải non-blank. Không gửi lại cell, row hay workbook trong lỗi.
 
-Email được trim/lower và student code trim/upper. Một duplicate trong file, identity partial/split với local record, hoặc membership Team khác cùng Course đều dừng toàn transaction trước write. Student existing chỉ reuse, không rewrite fullName/status/Cognito subject và không reactivate. Group trống giữ behavior cũ: không TeamMember/invitation; Group không trống dùng `Group {value}`, leader mark `x` là LEADER, giá trị khác là MEMBER. Same Team idempotent giữ role; nhiều Course vẫn hợp lệ với role riêng.
+Email được trim/lower và student code trim/upper. Một duplicate trong file, identity partial/split với local record, hoặc membership Team khác cùng Course đều dừng toàn transaction trước write. Student existing chỉ reuse và không rewrite fullName/Cognito subject; Course provisioning không thay đổi AccountStatus: imported placeholder mới vẫn PENDING, còn ACTIVE/INACTIVE/SUSPENDED giữ nguyên. Group trống không tạo TeamMember và invitation vẫn chỉ informational; Group không trống dùng `Group {value}`, leader mark `x` là LEADER, giá trị khác là MEMBER. Same Team idempotent giữ role; nhiều Course vẫn hợp lệ với role riêng.
 
 Mã lỗi safe: 400 `MALFORMED_WORKBOOK`, `FILE_TOO_LARGE`, `INVALID_HEADER`, `FORMULA_NOT_ALLOWED`, `INVALID_ROW`, `DUPLICATE_IN_FILE`, `ROW_LIMIT`; 409 `IDENTITY_CONFLICT`, `COURSE_TEAM_MEMBERSHIP_CONFLICT`. Invitation outbox được giữ nguyên và chỉ enqueue sau TeamMember; không có provider/Cognito call mới.

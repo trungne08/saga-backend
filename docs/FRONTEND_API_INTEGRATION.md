@@ -1578,6 +1578,17 @@ FE không gọi send API cho các event dưới đây. FE chỉ gọi business A
 
 Student actor của Task/Sprint mutation được loại khỏi tập recipient khi phù hợp. Event dedup ở backend ngăn replay/restart tạo trùng Bell item.
 
+## Student account lifecycle V2 — 2026-08-14
+
+No frontend endpoint or payload changed. Both normal ordering variants now converge automatically:
+
+- Course import first, Student login later: exact identity binding returns the existing Student as ACTIVE.
+- Student login/register first: successful accepted authentication immediately creates the local Student as ACTIVE, without TeamMember. Later exact Course provisioning reuses that Student, preserves ACTIVE and creates/reuses TeamMember.
+
+FE must not require or automate `PATCH ACTIVE` for this normal flow and must not treat invitation delivery/click as activation or enrollment. Invitation remains an informational CTA. After successful login, `GET /api/auth/me` reports ACTIVE even before Course membership; after import, the existing `/api/me/courses/{courseId}/team/members` path resolves the Course/team immediately through the same local Student ID and TeamMember.
+
+An unlinked imported placeholder remains PENDING and blocked with `ACCOUNT_STATUS_ACCESS_DENIED` until exact first login binds it. Historical `PENDING + cognitoSub` recovers on successful same-identity login without TeamMember. INACTIVE/SUSPENDED are not automatically reactivated. AccountStatus must not be rendered as Course enrollment status. Browser navigation login, `credentials: "include"`, JSESSIONID, CSRF rules and Cognito behavior are unchanged.
+
 ## 9. Notification frontend behavior
 
 ```text

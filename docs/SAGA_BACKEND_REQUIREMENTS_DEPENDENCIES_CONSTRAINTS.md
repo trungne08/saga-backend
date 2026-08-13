@@ -369,7 +369,7 @@ Master-data GET cho mọi authenticated user; `AccountStatus` không được en
 
 - Group Cognito được normalize; ưu tiên ADMIN, rồi LECTURER, rồi STUDENT. `CognitoRoleResolver#resolve`.
 - OIDC bắt buộc `sub`, email verified, name và supported group. `OidcIdentityService#extract`.
-- Student email phải trích xuất được student code; Student mới có `AccountStatus.PENDING`. `AuthenticatedProfileService#extractRequiredStudentCode`, `#create`.
+- Student email phải trích xuất được student code. Successful accepted STUDENT authentication không có local match tạo Student `ACTIVE`; Student mới do import/pre-provision tạo trước identity binding là `PENDING`. `AuthenticatedProfileService#extractRequiredStudentCode`, `#create`.
 - Một Cognito subject/email chỉ được khớp tối đa một profile local, và profile type phải khớp role. `AuthenticatedProfileService#synchronizeInternal`.
 - Subject/Class/Semester/Course code được kiểm tra duplicate; Course cần bốn foreign reference; Semester end không trước start. `*Service#create*`.
 - Một team chỉ được một project. `TeamProjectService#create`.
@@ -870,6 +870,15 @@ chặn nullable repair.
 - Producer runs only after persisted COMPLETED Jira write operation, uses existing DB notification/FID delivery, and never calls FCM directly.
 - Date-only deadline scan uses `JIRA_TIME_ZONE`, excludes deleted/null-due/DONE/CANCELLED, and reuses V27 semantic event dedup with task due-date revision.
 - Task mutation recipient is the canonical assignee, or owning TeamMember Students only when canonical assignee is null. Sprint mutation recipient is owning TeamMember Students. Exclude the actor only when the actor is a Student recipient; do not infer Lecturer/Admin Team membership and do not add AccountStatus filtering.
+
+## Student account lifecycle V2 constraints — 2026-08-14
+
+- Account status and Course membership must remain independent. `PENDING` is limited to an imported/pre-provisioned placeholder that has not completed an accepted authenticated identity bind. Successful accepted STUDENT authentication must create or return `ACTIVE` regardless of TeamMember presence.
+- Import-first must create an unlinked `PENDING` Student, create/reuse TeamMember and enqueue the invitation. Exact verified email + extracted student-code first login must bind and activate that same row under the existing pessimistic identity lock while retaining all TeamMember roles and Course memberships.
+- Login-first with no local identity match must create an `ACTIVE` Student with the authenticated subject and no TeamMember. Later exact Course provisioning must reuse the same Student, preserve ACTIVE, create/reuse TeamMember and enqueue the invitation. Authentication must never create Course membership.
+- Existing-subject recovery must row-lock the same Student and change only historical `PENDING + cognitoSub` to ACTIVE; no TeamMember is required. ACTIVE remains unchanged. INACTIVE and SUSPENDED must not auto-reactivate during authentication or provisioning. Partial/split, ambiguous and cross-profile identity remains a conflict.
+- Course membership authority remains `Student -> TeamMember -> Team -> Course`; do not add enrollment status/entity/state. Invitation is informational only and never identity, account activation or enrollment truth; no click or Admin PATCH is required for the normal flow.
+- No Cognito Lambda, group/role classification, browser session/CSRF, account-status enforcement, TeamMember model or `CourseService` behavior change is permitted.
 - `JiraWriteOperation.id` plus `NotificationType` is the durable mutation event identity. The V27 unique key combines recipient profile/role with `event_key`, so producer replay/concurrency cannot create a second Bell row. Raw `Idempotency-Key` is never placed in the event key or logs.
 - `REMOTE_SUCCEEDED`, FAILED, UNKNOWN, reconciliation, and webhook snapshots do not create mutation success notifications. Start/Close require canonical Sprint state `active`/`closed` before completion and notification.
 - Jira due-date semantic is date-only: public request DTOs use `LocalDate`; canonical parser and legacy `Task.dueDate`/DB column store start-of-day `LocalDateTime`. Do not infer a due instant or 3-hour/24-hour alert. Only `TASK_DUE_TOMORROW`, `TASK_DUE_TODAY`, and `TASK_OVERDUE` are allowed.
