@@ -14,6 +14,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.saga.be.entity.enums.AccountStatus;
 import com.saga.be.dto.request.JiraTaskSprintRequest;
 import com.saga.be.dto.request.JiraTaskAssigneeRequest;
+import com.saga.be.dto.request.JiraTaskUpdateRequest;
+import com.saga.be.entity.enums.TaskType;
 import com.saga.be.security.ApplicationRole;
 import com.saga.be.security.SagaPrincipal;
 import com.saga.be.service.JiraSprintWriteService;
@@ -149,6 +151,26 @@ class JiraMutationControllerSecurityIntegrationTest {
 
         assertEquals(RUNTIME_SPRINT_ID, request.sprintId());
         assertFalse(request.backlog());
+    }
+
+    @Test
+    void taskUpdateBusinessTypeJsonDeserializesAndReachesSessionCsrfProtectedWriteService() throws Exception {
+        ArgumentCaptor<JiraTaskUpdateRequest> requestCaptor = ArgumentCaptor.forClass(JiraTaskUpdateRequest.class);
+
+        mockMvc.perform(request(HttpMethod.PUT,
+                        "/api/v1/projects/" + RUNTIME_PROJECT_ID + "/tasks/" + RUNTIME_TASK_ID)
+                        .header("Idempotency-Key", "integration-test-key")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"type\":\"REQUEST\"}")
+                        .with(authentication(authenticationFor(ApplicationRole.ADMIN)))
+                        .with(csrf()))
+                .andExpect(status().isOk());
+
+        verify(taskWrites).update(any(), eq(RUNTIME_PROJECT_ID), eq(RUNTIME_TASK_ID),
+                eq("integration-test-key"), requestCaptor.capture());
+        assertEquals(TaskType.REQUEST, requestCaptor.getValue().type());
+        assertNull(requestCaptor.getValue().priorityId());
+        verifyNoInteractions(jiraProvider);
     }
 
     @Test

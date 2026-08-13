@@ -33,7 +33,7 @@ Nếu nhận lỗi recovery sau sự cố canonical, FE không tạo key mới v
 
 ## J1G Jira Task Update contract — 2026-08-10
 
-`PUT /api/v1/projects/{projectId}/tasks/{taskId}` chỉ dùng field optional `title`, `description`, `priority`, advanced `priorityId`, `dueDate` (`YYYY-MM-DD`), `labels`, `componentIds`. Omit/null là không đổi; `labels: []`/`componentIds: []` replace-all rỗng. J1J supersede phần priority cũ của J1G. Không gửi type, assignee, sprintId, estimation hay status vào body này.
+Historical J1G baseline accepted `title`, `description`, `priority`, advanced `priorityId`, `dueDate` (`YYYY-MM-DD`), `labels`, and `componentIds`. J1K now also accepts business `type`; assignee, sprintId, estimation and status remain on their separate routes. Omit/null means unchanged; `labels: []`/`componentIds: []` replace-all empty.
 
 | Ý định | Endpoint | Body tối thiểu |
 | --- | --- | --- |
@@ -121,7 +121,7 @@ IP hay raw payload. Chưa có route per-user vì history trước đó không đ
 
 ## Jira Task Create metadata — 2026-08-09
 
-`POST /api/v1/projects/{projectId}/tasks` normal không yêu cầu FE hiển thị hoặc nhập Jira numeric IDs. FE gửi `title`, business `type` (`BUG`, `FEATURE`, `STORY`, `TASK`, `EPIC`, `SUBTASK`) và, khi cần đặt priority, business `priority` (`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`). Backend resolve Jira issue type/priority theo metadata của đúng Project hiện tại.
+`POST /api/v1/projects/{projectId}/tasks` normal does not require Jira numeric IDs. FE sends `title`, business `type` (`BUG`, `FEATURE`, `REQUEST`, `STORY`, `TASK`, `EPIC`, `SUBTASK`) and optional business `priority` (`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`). Backend resolves Jira issue type/priority from metadata for the exact current Project.
 
 `issueTypeId` và `priorityId` vẫn được chấp nhận như advanced override optional cho client cũ/debug admin. Backend luôn validate: ID issue type phải thuộc metadata Project; ID priority phải thuộc `priority.allowedValues`. Không gửi `customfield_*`, token, Bearer hay Jira numeric ID hardcode. Nếu auto-resolution không có đúng một candidate, API fail closed; FE không fallback sang tự chọn numeric ID.
 
@@ -1656,3 +1656,22 @@ owning Team. Không dùng Bearer.
 PR/Commit relation type có `REFERENCE|CLOSING_REFERENCE|MANUAL`, nhưng current provider chưa tự
 populate authoritative relation; FE phải chấp nhận danh sách rỗng. Không suy `REFERENCE` là
 `CLOSING_REFERENCE`. GitHub Issue remote CRUD và lifecycle notification chưa có trong milestone này.
+## J1K Jira Task Issue Type Update contract — 2026-08-13
+
+Normal FE changes Jira Issue Type through the existing sparse endpoint:
+
+```http
+PUT /api/v1/projects/{projectId}/tasks/{taskId}
+Idempotency-Key: <stable key for this intent>
+Content-Type: application/json
+```
+
+```json
+{ "type": "FEATURE" }
+```
+
+The normal UI values are `BUG`, `FEATURE`, `REQUEST`, `STORY`, and `TASK`, all represented by SAGA `TaskType`. Do not send `issueTypeId`, numeric Jira IDs, `customfield_*`, Bearer tokens, or provider metadata. Mixed sparse updates such as `{ "title": "...", "type": "FEATURE", "priority": "HIGH" }` are supported in one mutation.
+
+Backend resolves the provider ID from `editmeta.fields.issuetype.allowedValues` of the exact issue. `JIRA_EDIT_FIELD_NOT_ALLOWED`, `JIRA_ISSUE_TYPE_RESOLUTION_NOT_FOUND`, or `JIRA_ISSUE_TYPE_RESOLUTION_AMBIGUOUS` are controlled failures: retain the user's input and display the backend error; never ask the user for a Jira ID. EPIC/SUBTASK hierarchy conversion is not supported by this normal edit flow.
+
+If canonical confirmation fails after Jira accepted the PUT, retry the identical body with the identical `Idempotency-Key`; do not create a new key or send a different type. Backend will reconcile canonical state without replaying the provider mutation. Browser auth remains `JSESSIONID` with `credentials: "include"`, CSRF for PUT, and required `Idempotency-Key`; no Bearer flow was added. Runtime deploy smoke remains **TBD_DEPLOYMENT_SMOKE**.

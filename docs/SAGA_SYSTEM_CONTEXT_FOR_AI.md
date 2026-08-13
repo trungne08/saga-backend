@@ -12,7 +12,7 @@
 - **BACKWARD COMPATIBILITY:** `priorityId` vẫn là Jira provider ID override nâng cao và phải thuộc `priority.allowedValues`; stale trả `400 JIRA_PRIORITY_INVALID`. Gửi đồng thời `priority` và `priorityId` cũng trả `400 JIRA_PRIORITY_INVALID` trước claim/provider call. Payload provider vẫn là `{"fields":{"priority":{"id":"<resolved-provider-id>"}}}`; canonical GET/upsert/fresh confirmation và remote-success recovery J1G giữ nguyên.
 - **IDEMPOTENCY:** Task Update fingerprint chứa riêng business `priority` và explicit `priorityId`; cùng raw intent tạo cùng fingerprint, priority khác hoặc business-vs-explicit không bị coi là cùng request. Không persist provider payload/metadata và không đổi schema.
 - **PROVIDER-ID AUDIT:** Create `issueTypeId`/`priorityId` là override nâng cao; Assignee dùng SAGA Student UUID rồi resolve `IdentityMap ACTIVE`; Sprint dùng SAGA Sprint UUID rồi resolve external ID; Estimation chỉ nhận integer và discovery field; Delete dùng SAGA Task UUID. Transition ID vẫn là provider ID nhưng được backend trả theo từng issue qua GET transitions để FE round-trip. `componentIds` của Create/Update vẫn là Jira component IDs và chưa có public options endpoint được chứng minh: đây là gap chỉ ghi nhận, không sửa trong J1J.
-- **CONFIRMED_NOT_IMPLEMENTED:** main Update không có `type`/`issueTypeId`; không có flow đổi Issue Type. **TBD_DEPLOYMENT_SMOKE:** chưa xác nhận production sau deploy. Không hardcode ID/customfield, không thêm Bearer, migration hay đổi session/CSRF/authorization.
+- **HISTORICAL BEFORE J1K / SUPERSEDED BY THE J1K ISSUE-TYPE SECTION BELOW:** main Update did not have `type`; J1K now implements business `TaskType` resolution from exact-issue editmeta. Runtime remains **TBD_DEPLOYMENT_SMOKE**.
 
 ## J1I Jira Estimation canonical decimal normalization — 2026-08-10
 
@@ -28,7 +28,7 @@
 
 ## J1G Jira Task update edit-metadata correctness — 2026-08-10
 
-- `PUT /api/v1/projects/{projectId}/tasks/{taskId}` chỉ nhận `title`, `description`, normal business `priority`, advanced `priorityId`, `dueDate`, `labels`, `componentIds`; type/assignee/Sprint/estimation/status dùng endpoint riêng. J1J supersede mô tả priority cũ của J1G.
+- Historical J1G baseline: `PUT /api/v1/projects/{projectId}/tasks/{taskId}` accepted `title`, `description`, `priority`, `priorityId`, `dueDate`, `labels`, `componentIds`. J1K supersedes only the type gap by adding business `type`; assignee/Sprint/estimation/status remain separate.
 - Backend dùng `GET /rest/api/3/issue/{issueIdOrKey}/editmeta`; chỉ suppress field bằng canonical local khi an toàn (title, priority có metadata name, dueDate theo ngày, labels, component IDs). Description non-null vẫn requested vì ADF bị flatten.
 - Metadata không cho field còn phải gửi: `400 JIRA_EDIT_FIELD_NOT_ALLOWED` và WARN an toàn không có value/secret. Provider PUT 400 vẫn là `JIRA_REQUEST_REJECTED`.
 
@@ -917,3 +917,11 @@ và reliability regression 20 tests đều pass.
 - Công thức/normalization/override/slice weight/Peer Review không đổi. POST override vẫn chỉ
   `ADMIN|LECTURER`. Targeted authorization/calculation/override/slice-weight/roster/Peer Review
   regressions: 53/53 PASS.
+## J1K Jira Task Issue Type Update — 2026-08-13
+
+- **SUPERSEDES J1J/J1G ISSUE-TYPE GAP:** sparse `PUT /api/v1/projects/{projectId}/tasks/{taskId}` now accepts optional business field `type` using the existing SAGA `TaskType`. `REQUEST` is a first-class enum value so the normal UI values are `BUG`, `FEATURE`, `REQUEST`, `STORY`, and `TASK`; FE never supplies a Jira issue-type ID.
+- **METADATA AUTHORITY / OWNERSHIP:** backend calls `GET /rest/api/3/issue/{issueIdOrKey}/editmeta` for the exact issue and resolves only from `fields.issuetype.allowedValues`. It reuses the Create resolver semantics: normalize, deduplicate provider ID, prefer one exact canonical business name, otherwise accept only one semantic provider ID; zero/multiple IDs fail closed. There is no hardcoded ID, project mapping, cross-project cache, sort/pick-first, or create-metadata authority for edit.
+- **SPARSE MUTATION / SAFETY:** after complete local validation, Jira receives one sparse PUT with `fields.issuetype.id` plus any other actual diffs. Missing/non-editable `issuetype` returns `400 JIRA_EDIT_FIELD_NOT_ALLOWED`; resolution uses `JIRA_ISSUE_TYPE_RESOLUTION_NOT_FOUND`/`AMBIGUOUS`; local failure performs no PUT. Same canonical type is suppressed and an otherwise all-no-op request retains `JIRA_TASK_UPDATE_EMPTY`. EPIC/SUBTASK hierarchy crossing is rejected locally; no Move Issue, parent rewrite, or hierarchy workaround exists.
+- **IDEMPOTENCY / CONFIRMATION:** fingerprint contains raw business `type`, never the resolved provider ID. After PUT: `markRemoteSucceeded` -> canonical GET -> upsert -> fresh local read -> complete only when canonical `Task.type` equals the requested `TaskType`. Failure/mismatch stays `REMOTE_SUCCEEDED`; same-key retry only canonical-recovers and never blindly replays PUT. Background recovery also leaves `TASK_UPDATE` target-aware because its persisted hash cannot reveal optional type intent.
+- **UNCHANGED:** Assignee, Sprint, Estimation, Transition and Delete routes; browser `JSESSIONID`, `credentials: include`, CSRF and required `Idempotency-Key`; authorization/scopes; no Bearer, migration, provider payload logging, or `CourseService` change. Runtime Jira Cloud/Railway verification remains **TBD_DEPLOYMENT_SMOKE**.
+- **EVIDENCE:** targeted Jira update/provider/upsert/recovery/controller/idempotency regression passes **6 suites / 240 tests / 0 failures / 0 errors / 0 skipped**. Full clean produced **134 suites / 868 tests / 4 failures / 0 errors**: the known DEC-023 Course roster baseline plus stable unrelated OpenAPI operation-count and two Lecturer Analytics route/role failures; none is in J1K code. `CourseService` diff is empty.

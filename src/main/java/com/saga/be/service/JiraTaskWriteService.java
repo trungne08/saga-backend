@@ -129,7 +129,8 @@ public class JiraTaskWriteService {
             String key, JiraTaskUpdateRequest request) {
         validatePriorityRequest(request);
         return mutate(principal, projectId, taskId, key, JiraWriteOperationType.TASK_UPDATE,
-                updateFingerprint(request), JiraWriteScope.CLASSIC_WRITE_SCOPE, (token, board, task) -> {
+                updateFingerprint(request), JiraWriteScope.CLASSIC_WRITE_SCOPE, request.type(),
+                (token, board, task) -> {
                     List<JiraCreateField> editMetadata = jiraClient.getEditMetadata(
                             token, board.getCloudId(), external(task));
                     Set<String> allowed = editMetadata.stream().map(JiraCreateField::key)
@@ -286,6 +287,12 @@ public class JiraTaskWriteService {
 
     private TaskReadResponse mutate(SagaPrincipal principal, UUID projectId, UUID taskId, String key,
             JiraWriteOperationType type, String fingerprint, String requiredScope, TaskMutation remote) {
+        return mutate(principal, projectId, taskId, key, type, fingerprint, requiredScope, null, remote);
+    }
+
+    private TaskReadResponse mutate(SagaPrincipal principal, UUID projectId, UUID taskId, String key,
+            JiraWriteOperationType type, String fingerprint, String requiredScope,
+            TaskType expectedTaskType, TaskMutation remote) {
         Project project = authorization.requireProjectManager(principal, projectId);
         Task task = task(projectId, taskId);
         JiraWriteOperation operation = operationService.claim(project, principal, type, key, operationService.fingerprint(fingerprint));
@@ -293,7 +300,7 @@ public class JiraTaskWriteService {
         JiraBoard board = activeBoard(projectId); String token = credentialService.validAccessToken(board);
         JiraWriteScope.requireGranted(board, requiredScope);
         if (operation.getStatus() == JiraWriteOperationStatus.REMOTE_SUCCEEDED) {
-            return reconcile(operation, board, projectId, principal);
+            return reconcile(operation, board, projectId, null, null, expectedTaskType, principal);
         }
         try {
             remote.apply(token, board, task);
@@ -301,7 +308,7 @@ public class JiraTaskWriteService {
             operationService.markRemoteSucceeded(operation.getId(), task.getExternalId(), task.getExternalKey());
         } catch (IntegrationException exception) { operationService.failed(operation.getId(), exception.getCode()); throw exception;
         } catch (RuntimeException exception) { operationService.unknown(operation.getId(), "JIRA_WRITE_OUTCOME_UNKNOWN"); throw exception; }
-        return reconcile(operation, board, projectId, principal);
+        return reconcile(operation, board, projectId, null, null, expectedTaskType, principal);
     }
 
     private Task task(UUID projectId, UUID taskId) {
@@ -326,6 +333,11 @@ public class JiraTaskWriteService {
         if (request.description() != null) {
             fields.put("description", requireEditable(allowed, "description", "description", adf(request.description())));
         }
+        if (request.type() != null && request.type() != task.getType()) {
+            requireSafeIssueTypeHierarchy(task.getType(), request.type());
+            requireEditable(allowed, "issuetype", "type", null);
+            fields.put("issuetype", Map.of("id", resolveUpdateIssueType(request.type(), editMetadata)));
+        }
         if ((request.priority() != null || request.priorityId() != null)
                 && !samePriority(task, request, editMetadata)) {
             requireEditable(allowed, "priority",
@@ -345,6 +357,38 @@ public class JiraTaskWriteService {
                     request.componentIds().stream().map(id -> Map.of("id", id)).toList()));
         }
         return fields;
+    }
+
+    private void requireSafeIssueTypeHierarchy(TaskType currentType, TaskType requestedType) {
+        if (currentType == TaskType.SUBTASK || requestedType == TaskType.SUBTASK
+                || currentType == TaskType.EPIC || requestedType == TaskType.EPIC) {
+            log.warn("jira_task_update_edit_metadata operation=TASK_UPDATE stage=HIERARCHY_VALIDATION "
+                    + "fieldKey=issuetype businessField=type "
+                    + "errorCategory=JIRA_EDIT_FIELD_NOT_ALLOWED writeOperationStatus=PENDING");
+            throw IntegrationException.invalid(
+                    "JIRA_EDIT_FIELD_NOT_ALLOWED",
+                    "The Jira issue type hierarchy cannot be changed by this operation");
+        }
+    }
+
+    private String resolveUpdateIssueType(TaskType requestedType, List<JiraCreateField> editMetadata) {
+        JiraCreateField issueTypeField = editMetadata.stream()
+                .filter(field -> "issuetype".equals(field.key()))
+                .findFirst()
+                .orElseThrow(() -> IntegrationException.invalid(
+                        "JIRA_EDIT_FIELD_NOT_ALLOWED",
+                        "The Jira edit metadata does not allow the requested field"));
+        return resolveSpecificCandidate(
+                issueTypeField.allowedValues().stream()
+                        .filter(value -> taskType(value.name()) == requestedType)
+                        .toList(),
+                JiraCreateFieldAllowedValue::id,
+                JiraCreateFieldAllowedValue::name,
+                requestedType.name(),
+                "JIRA_ISSUE_TYPE_RESOLUTION_NOT_FOUND",
+                "JIRA_ISSUE_TYPE_RESOLUTION_AMBIGUOUS",
+                "The Jira issue type could not be resolved uniquely for this task"
+        );
     }
 
     private boolean samePriority(Task task, JiraTaskUpdateRequest request, List<JiraCreateField> editMetadata) {
@@ -524,7 +568,7 @@ public class JiraTaskWriteService {
             UUID projectId,
             SagaPrincipal actor
     ) {
-        return reconcile(operation, board, projectId, null, null, actor);
+        return reconcile(operation, board, projectId, null, null, null, actor);
     }
 
     private TaskReadResponse reconcileSprint(
@@ -560,7 +604,7 @@ public class JiraTaskWriteService {
             Integer expectedStoryPoint,
             SagaPrincipal actor
     ) {
-        return reconcile(operation, board, projectId, estimationFieldId, expectedStoryPoint, actor);
+        return reconcile(operation, board, projectId, estimationFieldId, expectedStoryPoint, null, actor);
     }
 
     private TaskReadResponse reconcile(
@@ -569,6 +613,7 @@ public class JiraTaskWriteService {
             UUID projectId,
             String estimationFieldId,
             Integer expectedStoryPoint,
+            TaskType expectedTaskType,
             SagaPrincipal actor
     ) {
         if (operation.getRemoteResourceId() == null) throw IntegrationException.conflict(
@@ -585,6 +630,13 @@ public class JiraTaskWriteService {
                             + "stage=TARGET_VERIFICATION expectedStoryPoint={} observedStoryPoint={} "
                             + "writeOperationStatus=REMOTE_SUCCEEDED",
                     expectedStoryPoint, result.storyPoint());
+            throw IntegrationException.conflict(
+                    "JIRA_WRITE_RECOVERY_REQUIRED", "The Jira write is awaiting local recovery");
+        }
+        if (expectedTaskType != null && expectedTaskType != result.type()) {
+            log.warn("jira_task_update_recovery_pending operation=TASK_UPDATE "
+                            + "stage=TARGET_VERIFICATION businessField=type "
+                            + "writeOperationStatus=REMOTE_SUCCEEDED");
             throw IntegrationException.conflict(
                     "JIRA_WRITE_RECOVERY_REQUIRED", "The Jira write is awaiting local recovery");
         }
@@ -772,6 +824,7 @@ public class JiraTaskWriteService {
         return switch (normalize(value)) {
             case "BUG" -> TaskType.BUG;
             case "FEATURE", "NEW_FEATURE" -> TaskType.FEATURE;
+            case "REQUEST" -> TaskType.REQUEST;
             case "STORY", "USER_STORY" -> TaskType.STORY;
             case "EPIC" -> TaskType.EPIC;
             case "SUBTASK", "SUB_TASK" -> TaskType.SUBTASK;
@@ -927,7 +980,7 @@ public class JiraTaskWriteService {
 
     static String updateFingerprint(JiraTaskUpdateRequest request) {
         return String.join("|", String.valueOf(request.title()), String.valueOf(request.description()),
-                String.valueOf(request.priority()), String.valueOf(request.priorityId()), String.valueOf(request.dueDate()),
+                String.valueOf(request.type()), String.valueOf(request.priority()), String.valueOf(request.priorityId()), String.valueOf(request.dueDate()),
                 String.valueOf(request.labels()), String.valueOf(request.componentIds()));
     }
 }

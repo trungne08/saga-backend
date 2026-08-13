@@ -537,7 +537,7 @@ public class TeamContributionService {
         }
         if (task.getType() != null) {
             return switch (task.getType()) {
-                case BUG, FEATURE, STORY, TASK, EPIC, SUBTASK -> ContributionSlice.CODE;
+                case BUG, FEATURE, REQUEST, STORY, TASK, EPIC, SUBTASK -> ContributionSlice.CODE;
             };
         }
         return ContributionSlice.CODE;

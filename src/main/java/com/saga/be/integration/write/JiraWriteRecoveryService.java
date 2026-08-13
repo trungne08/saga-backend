@@ -74,7 +74,8 @@ public class JiraWriteRecoveryService {
                 sprintName = sprint.getName();
                 tombstoneSprint(operation.getProject().getId(), sprint);
             }
-        } else if (operation.getOperationType() == JiraWriteOperationType.TASK_SPRINT
+        } else if (operation.getOperationType() == JiraWriteOperationType.TASK_UPDATE
+                || operation.getOperationType() == JiraWriteOperationType.TASK_SPRINT
                 || operation.getOperationType() == JiraWriteOperationType.TASK_ESTIMATION) {
             log.warn("Jira write recovery remains pending: stage=TARGET_INTENT writeOperationStatus=REMOTE_SUCCEEDED operationType={}",
                     operation.getOperationType());
@@ -101,7 +102,6 @@ public class JiraWriteRecoveryService {
         try {
             switch (operation.getOperationType()) {
                 case TASK_CREATE -> notificationProducer.taskCompleted(operation.getId(), NotificationType.TASK_CREATED, null);
-                case TASK_UPDATE -> notificationProducer.taskCompleted(operation.getId(), NotificationType.TASK_UPDATED, null);
                 case TASK_ASSIGN -> notificationProducer.taskCompleted(operation.getId(), NotificationType.TASK_ASSIGNEE_CHANGED, null);
                 case TASK_TRANSITION -> notificationProducer.taskCompleted(operation.getId(), NotificationType.TASK_STATUS_CHANGED, null);
                 case TASK_DELETE -> notificationProducer.taskCompleted(operation.getId(), NotificationType.TASK_DELETED, null);
@@ -110,7 +110,7 @@ public class JiraWriteRecoveryService {
                 case SPRINT_START -> notificationProducer.sprintCompleted(operation.getId(), NotificationType.SPRINT_STARTED, null, sprintName);
                 case SPRINT_CLOSE -> notificationProducer.sprintCompleted(operation.getId(), NotificationType.SPRINT_CLOSED, null, sprintName);
                 case SPRINT_DELETE -> notificationProducer.sprintCompleted(operation.getId(), NotificationType.SPRINT_DELETED, null, sprintName);
-                case TASK_SPRINT, TASK_ESTIMATION -> throw new IllegalStateException("Target-aware recovery must not complete in background");
+                case TASK_UPDATE, TASK_SPRINT, TASK_ESTIMATION -> throw new IllegalStateException("Target-aware recovery must not complete in background");
             }
         } catch (RuntimeException exception) {
             log.warn("Jira recovery notification failed after durable completion: operationType={}",

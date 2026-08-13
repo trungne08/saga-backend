@@ -19,7 +19,6 @@ import com.saga.be.entity.Sprint;
 import com.saga.be.entity.Task;
 import com.saga.be.entity.enums.JiraWriteOperationStatus;
 import com.saga.be.entity.enums.JiraWriteOperationType;
-import com.saga.be.entity.enums.NotificationType;
 import com.saga.be.integration.project.JiraCredentialService;
 import com.saga.be.integration.provider.JiraIssueSnapshot;
 import com.saga.be.integration.provider.JiraProviderClient;
@@ -40,7 +39,7 @@ import org.junit.jupiter.api.Test;
 
 class JiraWriteRecoveryServiceTest {
     @Test
-    void remoteSucceededTaskUsesOnlyCanonicalGetThenCompletes() {
+    void remoteSucceededTaskUpdateStaysPendingUntilSameKeyCanVerifyOptionalTypeIntent() {
         JiraWriteOperationRepository operations = mock(JiraWriteOperationRepository.class);
         JiraBoardRepository boards = mock(JiraBoardRepository.class);
         JiraCredentialService credentials = mock(JiraCredentialService.class);
@@ -54,23 +53,16 @@ class JiraWriteRecoveryServiceTest {
         JiraWriteOperation operation = JiraWriteOperation.builder().project(project)
                 .operationType(JiraWriteOperationType.TASK_UPDATE).status(JiraWriteOperationStatus.REMOTE_SUCCEEDED)
                 .remoteResourceId("101").remoteResourceKey("P-1").build(); operation.setId(UUID.randomUUID());
-        JiraIssueSnapshot snapshot = new JiraIssueSnapshot("101", "P-1", "Task", "Task", "To Do", null,
-                null, null, null, null, null, LocalDateTime.now(), null, null, null, null, null);
         when(operations.findByStatusIn(any())).thenReturn(List.of(operation));
         when(boards.findByProjectId(project.getId())).thenReturn(Optional.of(board));
-        when(credentials.validAccessToken(board)).thenReturn("token");
-        when(provider.getIssue("token", "cloud", "101")).thenReturn(snapshot);
-        when(canonicalReads.exists(project.getId(), "101")).thenReturn(true);
 
         new JiraWriteRecoveryService(operations, boards, credentials, provider, issueUpserts,
                 mock(JiraSprintUpsertService.class), mock(TaskRepository.class), mock(SprintRepository.class), operationService,
                 canonicalReads, notifications)
                 .recoverRemoteSuccesses();
 
-        verify(issueUpserts).upsert(board.getId(), snapshot);
-        verify(canonicalReads).exists(project.getId(), "101");
-        verify(operationService).complete(operation.getId());
-        verify(notifications).taskCompleted(operation.getId(), NotificationType.TASK_UPDATED, null);
+        verifyNoInteractions(credentials, provider, issueUpserts, canonicalReads, notifications);
+        verify(operationService, never()).complete(operation.getId());
         verify(provider, never()).createIssue(any(), any(), any());
         verify(provider, never()).updateIssue(any(), any(), any(), any());
         verify(provider, never()).deleteIssue(any(), any(), any());
@@ -87,7 +79,7 @@ class JiraWriteRecoveryServiceTest {
         JiraCanonicalTaskReadService canonicalReads = mock(JiraCanonicalTaskReadService.class);
         Project project = Project.builder().build(); project.setId(UUID.randomUUID());
         JiraBoard board = JiraBoard.builder().project(project).cloudId("cloud").build(); board.setId(UUID.randomUUID());
-        JiraWriteOperation operation = operation(project, JiraWriteOperationType.TASK_UPDATE, "101");
+        JiraWriteOperation operation = operation(project, JiraWriteOperationType.TASK_ASSIGN, "101");
         JiraIssueSnapshot snapshot = new JiraIssueSnapshot("101", "P-1", "Task", "Task", "To Do", null,
                 null, null, null, null, null, LocalDateTime.now(), null, null, null, null, null);
         when(operations.findByStatusIn(any())).thenReturn(List.of(operation));
@@ -241,7 +233,7 @@ class JiraWriteRecoveryServiceTest {
         JiraWriteOperationService operationService = mock(JiraWriteOperationService.class);
         Project project = Project.builder().build(); project.setId(UUID.randomUUID());
         JiraBoard board = JiraBoard.builder().project(project).cloudId("cloud").build();
-        JiraWriteOperation operation = operation(project, JiraWriteOperationType.TASK_UPDATE, "101");
+        JiraWriteOperation operation = operation(project, JiraWriteOperationType.TASK_ASSIGN, "101");
         operation.setRemoteResourceKey("P-1");
         when(operations.findByStatusIn(any())).thenReturn(List.of(operation));
         when(boards.findByProjectId(project.getId())).thenReturn(Optional.of(board));

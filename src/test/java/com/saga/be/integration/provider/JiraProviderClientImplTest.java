@@ -1151,6 +1151,46 @@ class JiraProviderClientImplTest {
     }
 
     @Test
+    void mapsEditMetadataIssueTypeAllowedValuesAndSendsSparseResolvedProviderId() {
+        Fixture fixture = fixture();
+        String issueUrl = BASE + "/ex/jira/" + CLOUD_ID + "/rest/api/3/issue/10452";
+        fixture.server.expect(requestTo(issueUrl + "/editmeta"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(json("""
+                        {"fields":{"issuetype":{
+                          "name":"Issue Type","required":false,
+                          "schema":{"type":"issuetype"},
+                          "allowedValues":[
+                            {"id":"type-feature","name":"Feature","subtask":false,"hierarchyLevel":0},
+                            {"id":"type-request","name":"Request","subtask":false,"hierarchyLevel":0}
+                          ]
+                        }}}
+                        """));
+        fixture.server.expect(requestTo(issueUrl))
+                .andExpect(method(HttpMethod.PUT))
+                .andExpect(content().json("""
+                        {"fields":{"issuetype":{"id":"type-feature"}}}
+                        """))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.NO_CONTENT));
+
+        assertThat(fixture.client.getEditMetadata(
+                "ACCESS_TOKEN_SECRET", CLOUD_ID, "10452"
+        )).containsExactly(new JiraCreateField(
+                "issuetype", "Issue Type", false, "issuetype", null,
+                List.of(
+                        new JiraCreateFieldAllowedValue("type-feature", null, "Feature"),
+                        new JiraCreateFieldAllowedValue("type-request", null, "Request")
+                )
+        ));
+        fixture.client.updateIssue(
+                "ACCESS_TOKEN_SECRET", CLOUD_ID, "10452",
+                Map.of("issuetype", Map.of("id", "type-feature"))
+        );
+
+        fixture.server.verify();
+    }
+
+    @Test
     void requestedNullEstimationIsAuthoritativeButOmittedFieldIsNot() {
         JiraIssueSnapshot requestedNull = canonicalEstimation("null");
         JiraIssueSnapshot omitted = canonicalEstimation(null);

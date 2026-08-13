@@ -870,3 +870,13 @@ Không có secret hoặc thông tin đăng nhập thật trong decision log này
 - Evidence: targeted Contribution/authorization regressions 53/53 PASS. Full clean chạy
   132 suites / 831 tests / 1 failure / 0 errors / 0 skipped; failure duy nhất là baseline DEC-023
   ngoài scope và `CourseService` không có diff.
+## DEC-075 — Jira Task Issue Type Update uses exact-issue editmeta and business TaskType
+
+- Date: 2026-08-13; status: ACCEPTED / CONFIRMED_SOURCE_TEST; runtime **TBD_DEPLOYMENT_SMOKE**.
+- Context: normal FE offered Bug, Feature, Request, Story and Task, but main Task Update had no `type`, so type-only requests became `JIRA_TASK_UPDATE_EMPTY`. FE does not own Jira provider IDs. Source also lacked `REQUEST` in `TaskType`, causing Jira Request to collapse to TASK and making the UI intent unrepresentable.
+- Decision: add optional `type` to the existing sparse update request using the same SAGA `TaskType`, and add exact enum value `REQUEST`. Backend owns provider-ID resolution from `editmeta.fields.issuetype.allowedValues` of the exact issue; edit never uses create metadata as authority.
+- Resolution: reuse the established normalize/deduplicate/exact-name-first/unique-semantic-fallback algorithm. Zero and multiple distinct provider IDs fail closed; never hardcode, cache cross-project, sort/pick-first, guess, or expose a provider ID to FE. Only after full local validation does one sparse Jira PUT contain `fields.issuetype.id` plus other actual diffs.
+- No-op/hierarchy: same canonical type is suppressed and an otherwise all-no-op update retains `JIRA_TASK_UPDATE_EMPTY`. EPIC/SUBTASK hierarchy crossing fails locally with no Move Issue, parent mutation, or hierarchy workaround.
+- Idempotency/recovery: raw business `type` is part of the fingerprint; resolved ID/metadata is not persisted. Remote 2xx only marks remote success. Canonical GET/upsert/fresh read must confirm the requested `TaskType` before completion; mismatch/failure remains `REMOTE_SUCCEEDED`. Because persisted fingerprints are one-way, background recovery leaves `TASK_UPDATE` pending for same-body/same-key target-aware recovery and never replays provider PUT.
+- Unchanged: Assignee, Sprint, Estimation, Transition, Delete, authorization/scopes, browser session, CSRF, CORS and required Idempotency-Key. No Bearer, schema migration, sensitive logging, `CourseService` change, commit, or push.
+- Evidence: targeted J1K suites pass **240/240**. Full clean ran **868 tests with 4 failures**: known DEC-023 Course roster plus unrelated stable OpenAPI count and Lecturer Analytics failures. J1K introduced no targeted failure and `CourseService` has no diff.

@@ -827,6 +827,202 @@ class JiraTaskWriteServiceTest {
     }
 
     @Test
+    void updateResolvesTypeOnlyTaskToFeatureThenCanonicalizesAndCompletes() {
+        UpdateFixture fixture = updateFixture();
+        TaskReadResponse confirmed = responseWithType(fixture, TaskType.FEATURE);
+        when(fixture.canonicalReads.findResponse(fixture.projectId, "101")).thenReturn(Optional.of(confirmed));
+
+        TaskReadResponse response = fixture.service.update(fixture.principal, fixture.projectId,
+                fixture.task.getId(), "key",
+                new JiraTaskUpdateRequest(null, null, TaskType.FEATURE, null, null, null, null, null));
+
+        assertEquals(TaskType.FEATURE, response.type());
+        verify(fixture.provider).updateIssue("token", "cloud", "101",
+                Map.of("issuetype", Map.of("id", "feature")));
+        verify(fixture.operations).markRemoteSucceeded(fixture.operation.getId(), "101", "P-1");
+        verify(fixture.operations).complete(fixture.operation.getId());
+    }
+
+    @Test
+    void updateResolvesFeatureToRequestWhenExactIssueEditMetadataAllowsIt() {
+        UpdateFixture fixture = updateFixture();
+        fixture.task.setType(TaskType.FEATURE);
+        when(fixture.canonicalReads.findResponse(fixture.projectId, "101"))
+                .thenReturn(Optional.of(responseWithType(fixture, TaskType.REQUEST)));
+
+        TaskReadResponse response = fixture.service.update(fixture.principal, fixture.projectId,
+                fixture.task.getId(), "key",
+                new JiraTaskUpdateRequest(null, null, TaskType.REQUEST, null, null, null, null, null));
+
+        assertEquals(TaskType.REQUEST, response.type());
+        verify(fixture.provider).updateIssue("token", "cloud", "101",
+                Map.of("issuetype", Map.of("id", "request")));
+    }
+
+    @Test
+    void updateResolvesRequestToStoryWhenExactIssueEditMetadataAllowsIt() {
+        UpdateFixture fixture = updateFixture();
+        fixture.task.setType(TaskType.REQUEST);
+        when(fixture.canonicalReads.findResponse(fixture.projectId, "101"))
+                .thenReturn(Optional.of(responseWithType(fixture, TaskType.STORY)));
+
+        TaskReadResponse response = fixture.service.update(fixture.principal, fixture.projectId,
+                fixture.task.getId(), "key",
+                new JiraTaskUpdateRequest(null, null, TaskType.STORY, null, null, null, null, null));
+
+        assertEquals(TaskType.STORY, response.type());
+        verify(fixture.provider).updateIssue("token", "cloud", "101",
+                Map.of("issuetype", Map.of("id", "story")));
+    }
+
+    @Test
+    void updateTypeRequiresEditableIssueTypeField() {
+        UpdateFixture fixture = updateFixture();
+        when(fixture.provider.getEditMetadata("token", "cloud", "101")).thenReturn(List.of());
+
+        assertEquals("JIRA_EDIT_FIELD_NOT_ALLOWED", assertThrows(IntegrationException.class,
+                () -> fixture.service.update(fixture.principal, fixture.projectId, fixture.task.getId(), "key",
+                        new JiraTaskUpdateRequest(null, null, TaskType.FEATURE,
+                                null, null, null, null, null))).getCode());
+
+        verify(fixture.provider, never()).updateIssue(any(), any(), any(), any());
+    }
+
+    @Test
+    void updateTypeFailsClosedWhenNoAllowedValueMatches() {
+        UpdateFixture fixture = updateFixture();
+        stubIssueTypes(fixture, new JiraCreateFieldAllowedValue("bug", null, "Bug"));
+
+        assertEquals("JIRA_ISSUE_TYPE_RESOLUTION_NOT_FOUND", assertThrows(IntegrationException.class,
+                () -> fixture.service.update(fixture.principal, fixture.projectId, fixture.task.getId(), "key",
+                        new JiraTaskUpdateRequest(null, null, TaskType.FEATURE,
+                                null, null, null, null, null))).getCode());
+
+        verify(fixture.provider, never()).updateIssue(any(), any(), any(), any());
+    }
+
+    @Test
+    void updateTypeFailsClosedWhenSemanticAllowedValuesHaveDistinctIds() {
+        UpdateFixture fixture = updateFixture();
+        stubIssueTypes(fixture,
+                new JiraCreateFieldAllowedValue("feature-a", null, "New Feature"),
+                new JiraCreateFieldAllowedValue("feature-b", null, "New-Feature"));
+
+        assertEquals("JIRA_ISSUE_TYPE_RESOLUTION_AMBIGUOUS", assertThrows(IntegrationException.class,
+                () -> fixture.service.update(fixture.principal, fixture.projectId, fixture.task.getId(), "key",
+                        new JiraTaskUpdateRequest(null, null, TaskType.FEATURE,
+                                null, null, null, null, null))).getCode());
+
+        verify(fixture.provider, never()).updateIssue(any(), any(), any(), any());
+    }
+
+    @Test
+    void updateTypeDeduplicatesProviderIdAndPrefersUniqueExactCanonicalName() {
+        UpdateFixture fixture = updateFixture();
+        stubIssueTypes(fixture,
+                new JiraCreateFieldAllowedValue("feature", null, "Feature"),
+                new JiraCreateFieldAllowedValue("feature", null, "Feature"),
+                new JiraCreateFieldAllowedValue("fallback", null, "New Feature"));
+        when(fixture.canonicalReads.findResponse(fixture.projectId, "101"))
+                .thenReturn(Optional.of(responseWithType(fixture, TaskType.FEATURE)));
+
+        fixture.service.update(fixture.principal, fixture.projectId, fixture.task.getId(), "key",
+                new JiraTaskUpdateRequest(null, null, TaskType.FEATURE, null, null, null, null, null));
+
+        verify(fixture.provider).updateIssue("token", "cloud", "101",
+                Map.of("issuetype", Map.of("id", "feature")));
+    }
+
+    @Test
+    void updateTypeUsesUniqueExistingSemanticFallback() {
+        UpdateFixture fixture = updateFixture();
+        stubIssueTypes(fixture, new JiraCreateFieldAllowedValue("new-feature", null, "New Feature"));
+        when(fixture.canonicalReads.findResponse(fixture.projectId, "101"))
+                .thenReturn(Optional.of(responseWithType(fixture, TaskType.FEATURE)));
+
+        fixture.service.update(fixture.principal, fixture.projectId, fixture.task.getId(), "key",
+                new JiraTaskUpdateRequest(null, null, TaskType.FEATURE, null, null, null, null, null));
+
+        verify(fixture.provider).updateIssue("token", "cloud", "101",
+                Map.of("issuetype", Map.of("id", "new-feature")));
+    }
+
+    @Test
+    void updateBuildsOneMixedTitleAndTypeProviderMutation() {
+        UpdateFixture fixture = updateFixture();
+        when(fixture.canonicalReads.findResponse(fixture.projectId, "101"))
+                .thenReturn(Optional.of(responseWithType(fixture, TaskType.FEATURE)));
+
+        fixture.service.update(fixture.principal, fixture.projectId, fixture.task.getId(), "key",
+                new JiraTaskUpdateRequest("Changed", null, TaskType.FEATURE,
+                        null, null, null, null, null));
+
+        verify(fixture.provider, times(1)).updateIssue("token", "cloud", "101", Map.of(
+                "summary", "Changed",
+                "issuetype", Map.of("id", "feature")
+        ));
+    }
+
+    @Test
+    void updateSameTypePreservesAllNoOpEmptySemanticsWithoutProviderMutation() {
+        UpdateFixture fixture = updateFixture();
+
+        assertEquals("JIRA_TASK_UPDATE_EMPTY", assertThrows(IntegrationException.class,
+                () -> fixture.service.update(fixture.principal, fixture.projectId, fixture.task.getId(), "key",
+                        new JiraTaskUpdateRequest(null, null, TaskType.TASK,
+                                null, null, null, null, null))).getCode());
+
+        verify(fixture.provider, never()).updateIssue(any(), any(), any(), any());
+    }
+
+    @Test
+    void updateTypeDoesNotCrossEpicOrSubtaskHierarchyEvenWhenMetadataListsTarget() {
+        UpdateFixture fixture = updateFixture();
+        stubIssueTypes(fixture, new JiraCreateFieldAllowedValue("subtask", null, "Sub-task"));
+
+        assertEquals("JIRA_EDIT_FIELD_NOT_ALLOWED", assertThrows(IntegrationException.class,
+                () -> fixture.service.update(fixture.principal, fixture.projectId, fixture.task.getId(), "key",
+                        new JiraTaskUpdateRequest(null, null, TaskType.SUBTASK,
+                                null, null, null, null, null))).getCode());
+
+        verify(fixture.provider, never()).updateIssue(any(), any(), any(), any());
+    }
+
+    @Test
+    void updateTypeCanonicalMismatchRetainsRecoveryStateWithoutFalseCompletion() {
+        UpdateFixture fixture = updateFixture();
+        when(fixture.canonicalReads.findResponse(fixture.projectId, "101"))
+                .thenReturn(Optional.of(responseWithType(fixture, TaskType.STORY)));
+
+        assertEquals("JIRA_WRITE_RECOVERY_REQUIRED", assertThrows(IntegrationException.class,
+                () -> fixture.service.update(fixture.principal, fixture.projectId, fixture.task.getId(), "key",
+                        new JiraTaskUpdateRequest(null, null, TaskType.FEATURE,
+                                null, null, null, null, null))).getCode());
+
+        verify(fixture.operations).markRemoteSucceeded(fixture.operation.getId(), "101", "P-1");
+        verify(fixture.operations, never()).complete(any());
+    }
+
+    @Test
+    void remoteSucceededTypeUpdateOnlyCanonicalRecoversWithoutBlindProviderReplay() {
+        UpdateFixture fixture = updateFixture();
+        fixture.operation.setStatus(JiraWriteOperationStatus.REMOTE_SUCCEEDED);
+        fixture.operation.setRemoteResourceId("101");
+        fixture.operation.setRemoteResourceKey("P-1");
+        when(fixture.canonicalReads.findResponse(fixture.projectId, "101"))
+                .thenReturn(Optional.of(responseWithType(fixture, TaskType.FEATURE)));
+
+        assertEquals(TaskType.FEATURE, fixture.service.update(fixture.principal, fixture.projectId,
+                fixture.task.getId(), "key",
+                new JiraTaskUpdateRequest(null, null, TaskType.FEATURE,
+                        null, null, null, null, null)).type());
+
+        verify(fixture.provider, never()).getEditMetadata(any(), any(), any());
+        verify(fixture.provider, never()).updateIssue(any(), any(), any(), any());
+        verify(fixture.operations).complete(fixture.operation.getId());
+    }
+
+    @Test
     void updateResolvesBusinessPriorityThenCanonicalizesAndCompletes() {
         UpdateFixture fixture = updateFixture();
         fixture.task.setPriority(Priority.LOW);
@@ -939,6 +1135,18 @@ class JiraTaskWriteServiceTest {
                 JiraTaskWriteService.updateFingerprint(businessHigh),
                 JiraTaskWriteService.updateFingerprint(new JiraTaskUpdateRequest(
                         null, null, Priority.LOW, null, null, null, null))
+        );
+        assertEquals(
+                JiraTaskWriteService.updateFingerprint(new JiraTaskUpdateRequest(
+                        null, null, TaskType.FEATURE, null, null, null, null, null)),
+                JiraTaskWriteService.updateFingerprint(new JiraTaskUpdateRequest(
+                        null, null, TaskType.FEATURE, null, null, null, null, null))
+        );
+        assertNotEquals(
+                JiraTaskWriteService.updateFingerprint(new JiraTaskUpdateRequest(
+                        null, null, TaskType.FEATURE, null, null, null, null, null)),
+                JiraTaskWriteService.updateFingerprint(new JiraTaskUpdateRequest(
+                        null, null, TaskType.STORY, null, null, null, null, null))
         );
         assertNotEquals(
                 JiraTaskWriteService.updateFingerprint(businessHigh),
@@ -1069,6 +1277,28 @@ class JiraTaskWriteServiceTest {
                 fields.size() == 1 && fields.containsKey(expectedField)));
         verify(fixture.operations).markRemoteSucceeded(fixture.operation.getId(), "101", "P-1");
         verify(fixture.operations).complete(fixture.operation.getId());
+    }
+
+    private void stubIssueTypes(UpdateFixture fixture, JiraCreateFieldAllowedValue... values) {
+        when(fixture.provider.getEditMetadata("token", "cloud", "101")).thenReturn(List.of(
+                new JiraCreateField("issuetype", "Issue Type", false, "issuetype", null, List.of(values))
+        ));
+    }
+
+    private TaskReadResponse responseWithType(UpdateFixture fixture, TaskType type) {
+        Task confirmed = Task.builder()
+                .project(fixture.task.getProject())
+                .externalId(fixture.task.getExternalId())
+                .externalKey(fixture.task.getExternalKey())
+                .title(fixture.task.getTitle())
+                .type(type)
+                .priority(fixture.task.getPriority())
+                .dueDate(fixture.task.getDueDate())
+                .labels(fixture.task.getLabels())
+                .components(fixture.task.getComponents())
+                .build();
+        confirmed.setId(fixture.task.getId());
+        return TaskReadResponse.from(confirmed);
     }
 
     private String captureCreateFailure(Runnable invocation) {
@@ -1219,7 +1449,7 @@ class JiraTaskWriteServiceTest {
                 .connectionStatus(IntegrationStatus.ACTIVE).grantedScopes("write:jira-work").build();
         board.setId(UUID.randomUUID());
         Task task = Task.builder().project(project).externalId("101").externalKey("P-1").title("Original")
-                .priority(Priority.HIGH).dueDate(LocalDateTime.of(2026, 8, 23, 0, 0))
+                .type(TaskType.TASK).priority(Priority.HIGH).dueDate(LocalDateTime.of(2026, 8, 23, 0, 0))
                 .labels(List.of("FE")).components(List.of(new TaskComponentSnapshot("1", "Frontend"))).build();
         task.setId(UUID.randomUUID());
         JiraWriteOperation operation = JiraWriteOperation.builder().project(project)
@@ -1238,6 +1468,11 @@ class JiraTaskWriteServiceTest {
         when(provider.getEditMetadata("token", "cloud", "101")).thenReturn(List.of(
                 new JiraCreateField("summary", "Summary", false, "string", null, List.of()),
                 new JiraCreateField("description", "Description", false, "string", null, List.of()),
+                new JiraCreateField("issuetype", "Issue Type", false, "issuetype", null, List.of(
+                        new JiraCreateFieldAllowedValue("feature", null, "Feature"),
+                        new JiraCreateFieldAllowedValue("request", null, "Request"),
+                        new JiraCreateFieldAllowedValue("story", null, "Story"),
+                        new JiraCreateFieldAllowedValue("task", null, "Task"))),
                 new JiraCreateField("priority", "Priority", false, "priority", null,
                         List.of(new JiraCreateFieldAllowedValue("1", null, "High"),
                                 new JiraCreateFieldAllowedValue("2", null, "Low"))),

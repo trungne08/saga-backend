@@ -199,6 +199,7 @@ public class JiraIssueUpsertService {
         return switch (normalized) {
             case "BUG" -> TaskType.BUG;
             case "FEATURE", "NEW_FEATURE" -> TaskType.FEATURE;
+            case "REQUEST" -> TaskType.REQUEST;
             case "STORY", "USER_STORY" -> TaskType.STORY;
             case "EPIC" -> TaskType.EPIC;
             case "SUBTASK", "SUB_TASK" -> TaskType.SUBTASK;

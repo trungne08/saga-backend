@@ -344,7 +344,7 @@ public class ContributionCalculationService {
         }
         if (task.getType() != null) {
             return switch (task.getType()) {
-                case BUG, FEATURE, STORY, TASK, EPIC, SUBTASK -> ContributionSlice.CODE;
+                case BUG, FEATURE, REQUEST, STORY, TASK, EPIC, SUBTASK -> ContributionSlice.CODE;
             };
         }
         String fallbackText = String.join(" ", task.getTitle() == null ? "" : task.getTitle(), task.getDescription() == null ? "" : task.getDescription()).toLowerCase(Locale.ROOT);

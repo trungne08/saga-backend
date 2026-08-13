@@ -12,7 +12,7 @@
 - Update phải lấy `GET /rest/api/3/issue/{issueIdOrKey}/editmeta` cho từng issue/request. Nếu cần mutate: field `priority` phải editable; business resolution phải dedup provider ID, chọn unique exact canonical name trước semantic fallback, zero/multiple fail closed; explicit ID phải thuộc `allowedValues`. Không sort/pick-first, cache cross-project hoặc fallback stale ID.
 - Create và Update phải gọi chung thuật toán priority resolution; chúng vẫn dùng authority metadata riêng (`createmeta` và `editmeta`). Provider payload chỉ được tạo sau resolution thành công. Diagnostic cấm request value, ID, token, Authorization, credential, Idempotency-Key, cookie/CSRF và raw response.
 - Fingerprint Update chứa raw `priority` và `priorityId` riêng; không chứa resolved provider ID/metadata. Canonical reconciliation, remote-success recovery, sparse update khác, session/CSRF/authorization và schema giữ nguyên.
-- `componentIds` vẫn là Jira component IDs và public option source chưa được chứng minh; chỉ ghi gap. Transition provider ID phải đến từ GET transitions đúng issue. Issue Type Update là `CONFIRMED_NOT_IMPLEMENTED`; không mở rộng trong J1J.
+- Historical J1J boundary: `componentIds` remains a Jira provider-ID gap and Transition IDs must come from GET transitions for the exact issue. The former Issue Type `CONFIRMED_NOT_IMPLEMENTED` statement is superseded by J1K below.
 
 ## Ràng buộc J1I canonical Story Point parser — 2026-08-10
 
@@ -28,7 +28,7 @@
 
 ## Ràng buộc J1G Jira Task update metadata — 2026-08-10
 
-- `PUT /tasks/{taskId}` không nhận type/assignee/Sprint/estimation/status; giữ route/scope/idempotency/recovery riêng.
+- Historical J1G baseline: `PUT /tasks/{taskId}` did not accept type. J1K adds business `type` only; assignee/Sprint/estimation/status retain their separate routes and recovery contracts.
 - `GET /rest/api/3/issue/{issueIdOrKey}/editmeta` là authority writable. Field cần mutate không có metadata trả `400 JIRA_EDIT_FIELD_NOT_ALLOWED`, không provider update/retry mù.
 - Diagnostic chỉ có operation, stage, field key/business field, upstream status, category, write status; cấm request value, token, Authorization, Idempotency-Key, cookie/CSRF, Cognito sub, raw provider response.
 - Thiếu `Idempotency-Key` là binding `400 INVALID_REQUEST`; header vẫn required, không đổi session/CSRF/CORS/state machine.
@@ -904,3 +904,11 @@ chặn nullable repair.
   reviewer/comment, token, credential, secret hoặc raw Jira/GitHub payload cho Leader.
 - Đây là read-only grant. Không mở override/slice-weight/Peer Review mutation và không sửa bất kỳ
   arithmetic, normalization, evidence, warning hay current-aggregate semantic nào.
+## J1K Jira Task Issue Type Update constraints — 2026-08-13
+
+- `PUT /api/v1/projects/{projectId}/tasks/{taskId}` may accept optional business `type` only as SAGA `TaskType`; `REQUEST` is an exact business value. Public/normal clients must not send `issueTypeId` or any Jira provider ID.
+- Edit authority is only `GET /rest/api/3/issue/{issueIdOrKey}/editmeta` for the exact current issue and field `issuetype`. Missing/non-editable field fails `400 JIRA_EDIT_FIELD_NOT_ALLOWED` before provider PUT. Create metadata, hardcoded/project IDs, cross-project cache, sort/pick-first and guessing are forbidden.
+- Resolution must normalize candidates, deduplicate provider IDs, prefer exactly one canonical exact-name match, then allow semantic fallback only for exactly one distinct provider ID. Zero and multiple distinct IDs fail closed with the existing issue-type resolution taxonomy. Build the entire sparse field map before a single provider PUT so mixed validation failure cannot partially mutate Jira.
+- Same canonical business type must be suppressed; an otherwise empty update keeps `JIRA_TASK_UPDATE_EMPTY`. Provider payload contains only the resolved ID under `fields.issuetype`; request/provider values, IDs, raw metadata/payload/response, credentials and Idempotency-Key must not be logged or exposed.
+- Fingerprint must contain raw business `type`, never resolved Jira ID. After remote success, canonical GET/upsert/fresh local read must confirm `Task.type == requested type` before `COMPLETED`. Failure/mismatch stays `REMOTE_SUCCEEDED`; same-key replay only recovers canonical state. Background recovery must not complete `TASK_UPDATE` without readable target intent and must never replay provider mutation.
+- EPIC/SUBTASK hierarchy crossing is fail-closed; do not call Move Issue or rewrite parent/hierarchy. Assignee, Sprint, Estimation, Transition, Delete, authorization/scopes, browser session, CSRF, CORS and required `Idempotency-Key` remain unchanged. No migration, Bearer, or `CourseService` change.

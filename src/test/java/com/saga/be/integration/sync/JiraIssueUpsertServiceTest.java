@@ -103,6 +103,28 @@ class JiraIssueUpsertServiceTest {
     }
 
     @Test
+    void canonicalRequestIssueTypeMapsToBusinessRequest() {
+        Task existing = new Task();
+        existing.setExternalId("jira-request");
+        when(taskRepository.findByProjectIdAndExternalId(projectId, "jira-request"))
+                .thenReturn(Optional.of(existing));
+        when(taskRepository.saveAndFlush(any(Task.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        LocalDateTime updatedAt = LocalDateTime.parse("2026-07-29T10:00:00");
+        JiraIssueSnapshot request = new JiraIssueSnapshot(
+                "jira-request", "SAGA-2", "request title", "Request", "To Do", "High", 3,
+                "atlassian-id-1", null, null, LocalDateTime.parse("2026-07-28T10:00:00"),
+                updatedAt, null, null, null, null, updatedAt.toInstant(java.time.ZoneOffset.UTC)
+        );
+
+        assertTrue(service.upsert(boardId, request));
+
+        ArgumentCaptor<Task> captor = ArgumentCaptor.forClass(Task.class);
+        verify(taskRepository).saveAndFlush(captor.capture());
+        assertEquals(TaskType.REQUEST, captor.getValue().getType());
+    }
+
+    @Test
     void staleJiraWebhookCannotOverwriteNewerTask() {
         Task existing = new Task();
         existing.setTitle("new title");
