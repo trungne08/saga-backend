@@ -1,3 +1,11 @@
+## J1K.1 TaskType.REQUEST physical schema constraints — 2026-08-13
+
+- Java `TaskType` and the physical MySQL `task.type` enum are one persistence contract. V29 must contain exactly `BUG, EPIC, FEATURE, REQUEST, STORY, SUBTASK, TASK`; adding a Java value without matching Flyway support must fail the migration contract test.
+- Preserve runtime metadata `IS_NULLABLE=YES` and `COLUMN_DEFAULT=NULL`. Do not rewrite/delete Task rows, change indexes/FKs, or modify unrelated columns/tables.
+- MySQL 1265 after successful Jira search at `UPSERT_ISSUES` is classified as `TASK_TYPE_DATABASE_ENUM_MISSING_REQUEST`, not webhook/search/FE failure.
+- Flyway is deployment authority. Do not manually ALTER production outside the normal migration path. Post-deploy Request/Story/existing-type and manual reconciliation smoke are required before runtime confirmation.
+- This section supersedes only the J1K “no migration/schema unchanged” statement. Provider resolution, sparse update, canonical confirmation, authorization, session/CSRF and `CourseService` remain unchanged.
+
 ## Ràng buộc J1K Jira external Web Task sync — 2026-08-13
 
 - Jira dynamic webhook phải giữ exact registered events: `jira:issue_created`, `jira:issue_updated`, `jira:issue_deleted`, `comment_created`, `comment_updated`, `comment_deleted`, `sprint_created`, `sprint_updated`, `sprint_deleted`, `sprint_started`, `sprint_closed`. Provider request chỉ được xử lý sau JWT/board-secret authentication, durable encrypted receipt và `(provider, delivery_id)` dedup.

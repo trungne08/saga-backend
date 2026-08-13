@@ -271,6 +271,35 @@ class AutomaticSyncDispatcherImplTest {
     }
 
     @Test
+    void reconciliationProcessesCanonicalRequestIssueWithoutFailure() {
+        JiraIssueSnapshot request = new JiraIssueSnapshot(
+                "request-1", "SAGA-REQUEST-1", "Canonical request",
+                "Request", "To Do", "Medium", null, null, null, null,
+                LocalDateTime.parse("2026-08-13T04:00:00"),
+                LocalDateTime.parse("2026-08-13T05:00:00"),
+                null, null, null, null
+        );
+        when(jiraClient.searchIssues(
+                eq("token"), eq("cloud-id"), eq("SAGA"), any(), any(), eq(null)
+        )).thenReturn(new JiraIssuePage(List.of(request), null, true));
+        when(jiraUpsertService.upsert(boardId, request)).thenReturn(true);
+
+        dispatcher.syncJira(boardId, SyncJobType.RECONCILIATION);
+
+        verify(jiraUpsertService).upsert(boardId, request);
+        verify(jiraBoardStateService).complete(eq(boardId), any());
+        verify(syncJobFinalizationService).finalizeJob(
+                eq(jiraJob.getId()),
+                eq(SyncJobStatus.COMPLETED),
+                eq(1),
+                eq(0),
+                any(),
+                isNull(),
+                isNull()
+        );
+    }
+
+    @Test
     void jiraReconciliationDiscoversAndProjectsBoardEstimationField() {
         board.setJiraBoardId("35");
         JiraIssueSnapshot estimated = new JiraIssueSnapshot(

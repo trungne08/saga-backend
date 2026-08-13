@@ -1,3 +1,11 @@
+## J1K.1 TaskType.REQUEST database enum migration — 2026-08-13
+
+- **CONFIRMED_RUNTIME_SCHEMA_MISMATCH:** production-compatible runtime metadata for nullable `task.type` lacked `REQUEST`; Jira reconciliation therefore reached HTTP 200/search success but failed canonical `saveAndFlush` at `UPSERT_ISSUES` with MySQL 1265.
+- **IMPLEMENTED_SOURCE_TEST:** V29 minimally expands the MySQL enum to `BUG, EPIC, FEATURE, REQUEST, STORY, SUBTASK, TASK`, retaining nullable `YES` and default `NULL`. Existing values/rows are not rewritten.
+- **CONTRACT:** SQL enum values are asserted equal to all `TaskType.values()` so a future Java enum addition without Flyway coverage fails tests. Persistence covers every enum; Request canonical upsert and reconciliation completion have regression coverage.
+- **VERIFICATION:** targeted J1K.1/Jira regression is 114/114 PASS. Full `mvnw clean test` ran 880 tests with 4 failures and 0 errors; the remaining failures are the same pre-existing OpenAPI count, Course roster, and two Lecturer Analytics gaps recorded before J1K.1. All J1K.1 and migration-index suites pass.
+- **DEPLOYMENT:** source/test completion does not prove production migration. Apply V29 through configured Flyway startup/deployment, then smoke Jira Request/Story and manual reconciliation. No ad-hoc production ALTER.
+
 ## J1K Jira Web create/update/Story Point/delete sync — 2026-08-13
 
 - **IMPLEMENTED / CONFIRMED_SOURCE_TEST:** Jira dynamic webhook đã đăng ký issue created/updated/deleted. Receipt chỉ được persist sau Jira authentication và có provider/delivery dedup; create/update gọi canonical reconciliation, không upsert từ raw webhook body. Retry receipt và reconciliation scheduler giữ fallback hiện hữu.

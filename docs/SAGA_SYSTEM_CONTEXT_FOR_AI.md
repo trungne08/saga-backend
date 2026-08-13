@@ -1,3 +1,11 @@
+## J1K.1 TaskType.REQUEST physical schema correction — 2026-08-13
+
+- **CONFIRMED_RUNTIME_SCHEMA_MISMATCH:** Jira search HTTP 200 fetched issues, but canonical upsert failed at `UPSERT_ISSUES` with MySQL 1265 `Data truncated for column 'type'`. Read-only `information_schema` evidence showed `task.type` as `enum('BUG','EPIC','FEATURE','STORY','SUBTASK','TASK')`, nullable `YES`, default `NULL`; Java already had `REQUEST`.
+- **ROOT CAUSE:** `TASK_TYPE_DATABASE_ENUM_MISSING_REQUEST`. The J1K claim that schema was unchanged is superseded: a first-class persisted `TaskType.REQUEST` requires the physical MySQL enum to include `REQUEST`.
+- **FIX:** V29 changes only `task.type` to the exact current TaskType set and preserves `NULL DEFAULT NULL`, existing rows, indexes and foreign keys. Flyway is the only deployment authority; no production ad-hoc ALTER.
+- **REGRESSION:** migration/schema contract compares SQL enum values to every Java `TaskType`; persistence round-trips every value; Jira Request canonical upsert and reconciliation Request batch are covered. Deployment smoke remains TBD until V29 is applied normally.
+- **TEST EVIDENCE:** targeted regression is 114/114 PASS. Full clean is 880 tests with only the 4 pre-existing non-J1K failures (OpenAPI count, Course roster, two Lecturer Analytics); J1K.1 and migration contracts have zero failures/errors.
+
 ## J1K Jira external Web Task sync correctness — 2026-08-13
 
 - **CONFIRMED_SOURCE_TEST:** dynamic webhook đăng ký đúng các event `jira:issue_created`, `jira:issue_updated`, `jira:issue_deleted`, `comment_created`, `comment_updated`, `comment_deleted`, `sprint_created`, `sprint_updated`, `sprint_deleted`, `sprint_started`, `sprint_closed`. Jira ingress vẫn authenticate JWT/board secret, persist encrypted deduplicated receipt rồi mới xử lý async; không tin raw payload để canonical upsert create/update.
