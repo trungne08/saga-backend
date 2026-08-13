@@ -1689,3 +1689,6 @@ If canonical confirmation fails after Jira accepted the PUT, retry the identical
 ## J1K.1 TaskType.REQUEST deployment note — 2026-08-13
 
 Backend source already accepts business `REQUEST`, but the deployed physical MySQL `task.type` enum must receive Flyway V29 before Jira Request can persist. This does not change the FE payload or error-handling contract. Until deployment smoke completes, sync-history `ITEM_UPSERT_FAILED` at `UPSERT_ISSUES` with the confirmed enum mismatch is a deployment/schema incident; FE must not substitute another type or send a Jira provider ID.
+# Internal AI context is not a frontend contract (2026-08-14)
+
+`/internal/ai/**` is reserved for authenticated `saga-ai-service` reads and uses `X-SAGA-AI-Service-Token`. Frontend code must not send, store, or request this credential and must not call the internal commit-review context endpoint. Existing browser APIs continue to use `JSESSIONID`, `credentials: include`, and CSRF for unsafe methods; M5 adds no public/browser AI review API.

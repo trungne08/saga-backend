@@ -929,3 +929,12 @@ chặn nullable repair.
 - Same canonical business type must be suppressed; an otherwise empty update keeps `JIRA_TASK_UPDATE_EMPTY`. Provider payload contains only the resolved ID under `fields.issuetype`; request/provider values, IDs, raw metadata/payload/response, credentials and Idempotency-Key must not be logged or exposed.
 - Fingerprint must contain raw business `type`, never resolved Jira ID. After remote success, canonical GET/upsert/fresh local read must confirm `Task.type == requested type` before `COMPLETED`. Failure/mismatch stays `REMOTE_SUCCEEDED`; same-key replay only recovers canonical state. Background recovery must not complete `TASK_UPDATE` without readable target intent and must never replay provider mutation.
 - EPIC/SUBTASK hierarchy crossing is fail-closed; do not call Move Issue or rewrite parent/hierarchy. Assignee, Sprint, Estimation, Transition, Delete, authorization/scopes, browser session, CSRF, CORS and required `Idempotency-Key` remain unchanged. No migration, Bearer, or `CourseService` change.
+# M5 internal AI context constraints (2026-08-14)
+
+- Backend is the sole authoritative source of Project/GitRepo/CommitData/Task/GitIssue context. AI must not query business tables or receive GitHub/Jira credentials.
+- Internal commit-review input is exact Project UUID + GitHub provider repository ID + full 40-hex SHA. Cross-project/repository/commit requests fail closed.
+- Service authentication is separate from browser security: env `SAGA_AI_SERVICE_TOKEN`, property `app.internal-ai.service-token`, header `X-SAGA-AI-Service-Token`, scoped only to `/internal/ai/**`. Browser `JSESSIONID`, CSRF, CORS, and no-Bearer contracts remain unchanged.
+- Traceability authority is normalized `GitIssueCommitLink` and `TaskGitIssueLink` only. Missing links are `NOT_PROVEN`; no text/key/number/AI inference is permitted.
+- Backend may fetch exact commit detail only with the existing Backend-owned GitHub client. Response is a dedicated versioned DTO, excludes credentials/personal session data, and is bounded to 50 files, 20,000 patch characters per file, and 100,000 total context characters with explicit truncation metadata.
+- M5 adds no business migration, public AI review API, n8n flow, webhook trigger, or automatic push review.
+- M5 targeted verification passes 47/47. Full clean runs 909 tests with only the four previously documented baseline failures (OpenAPI 131/133, DEC-023 Course roster, two Lecturer Analytics assertions); the internal endpoint is hidden from browser OpenAPI.

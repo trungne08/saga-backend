@@ -26,6 +26,12 @@ public interface GitRepoRepository extends JpaRepository<GitRepo, UUID> {
             Long repositoryId
     );
 
+    @EntityGraph(attributePaths = {"project", "installation"})
+    Optional<GitRepo> findForCommitContextByProjectIdAndRepositoryId(
+            UUID projectId,
+            Long repositoryId
+    );
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @EntityGraph(attributePaths = {"installation"})
     @Query("select repository from GitRepo repository where repository.project.id = :projectId and repository.repositoryId = :repositoryId")

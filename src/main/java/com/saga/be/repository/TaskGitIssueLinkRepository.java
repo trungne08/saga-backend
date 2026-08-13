@@ -27,4 +27,10 @@ public interface TaskGitIssueLinkRepository extends JpaRepository<TaskGitIssueLi
             UUID gitIssueId,
             Pageable pageable
     );
+
+    @EntityGraph(attributePaths = {"gitIssue", "task", "task.project"})
+    List<TaskGitIssueLink> findByGitIssueIdInOrderByTaskExternalKeyAscIdAsc(
+            List<UUID> gitIssueIds,
+            Pageable pageable
+    );
 }

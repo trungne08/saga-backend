@@ -6,6 +6,7 @@ import com.saga.be.security.CognitoLogoutSuccessHandler;
 import com.saga.be.security.CognitoOidcAuthoritiesMapper;
 import com.saga.be.security.JsonAccessDeniedHandler;
 import com.saga.be.security.JsonAuthenticationEntryPoint;
+import com.saga.be.security.InternalAiServiceAuthenticationFilter;
 import com.saga.be.security.NoStoreOAuth2AuthorizedClientRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -62,6 +63,7 @@ public class SecurityConfig {
             CsrfTokenRepository csrfTokenRepository,
             SecurityContextRepository securityContextRepository,
             com.saga.be.security.AccountStatusEnforcementFilter accountStatusEnforcementFilter,
+            InternalAiServiceAuthenticationFilter internalAiServiceAuthenticationFilter,
             CognitoOidcAuthoritiesMapper authoritiesMapper,
             NoStoreOAuth2AuthorizedClientRepository authorizedClientRepository,
             CognitoAuthenticationSuccessHandler successHandler,
@@ -87,6 +89,10 @@ public class SecurityConfig {
                                         "/api/webhooks/jira"
                                 )
                         )
+                )
+                .addFilterBefore(
+                        internalAiServiceAuthenticationFilter,
+                        OAuth2LoginAuthenticationFilter.class
                 )
                 .addFilterAfter(accountStatusEnforcementFilter, CsrfFilter.class)
                 .securityContext(context -> context
@@ -122,6 +128,7 @@ public class SecurityConfig {
                             "/api/webhooks/github",
                             "/api/webhooks/jira"
                     ).permitAll();
+                    authorize.requestMatchers("/internal/ai/**").permitAll();
                     if (apiDocsEnabled || swaggerUiEnabled) {
                         authorize.requestMatchers(
                                 "/v3/api-docs/**",

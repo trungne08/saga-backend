@@ -37,6 +37,13 @@ public interface GitHubProviderClient {
             LocalDateTime since
     );
 
+    GitHubCommitDetailSnapshot commitDetail(
+            long installationId,
+            String owner,
+            String repository,
+            String commitSha
+    );
+
     List<GitHubPullRequestSnapshot> pullRequests(
             long installationId,
             String owner,

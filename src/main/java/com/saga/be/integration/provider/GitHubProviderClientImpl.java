@@ -342,6 +342,50 @@ public class GitHubProviderClientImpl implements GitHubProviderClient {
     }
 
     @Override
+    public GitHubCommitDetailSnapshot commitDetail(
+            long installationId,
+            String owner,
+            String repository,
+            String commitSha
+    ) {
+        String token = installationAccessToken(installationId);
+        JsonNode detail = get(repositoryUriBuilder(
+                        owner,
+                repository,
+                "/commits/" + requiredCommitSha(commitSha)
+                )
+                .queryParam("per_page", 100)
+                .queryParam("page", 1)
+                .build()
+                .encode()
+                .toUri(), token);
+        JsonNode gitCommit = detail.path("commit");
+        JsonNode stats = detail.path("stats");
+        JsonNode files = detail.path("files");
+        if (!files.isArray()) {
+            throw invalidResponse();
+        }
+        List<GitHubChangedFileSnapshot> changedFiles = new ArrayList<>();
+        for (JsonNode file : files) {
+            changedFiles.add(new GitHubChangedFileSnapshot(
+                    requiredText(file, "filename"),
+                    requiredText(file, "status"),
+                    nullableInt(file, "additions"),
+                    nullableInt(file, "deletions"),
+                    text(file, "patch")
+            ));
+        }
+        return new GitHubCommitDetailSnapshot(
+                requiredText(detail, "sha"),
+                requiredText(gitCommit, "message"),
+                parseDateTime(nestedText(gitCommit, "committer", "date")),
+                nullableInt(stats, "additions"),
+                nullableInt(stats, "deletions"),
+                changedFiles
+        );
+    }
+
+    @Override
     public List<GitHubBranchInfo> branches(long installationId, String owner, String repository) {
         String token = installationAccessToken(installationId);
         List<GitHubBranchInfo> result = new ArrayList<>();
@@ -844,6 +888,16 @@ public class GitHubProviderClientImpl implements GitHubProviderClient {
             throw IntegrationException.invalid("GITHUB_BRANCH_INVALID", "The GitHub branch is invalid");
         }
         return branch.trim();
+    }
+
+    private String requiredCommitSha(String commitSha) {
+        if (commitSha == null || !commitSha.matches("(?i)[0-9a-f]{40}")) {
+            throw IntegrationException.invalid(
+                    "GITHUB_COMMIT_SHA_INVALID",
+                    "The GitHub commit SHA is invalid"
+            );
+        }
+        return commitSha.toLowerCase(java.util.Locale.ROOT);
     }
 
     private long requiredLong(JsonNode node, String field) {
