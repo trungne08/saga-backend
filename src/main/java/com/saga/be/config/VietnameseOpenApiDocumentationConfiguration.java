@@ -72,6 +72,8 @@ public class VietnameseOpenApiDocumentationConfiguration {
             summary("AdminActiveSemesterController#current", "Xem học kỳ mặc định của hệ thống"),
             summary("AdminActiveSemesterController#updateActiveSemester", "Đặt học kỳ mặc định của hệ thống"),
             summary("AdminCourseReportController#export", "Tải báo cáo dữ liệu khóa học"),
+            summary("AdminDashboardReportController#anomalies", "Xem báo cáo anomaly dashboard"),
+            summary("AdminDashboardReportController#graphProcessing", "Xem báo cáo xử lý graph"),
             summary("AdminNotificationBroadcastController#broadcast", "Gửi thông báo đến một nhóm người dùng"),
             summary("AdminReadController#users", "Xem danh sách người dùng"),
             summary("AdminReadController#updateUserStatus", "Cập nhật trạng thái tài khoản người dùng"),
@@ -321,6 +323,7 @@ public class VietnameseOpenApiDocumentationConfiguration {
             case "CourseContributionWeightController", "TeamContributionController" -> "Đóng góp";
             case "SemesterController" -> "Học kỳ";
             case "AdminActiveSemesterController", "AdminCourseReportController",
+                    "AdminDashboardReportController",
                     "AdminReadController", "AdminUserImportController" -> "Quản trị";
             case "SubjectController" -> "Môn học";
             case "MyCourseTeamController", "TeamRosterController" -> "Nhóm";
@@ -388,7 +391,8 @@ public class VietnameseOpenApiDocumentationConfiguration {
 
     private String scopeDescription(String controller) {
         return switch (controller) {
-            case "AdminActiveSemesterController", "AdminCourseReportController", "AdminReadController",
+            case "AdminActiveSemesterController", "AdminCourseReportController",
+                    "AdminDashboardReportController", "AdminReadController",
                     "AdminUserImportController" -> "Chỉ ADMIN; dữ liệu nằm trong phạm vi vận hành toàn hệ thống.";
             case "CourseController", "ClassController", "SemesterController", "SubjectController" ->
                     "Dữ liệu và quyền truy cập được giới hạn theo contract hiện có của tài khoản đang đăng nhập.";
