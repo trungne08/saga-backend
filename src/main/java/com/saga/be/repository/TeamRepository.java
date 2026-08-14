@@ -26,6 +26,9 @@ public interface TeamRepository extends JpaRepository<Team, UUID> {
 
     List<Team> findByCourseId(UUID courseId);
 
+    @EntityGraph(attributePaths = {"course", "project"})
+    List<Team> findByCourseIdOrderByNameAscIdAsc(UUID courseId);
+
     boolean existsByCourseId(UUID courseId);
 
     @Query("select team from Team team "

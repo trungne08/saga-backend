@@ -38,6 +38,16 @@ public interface TeamMemberRepository extends JpaRepository<TeamMember, UUID> {
 
     List<TeamMember> findByStudentId(UUID studentId);
 
+    @EntityGraph(attributePaths = {"team", "team.course", "team.project"})
+    @Query("""
+            select membership from TeamMember membership
+            where membership.student.id = :studentId
+              and membership.team.course.deletedAt is null
+            order by lower(membership.team.course.courseCode),
+                     lower(membership.team.name), membership.id
+            """)
+    List<TeamMember> findAgentContextsByStudentId(@Param("studentId") UUID studentId);
+
     @EntityGraph(attributePaths = "team")
     List<TeamMember> findByStudentIdAndTeamCourseId(UUID studentId, UUID courseId);
 

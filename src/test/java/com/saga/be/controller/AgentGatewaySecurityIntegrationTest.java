@@ -20,6 +20,8 @@ import com.saga.be.security.ApplicationRole;
 import com.saga.be.security.InternalAiServiceAuthenticationFilter;
 import com.saga.be.security.SagaPrincipal;
 import com.saga.be.service.AgentGatewayService;
+import com.saga.be.service.AgentDelegationCapability;
+import com.saga.be.service.AgentDelegationService;
 import com.saga.be.service.AgentToolProjectionService;
 import com.saga.be.service.CurrentAccountStatusService;
 import java.util.List;
@@ -59,11 +61,14 @@ class AgentGatewaySecurityIntegrationTest {
     private AgentToolProjectionService projections;
 
     @MockitoBean
+    private AgentDelegationService delegations;
+
+    @MockitoBean
     private CurrentAccountStatusService accountStatuses;
 
     @BeforeEach
     void reset() {
-        clearInvocations(gateway, projections, accountStatuses);
+        clearInvocations(gateway, projections, delegations, accountStatuses);
         when(accountStatuses.isAllowedForBusinessApi(any())).thenReturn(true);
         when(gateway.create(any(), any())).thenReturn(conversation());
         when(gateway.list(any())).thenReturn(new AgentApiResponses.ConversationList(List.of()));
@@ -136,6 +141,28 @@ class AgentGatewaySecurityIntegrationTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(content().string(not(containsString(INTERNAL_TOKEN))));
         verifyNoInteractions(projections);
+    }
+
+    @Test
+    void resourceDiscoveryUsesServiceCredentialAndDelegatedCurrentActor() throws Exception {
+        SagaPrincipal student = (SagaPrincipal) authFor(ApplicationRole.STUDENT).getPrincipal();
+        String opaqueContext = "opaque-delegated-context-value-1234567890";
+        when(delegations.resolve(
+                opaqueContext, CONVERSATION_ID, AgentDelegationCapability.READ
+        )).thenReturn(student);
+        when(projections.resourceContext(student)).thenReturn(
+                new com.saga.be.dto.response.InternalAgentToolResponses.ResourceContext(
+                        "STUDENT", "ZERO_MATCH", 0, 0, 0, List.of(), List.of()
+                )
+        );
+
+        mockMvc.perform(post("/internal/ai/v1/agent/tools/resource-context")
+                        .header(InternalAiServiceAuthenticationFilter.HEADER_NAME, INTERNAL_TOKEN)
+                        .header(InternalAgentToolController.DELEGATED_CONTEXT_HEADER, opaqueContext)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"conversationId\":\"" + CONVERSATION_ID + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("ZERO_MATCH")));
     }
 
     private AgentApiResponses.Conversation conversation() {

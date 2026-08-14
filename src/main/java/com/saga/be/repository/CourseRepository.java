@@ -13,6 +13,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.util.UUID;
 import java.util.Optional;
+import java.util.List;
 
 @Repository
 public interface CourseRepository extends JpaRepository<Course, UUID>, JpaSpecificationExecutor<Course> {
@@ -32,6 +33,8 @@ public interface CourseRepository extends JpaRepository<Course, UUID>, JpaSpecif
     Optional<Course> findWithReportDetailsByIdAndDeletedAtIsNull(UUID id);
 
     Page<Course> findAllByDeletedAtIsNull(Pageable pageable);
+
+    List<Course> findByInstructorIdAndDeletedAtIsNullOrderByCourseCodeAscIdAsc(UUID instructorId);
 
     Optional<Course> findByCourseCode(String courseCode);
 

@@ -18,6 +18,9 @@ public final class InternalAgentToolRequests {
     private InternalAgentToolRequests() {
     }
 
+    public record Context(@NotNull UUID conversationId) {
+    }
+
     public record Project(@NotNull UUID conversationId, @NotNull UUID projectId) {
     }
 
@@ -37,6 +40,9 @@ public final class InternalAgentToolRequests {
     }
 
     public record Team(@NotNull UUID conversationId, @NotNull UUID teamId) {
+    }
+
+    public record Course(@NotNull UUID conversationId, @NotNull UUID courseId) {
     }
 
     public record CommitReview(

@@ -4,8 +4,9 @@ import com.saga.be.dto.request.InternalAgentToolRequests;
 import com.saga.be.dto.response.InternalAgentToolResponses;
 import com.saga.be.dto.response.ProjectDetailResponse;
 import com.saga.be.dto.response.ProjectTraceabilityResponse;
+import com.saga.be.dto.response.LecturerAnalyticsResponses;
+import com.saga.be.dto.response.SprintListResponse;
 import com.saga.be.dto.response.TaskReadResponse;
-import com.saga.be.dto.response.TeamContributionEvaluationResponse;
 import com.saga.be.security.SagaPrincipal;
 import com.saga.be.service.AgentDelegationCapability;
 import com.saga.be.service.AgentDelegationService;
@@ -38,6 +39,14 @@ public class InternalAgentToolController {
         this.delegations = delegations;
         this.projections = projections;
         this.proposals = proposals;
+    }
+
+    @PostMapping("/resource-context")
+    public InternalAgentToolResponses.ResourceContext resourceContext(
+            @RequestHeader(DELEGATED_CONTEXT_HEADER) String context,
+            @Valid @RequestBody InternalAgentToolRequests.Context request
+    ) {
+        return projections.resourceContext(actor(context, request.conversationId(), false));
     }
 
     @PostMapping("/project-summary")
@@ -85,11 +94,35 @@ public class InternalAgentToolController {
     }
 
     @PostMapping("/team-contribution")
-    public TeamContributionEvaluationResponse teamContribution(
+    public InternalAgentToolResponses.ContributionSnapshot teamContribution(
             @RequestHeader(DELEGATED_CONTEXT_HEADER) String context,
             @Valid @RequestBody InternalAgentToolRequests.Team request
     ) {
         return projections.teamContribution(actor(context, request.conversationId(), false), request.teamId());
+    }
+
+    @PostMapping("/student-contribution")
+    public InternalAgentToolResponses.StudentContribution studentContribution(
+            @RequestHeader(DELEGATED_CONTEXT_HEADER) String context,
+            @Valid @RequestBody InternalAgentToolRequests.Team request
+    ) {
+        return projections.studentContribution(actor(context, request.conversationId(), false), request.teamId());
+    }
+
+    @PostMapping("/team-sprints")
+    public SprintListResponse teamSprints(
+            @RequestHeader(DELEGATED_CONTEXT_HEADER) String context,
+            @Valid @RequestBody InternalAgentToolRequests.Team request
+    ) {
+        return projections.teamSprints(actor(context, request.conversationId(), false), request.teamId());
+    }
+
+    @PostMapping("/course-warnings")
+    public LecturerAnalyticsResponses.EarlyWarnings courseWarnings(
+            @RequestHeader(DELEGATED_CONTEXT_HEADER) String context,
+            @Valid @RequestBody InternalAgentToolRequests.Course request
+    ) {
+        return projections.courseWarnings(actor(context, request.conversationId(), false), request.courseId());
     }
 
     @PostMapping("/project-traceability")

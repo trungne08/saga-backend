@@ -6,15 +6,21 @@ import com.saga.be.dto.response.InternalAgentToolResponses.DocumentEvidence;
 import com.saga.be.dto.response.InternalAgentToolResponses.MemberEvidence;
 import com.saga.be.dto.response.InternalAgentToolResponses.RepositoryEvidence;
 import com.saga.be.dto.response.InternalAgentToolResponses.TeamContext;
+import com.saga.be.dto.response.LecturerAnalyticsResponses;
 import com.saga.be.dto.response.ProjectDetailResponse;
 import com.saga.be.dto.response.ProjectTraceabilityResponse;
+import com.saga.be.dto.response.SprintListResponse;
 import com.saga.be.dto.response.TaskReadResponse;
 import com.saga.be.dto.response.TeamContributionEvaluationResponse;
+import com.saga.be.dto.response.TeamContributionMemberResponse;
+import com.saga.be.entity.Course;
 import com.saga.be.entity.Team;
+import com.saga.be.entity.TeamMember;
 import com.saga.be.entity.enums.TaskStatus;
 import com.saga.be.exception.IntegrationException;
 import com.saga.be.repository.DocumentRepository;
 import com.saga.be.repository.GitRepoRepository;
+import com.saga.be.repository.CourseRepository;
 import com.saga.be.repository.TeamMemberRepository;
 import com.saga.be.repository.TeamRepository;
 import com.saga.be.security.ApplicationRole;
@@ -23,7 +29,9 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
@@ -36,6 +44,8 @@ public class AgentToolProjectionService {
 
     private static final int MAX_TASKS = 100;
     private static final int MAX_TRACEABILITY_EVENTS = 50;
+    private static final int MAX_CONTEXT_COURSES = 50;
+    private static final int MAX_CONTEXT_TEAMS = 100;
 
     private final ProjectDetailService projects;
     private final ProjectTaskReadService tasks;
@@ -43,9 +53,12 @@ public class AgentToolProjectionService {
     private final GitHubTraceabilityService traceability;
     private final TeamRepository teams;
     private final TeamMemberRepository teamMembers;
+    private final CourseRepository courses;
     private final GitRepoRepository repositories;
     private final DocumentRepository documents;
     private final CommitReviewContextReader commitReviewContexts;
+    private final ProjectSprintService sprints;
+    private final CourseEarlyWarningQueryService earlyWarnings;
 
     public AgentToolProjectionService(
             ProjectDetailService projects,
@@ -54,9 +67,12 @@ public class AgentToolProjectionService {
             GitHubTraceabilityService traceability,
             TeamRepository teams,
             TeamMemberRepository teamMembers,
+            CourseRepository courses,
             GitRepoRepository repositories,
             DocumentRepository documents,
-            CommitReviewContextReader commitReviewContexts
+            CommitReviewContextReader commitReviewContexts,
+            ProjectSprintService sprints,
+            CourseEarlyWarningQueryService earlyWarnings
     ) {
         this.projects = projects;
         this.tasks = tasks;
@@ -64,9 +80,26 @@ public class AgentToolProjectionService {
         this.traceability = traceability;
         this.teams = teams;
         this.teamMembers = teamMembers;
+        this.courses = courses;
         this.repositories = repositories;
         this.documents = documents;
         this.commitReviewContexts = commitReviewContexts;
+        this.sprints = sprints;
+        this.earlyWarnings = earlyWarnings;
+    }
+
+    @Transactional(readOnly = true)
+    public InternalAgentToolResponses.ResourceContext resourceContext(SagaPrincipal actor) {
+        if (actor.applicationRole() == ApplicationRole.STUDENT) {
+            return studentResourceContext(actor);
+        }
+        if (actor.applicationRole() == ApplicationRole.LECTURER) {
+            return lecturerResourceContext(actor);
+        }
+        return new InternalAgentToolResponses.ResourceContext(
+                actor.applicationRole().name(), "ROLE_NOT_SUPPORTED", 0, 0, 0,
+                List.of(), List.of("ADMIN_CONTEXT_DISCOVERY_NOT_AVAILABLE")
+        );
     }
 
     public ProjectDetailResponse projectSummary(SagaPrincipal actor, UUID projectId) {
@@ -108,7 +141,9 @@ public class AgentToolProjectionService {
 
     @Transactional(readOnly = true)
     public InternalAgentToolResponses.TeamProgress teamProgress(SagaPrincipal actor, UUID teamId) {
-        TeamContributionEvaluationResponse contribution = contributions.evaluate(actor, teamId);
+        InternalAgentToolResponses.ContributionSnapshot contribution = contributionSnapshot(
+                contributions.evaluate(actor, teamId)
+        );
         Team team = teams.findById(teamId).orElseThrow(() -> new IntegrationException(
                 HttpStatus.NOT_FOUND, "TEAM_NOT_FOUND", "The team does not exist"
         ));
@@ -129,8 +164,44 @@ public class AgentToolProjectionService {
         );
     }
 
-    public TeamContributionEvaluationResponse teamContribution(SagaPrincipal actor, UUID teamId) {
-        return contributions.evaluate(actor, teamId);
+    public InternalAgentToolResponses.ContributionSnapshot teamContribution(
+            SagaPrincipal actor, UUID teamId
+    ) {
+        return contributionSnapshot(contributions.evaluate(actor, teamId));
+    }
+
+    @Transactional(readOnly = true)
+    public InternalAgentToolResponses.StudentContribution studentContribution(
+            SagaPrincipal actor, UUID teamId
+    ) {
+        if (actor.applicationRole() != ApplicationRole.STUDENT) {
+            throw new AccessDeniedException("Student contribution is available only to the current Student");
+        }
+        teamMembers.findByTeamIdAndStudentId(teamId, actor.localProfileId())
+                .orElseThrow(() -> new AccessDeniedException(
+                        "You do not have access to this Team contribution"
+                ));
+        InternalAgentToolResponses.ContributionSnapshot snapshot = contributionSnapshot(
+                contributions.evaluate(teamId)
+        );
+        InternalAgentToolResponses.ContributionMemberSnapshot current = snapshot.members().stream()
+                .filter(value -> actor.localProfileId().equals(value.studentId()))
+                .findFirst()
+                .orElse(null);
+        return new InternalAgentToolResponses.StudentContribution(
+                actor.localProfileId(), snapshot.teamId(), snapshot.projectId(),
+                snapshot.evaluatedAt(), current
+        );
+    }
+
+    public SprintListResponse teamSprints(SagaPrincipal actor, UUID teamId) {
+        return sprints.getByTeam(actor, teamId);
+    }
+
+    public LecturerAnalyticsResponses.EarlyWarnings courseWarnings(
+            SagaPrincipal actor, UUID courseId
+    ) {
+        return earlyWarnings.get(actor, courseId);
     }
 
     public ProjectTraceabilityResponse projectTraceability(SagaPrincipal actor, UUID projectId) {
@@ -222,5 +293,140 @@ public class AgentToolProjectionService {
             }
         }
         return counts;
+    }
+
+    private InternalAgentToolResponses.ResourceContext studentResourceContext(SagaPrincipal actor) {
+        List<TeamMember> memberships = teamMembers.findAgentContextsByStudentId(actor.localProfileId());
+        Map<UUID, Course> coursesById = new LinkedHashMap<>();
+        Map<UUID, List<InternalAgentToolResponses.ResourceTeamContext>> teamsByCourse = new LinkedHashMap<>();
+        Set<UUID> teamIds = new LinkedHashSet<>();
+        Set<UUID> projectIds = new LinkedHashSet<>();
+        for (TeamMember membership : memberships) {
+            Team team = membership.getTeam();
+            if (team == null || team.getCourse() == null || team.getId() == null) {
+                continue;
+            }
+            UUID courseId = team.getCourse().getId();
+            coursesById.putIfAbsent(courseId, team.getCourse());
+            if (teamIds.add(team.getId())) {
+                teamsByCourse.computeIfAbsent(courseId, ignored -> new ArrayList<>()).add(
+                        resourceTeam(team, membership.getRoleInTeam())
+                );
+            }
+            if (team.getProject() != null) {
+                projectIds.add(team.getProject().getId());
+            }
+        }
+        return resourceContext(
+                actor.applicationRole(), selectionState(projectIds.size()), coursesById,
+                teamsByCourse, teamIds.size(), projectIds.size()
+        );
+    }
+
+    private InternalAgentToolResponses.ResourceContext lecturerResourceContext(SagaPrincipal actor) {
+        List<Course> instructedCourses = courses
+                .findByInstructorIdAndDeletedAtIsNullOrderByCourseCodeAscIdAsc(actor.localProfileId());
+        Map<UUID, Course> coursesById = new LinkedHashMap<>();
+        Map<UUID, List<InternalAgentToolResponses.ResourceTeamContext>> teamsByCourse = new LinkedHashMap<>();
+        Set<UUID> teamIds = new LinkedHashSet<>();
+        Set<UUID> projectIds = new LinkedHashSet<>();
+        for (Course course : instructedCourses) {
+            coursesById.put(course.getId(), course);
+            List<InternalAgentToolResponses.ResourceTeamContext> courseTeams = new ArrayList<>();
+            for (Team team : teams.findByCourseIdOrderByNameAscIdAsc(course.getId())) {
+                if (teamIds.add(team.getId())) {
+                    courseTeams.add(resourceTeam(team, null));
+                }
+                if (team.getProject() != null) {
+                    projectIds.add(team.getProject().getId());
+                }
+            }
+            teamsByCourse.put(course.getId(), courseTeams);
+        }
+        return resourceContext(
+                actor.applicationRole(), selectionState(coursesById.size()), coursesById,
+                teamsByCourse, teamIds.size(), projectIds.size()
+        );
+    }
+
+    private InternalAgentToolResponses.ResourceContext resourceContext(
+            ApplicationRole role,
+            String selectionState,
+            Map<UUID, Course> coursesById,
+            Map<UUID, List<InternalAgentToolResponses.ResourceTeamContext>> teamsByCourse,
+            long totalTeams,
+            long totalProjects
+    ) {
+        List<String> limitations = new ArrayList<>();
+        if (coursesById.size() > MAX_CONTEXT_COURSES) {
+            limitations.add("COURSE_LIMIT_EXCEEDED");
+        }
+        if (totalTeams > MAX_CONTEXT_TEAMS) {
+            limitations.add("TEAM_LIMIT_EXCEEDED");
+        }
+        List<InternalAgentToolResponses.CourseContext> result = new ArrayList<>();
+        int includedTeams = 0;
+        for (Map.Entry<UUID, Course> entry : coursesById.entrySet()) {
+            if (result.size() >= MAX_CONTEXT_COURSES) {
+                break;
+            }
+            List<InternalAgentToolResponses.ResourceTeamContext> boundedTeams = new ArrayList<>();
+            for (InternalAgentToolResponses.ResourceTeamContext team
+                    : teamsByCourse.getOrDefault(entry.getKey(), List.of())) {
+                if (includedTeams >= MAX_CONTEXT_TEAMS) {
+                    break;
+                }
+                boundedTeams.add(team);
+                includedTeams++;
+            }
+            Course course = entry.getValue();
+            result.add(new InternalAgentToolResponses.CourseContext(
+                    course.getId(), course.getCourseCode(), course.getName(), List.copyOf(boundedTeams)
+            ));
+        }
+        return new InternalAgentToolResponses.ResourceContext(
+                role.name(), selectionState, coursesById.size(), totalTeams, totalProjects,
+                List.copyOf(result), List.copyOf(limitations)
+        );
+    }
+
+    private InternalAgentToolResponses.ResourceTeamContext resourceTeam(
+            Team team, com.saga.be.entity.enums.RoleInTeam currentStudentRole
+    ) {
+        InternalAgentToolResponses.ResourceProjectContext project = team.getProject() == null
+                ? null
+                : new InternalAgentToolResponses.ResourceProjectContext(
+                        team.getProject().getId(), team.getProject().getName()
+                );
+        return new InternalAgentToolResponses.ResourceTeamContext(
+                team.getId(), team.getName(), currentStudentRole, project
+        );
+    }
+
+    private String selectionState(long matches) {
+        if (matches == 0) {
+            return "ZERO_MATCH";
+        }
+        return matches == 1 ? "SINGLE_MATCH" : "MULTIPLE_MATCH";
+    }
+
+    private InternalAgentToolResponses.ContributionSnapshot contributionSnapshot(
+            TeamContributionEvaluationResponse value
+    ) {
+        return new InternalAgentToolResponses.ContributionSnapshot(
+                value.teamId(), value.projectId(), value.evaluatedAt(),
+                value.members().stream().map(this::contributionMemberSnapshot).toList()
+        );
+    }
+
+    private InternalAgentToolResponses.ContributionMemberSnapshot contributionMemberSnapshot(
+            TeamContributionMemberResponse value
+    ) {
+        return new InternalAgentToolResponses.ContributionMemberSnapshot(
+                value.studentId(), value.fullName(), value.studentCode(),
+                value.codeContributionPercentage(), value.documentContributionPercentage(),
+                value.designContributionPercentage(), value.taskContributionPercentage(),
+                value.finalContributionPercentage(), value.evidenceCount()
+        );
     }
 }

@@ -2,6 +2,7 @@ package com.saga.be.dto.response;
 
 import com.saga.be.entity.enums.DocumentType;
 import com.saga.be.entity.enums.RoleInTeam;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -9,6 +10,36 @@ import java.util.UUID;
 public final class InternalAgentToolResponses {
 
     private InternalAgentToolResponses() {
+    }
+
+    public record ResourceContext(
+            String actorRole,
+            String selectionState,
+            long totalCourses,
+            long totalTeams,
+            long totalProjects,
+            List<CourseContext> courses,
+            List<String> dataLimitations
+    ) {
+    }
+
+    public record CourseContext(
+            UUID courseId,
+            String courseCode,
+            String courseName,
+            List<ResourceTeamContext> teams
+    ) {
+    }
+
+    public record ResourceTeamContext(
+            UUID teamId,
+            String teamName,
+            RoleInTeam currentStudentRole,
+            ResourceProjectContext project
+    ) {
+    }
+
+    public record ResourceProjectContext(UUID projectId, String projectName) {
     }
 
     public record ProjectTasks(
@@ -38,8 +69,38 @@ public final class InternalAgentToolResponses {
             long totalTasks,
             boolean truncated,
             Map<String, Long> statusCounts,
-            TeamContributionEvaluationResponse contribution,
+            ContributionSnapshot contribution,
             List<String> dataLimitations
+    ) {
+    }
+
+    public record ContributionSnapshot(
+            UUID teamId,
+            UUID projectId,
+            LocalDateTime evaluatedAt,
+            List<ContributionMemberSnapshot> members
+    ) {
+    }
+
+    public record ContributionMemberSnapshot(
+            UUID studentId,
+            String fullName,
+            String studentCode,
+            double codeContributionPercentage,
+            double documentContributionPercentage,
+            double designContributionPercentage,
+            double taskContributionPercentage,
+            double finalContributionPercentage,
+            int evidenceCount
+    ) {
+    }
+
+    public record StudentContribution(
+            UUID studentId,
+            UUID teamId,
+            UUID projectId,
+            LocalDateTime evaluatedAt,
+            ContributionMemberSnapshot currentAggregate
     ) {
     }
 
