@@ -40,6 +40,7 @@ public class ContributionCalculationService {
     private final SprintRepository sprintRepository;
     private final TaskRepository taskRepository;
     private final PeerReviewRepository peerReviewRepository;
+    private final ContributionSliceWeightResolver sliceWeightResolver;
 
     public ContributionCalculationService(
             TeamRepository teamRepository,
@@ -48,7 +49,8 @@ public class ContributionCalculationService {
             DocumentRepository documentRepository,
             SprintRepository sprintRepository,
             TaskRepository taskRepository,
-            PeerReviewRepository peerReviewRepository
+            PeerReviewRepository peerReviewRepository,
+            ContributionSliceWeightResolver sliceWeightResolver
     ) {
         this.teamRepository = teamRepository;
         this.teamMemberRepository = teamMemberRepository;
@@ -57,6 +59,7 @@ public class ContributionCalculationService {
         this.sprintRepository = sprintRepository;
         this.taskRepository = taskRepository;
         this.peerReviewRepository = peerReviewRepository;
+        this.sliceWeightResolver = sliceWeightResolver;
     }
 
     @Transactional(readOnly = true)
@@ -100,7 +103,7 @@ public class ContributionCalculationService {
         BigDecimal totalDocument = total(scores.values(), Scores::document);
         BigDecimal totalDesign = total(scores.values(), Scores::design);
         BigDecimal totalTask = total(scores.values(), Scores::adjustedSprint);
-        ContributionSliceWeights sliceWeights = ContributionSliceWeights.fromCourse(team.getCourse())
+        ContributionSliceWeights sliceWeights = sliceWeightResolver.resolve(projectId, team)
                 .normalizeForActiveSlices(
                         totalCode.signum() > 0,
                         totalDocument.signum() > 0,

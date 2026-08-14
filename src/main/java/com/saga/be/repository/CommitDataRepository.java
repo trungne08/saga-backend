@@ -39,6 +39,11 @@ public interface CommitDataRepository extends JpaRepository<CommitData, UUID> {
     @Query("select commit from CommitData commit join commit.repo repo where repo.project.id = :projectId")
     List<CommitData> findByProjectId(@Param("projectId") UUID projectId);
 
+    @Query("select commit.repo.project.id, count(commit) from CommitData commit "
+            + "where commit.repo.project.course.id = :courseId "
+            + "group by commit.repo.project.id order by commit.repo.project.id")
+    List<Object[]> countByProjectForCourse(@Param("courseId") UUID courseId);
+
     List<CommitData> findByAuthorIdAndRepoProjectIdOrderByTimestampDescIdDesc(
             UUID authorId, UUID projectId, Pageable pageable);
 

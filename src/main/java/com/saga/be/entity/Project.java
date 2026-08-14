@@ -25,6 +25,10 @@ public class Project extends BaseEntity {
     @JoinColumn(name = "course_id")
     private Course course;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "project_type_id")
+    private ProjectType projectType;
+
     @Column(name = "name")
     private String name;
 

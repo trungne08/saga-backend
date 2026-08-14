@@ -10,6 +10,7 @@ import com.saga.be.entity.CommitData;
 import com.saga.be.entity.Course;
 import com.saga.be.entity.PeerReview;
 import com.saga.be.entity.Project;
+import com.saga.be.entity.ProjectGroupWeightConfig;
 import com.saga.be.entity.Sprint;
 import com.saga.be.entity.Student;
 import com.saga.be.entity.Subject;
@@ -22,6 +23,7 @@ import com.saga.be.entity.enums.TaskType;
 import com.saga.be.repository.CommitDataRepository;
 import com.saga.be.repository.DocumentRepository;
 import com.saga.be.repository.PeerReviewRepository;
+import com.saga.be.repository.ProjectGroupWeightConfigRepository;
 import com.saga.be.repository.SprintRepository;
 import com.saga.be.repository.TaskRepository;
 import com.saga.be.repository.TeamMemberRepository;
@@ -245,6 +247,78 @@ class ContributionCalculationServiceTest {
     }
 
     @Test
+    void calculateUsesExactProjectGroupWeightConfigOverrideOverCourseWeights() {
+        Fixture fixture = fixture();
+        Task codeTask = new Task();
+        codeTask.setStatus(TaskStatus.DONE);
+        codeTask.setStoryPoint(1);
+        codeTask.setLabels(List.of("backend"));
+        Task designTask = new Task();
+        designTask.setStatus(TaskStatus.DONE);
+        designTask.setStoryPoint(1);
+        designTask.setLabels(List.of("ui-ux", "design"));
+
+        when(fixture.taskRepository.findByProjectIdAndAssigneeId(fixture.projectId, fixture.first.getId()))
+                .thenReturn(List.of(codeTask));
+        when(fixture.taskRepository.findByProjectIdAndAssigneeId(fixture.projectId, fixture.second.getId()))
+                .thenReturn(List.of(designTask));
+        when(fixture.taskRepository.findByProjectIdAndAssigneeId(fixture.projectId, fixture.third.getId()))
+                .thenReturn(List.of());
+        when(fixture.projectGroupWeightConfigRepository.findByProjectId(fixture.projectId))
+                .thenReturn(Optional.of(ProjectGroupWeightConfig.builder()
+                        .team(fixture.team)
+                        .codeWeight(new BigDecimal("0.2"))
+                        .documentWeight(new BigDecimal("0.3"))
+                        .designWeight(new BigDecimal("0.5"))
+                        .build()));
+
+        ProjectContributionCalculation result = fixture.service.calculate(fixture.projectId, Map.of());
+
+        assertThat(breakdown(result, fixture.first).finalContribution())
+                .isCloseTo(new BigDecimal("28.5714"), org.assertj.core.data.Offset.offset(new BigDecimal("0.0001")));
+        assertThat(breakdown(result, fixture.second).finalContribution())
+                .isCloseTo(new BigDecimal("71.4286"), org.assertj.core.data.Offset.offset(new BigDecimal("0.0001")));
+        assertThat(breakdown(result, fixture.third).finalContribution()).isEqualByComparingTo("0");
+    }
+
+    @Test
+    void calculateIgnoresProjectGroupWeightConfigBelongingToAnotherTeam() {
+        Fixture fixture = fixture();
+        Team otherTeam = new Team();
+        otherTeam.setId(UUID.randomUUID());
+        Task codeTask = new Task();
+        codeTask.setStatus(TaskStatus.DONE);
+        codeTask.setStoryPoint(1);
+        codeTask.setLabels(List.of("backend"));
+        Task designTask = new Task();
+        designTask.setStatus(TaskStatus.DONE);
+        designTask.setStoryPoint(1);
+        designTask.setLabels(List.of("ui-ux", "design"));
+
+        when(fixture.taskRepository.findByProjectIdAndAssigneeId(fixture.projectId, fixture.first.getId()))
+                .thenReturn(List.of(codeTask));
+        when(fixture.taskRepository.findByProjectIdAndAssigneeId(fixture.projectId, fixture.second.getId()))
+                .thenReturn(List.of(designTask));
+        when(fixture.taskRepository.findByProjectIdAndAssigneeId(fixture.projectId, fixture.third.getId()))
+                .thenReturn(List.of());
+        when(fixture.projectGroupWeightConfigRepository.findByProjectId(fixture.projectId))
+                .thenReturn(Optional.of(ProjectGroupWeightConfig.builder()
+                        .team(otherTeam)
+                        .codeWeight(new BigDecimal("0.2"))
+                        .documentWeight(new BigDecimal("0.3"))
+                        .designWeight(new BigDecimal("0.5"))
+                        .build()));
+
+        ProjectContributionCalculation result = fixture.service.calculate(fixture.projectId, Map.of());
+
+        assertThat(breakdown(result, fixture.first).finalContribution())
+                .isCloseTo(new BigDecimal("50"), org.assertj.core.data.Offset.offset(new BigDecimal("0.0001")));
+        assertThat(breakdown(result, fixture.second).finalContribution())
+                .isCloseTo(new BigDecimal("50"), org.assertj.core.data.Offset.offset(new BigDecimal("0.0001")));
+        assertThat(breakdown(result, fixture.third).finalContribution()).isEqualByComparingTo("0");
+    }
+
+    @Test
     void normalizesOverridesAboveOneHundredWithoutDividingZeroBase() {
         Fixture fixture = fixture();
         ProjectContributionCalculation result = fixture.service.calculate(fixture.projectId, Map.of(
@@ -319,9 +393,13 @@ class ContributionCalculationServiceTest {
         subject.setId(subjectId);
         Course course = new Course();
         course.setSubject(subject);
+        Project project = new Project();
+        project.setId(projectId);
+        project.setCourse(course);
         Team team = new Team();
         team.setId(UUID.randomUUID());
         team.setCourse(course);
+        team.setProject(project);
         Student first = student();
         Student second = student();
         Student third = student();
@@ -335,6 +413,8 @@ class ContributionCalculationServiceTest {
         SprintRepository sprintRepository = mock(SprintRepository.class);
         TaskRepository taskRepository = mock(TaskRepository.class);
         PeerReviewRepository peerReviewRepository = mock(PeerReviewRepository.class);
+        ProjectGroupWeightConfigRepository projectGroupWeightConfigRepository =
+                mock(ProjectGroupWeightConfigRepository.class);
         when(teamRepository.findByProjectId(projectId)).thenReturn(Optional.of(team));
         when(teamMemberRepository.findByTeamId(team.getId())).thenReturn(List.of(
                 TeamMember.builder().team(team).student(first).build(),
@@ -346,11 +426,12 @@ class ContributionCalculationServiceTest {
                 .thenReturn(List.of());
 
         return new Fixture(
-                projectId, subjectId, first, second, third, sprint, commitRepository,
-                documentRepository, taskRepository, peerReviewRepository,
+                projectId, subjectId, team, first, second, third, sprint, commitRepository,
+                documentRepository, taskRepository, peerReviewRepository, projectGroupWeightConfigRepository,
                 new ContributionCalculationService(
                         teamRepository, teamMemberRepository, commitRepository, documentRepository,
-                        sprintRepository, taskRepository, peerReviewRepository
+                        sprintRepository, taskRepository, peerReviewRepository,
+                        new ContributionSliceWeightResolver(projectGroupWeightConfigRepository)
                 )
         );
     }
@@ -370,6 +451,7 @@ class ContributionCalculationServiceTest {
     private record Fixture(
             UUID projectId,
             UUID subjectId,
+            Team team,
             Student first,
             Student second,
             Student third,
@@ -378,6 +460,7 @@ class ContributionCalculationServiceTest {
             DocumentRepository documentRepository,
             TaskRepository taskRepository,
             PeerReviewRepository peerReviewRepository,
+            ProjectGroupWeightConfigRepository projectGroupWeightConfigRepository,
             ContributionCalculationService service
     ) {
     }

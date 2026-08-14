@@ -9,6 +9,7 @@ import com.saga.be.dto.response.ProjectResponse;
 import com.saga.be.entity.Course;
 import com.saga.be.entity.Lecturer;
 import com.saga.be.entity.Project;
+import com.saga.be.entity.ProjectType;
 import com.saga.be.entity.Semester;
 import com.saga.be.entity.Student;
 import com.saga.be.entity.Subject;
@@ -19,6 +20,7 @@ import com.saga.be.integration.project.TeamProjectService;
 import com.saga.be.repository.ClassRepository;
 import com.saga.be.repository.CourseRepository;
 import com.saga.be.repository.LecturerRepository;
+import com.saga.be.repository.ProjectTypeRepository;
 import com.saga.be.repository.SemesterRepository;
 import com.saga.be.repository.StudentRepository;
 import com.saga.be.repository.SubjectRepository;
@@ -55,6 +57,7 @@ public class LocalDemoDataSeeder implements ApplicationRunner {
     static final String COURSE_CODE = "SAGA-LOCAL-DEMO";
     static final String TEAM_NAME = "SAGA Local Demo Team";
     static final String PROJECT_NAME = "SAGA Local Demo Project";
+    static final String PROJECT_TYPE_CODE = "SAGA-LOCAL-DEMO";
     private static final String DEMO_INSTRUCTOR_EMAIL = "local-demo-instructor@saga.invalid";
 
     private final String leaderCognitoSub;
@@ -66,6 +69,7 @@ public class LocalDemoDataSeeder implements ApplicationRunner {
     private final LecturerRepository lecturerRepository;
     private final TeamRepository teamRepository;
     private final TeamMemberRepository teamMemberRepository;
+    private final ProjectTypeRepository projectTypeRepository;
     private final SemesterService semesterService;
     private final SubjectService subjectService;
     private final ClassService classService;
@@ -82,6 +86,7 @@ public class LocalDemoDataSeeder implements ApplicationRunner {
             LecturerRepository lecturerRepository,
             TeamRepository teamRepository,
             TeamMemberRepository teamMemberRepository,
+            ProjectTypeRepository projectTypeRepository,
             SemesterService semesterService,
             SubjectService subjectService,
             ClassService classService,
@@ -97,6 +102,7 @@ public class LocalDemoDataSeeder implements ApplicationRunner {
         this.lecturerRepository = lecturerRepository;
         this.teamRepository = teamRepository;
         this.teamMemberRepository = teamMemberRepository;
+        this.projectTypeRepository = projectTypeRepository;
         this.semesterService = semesterService;
         this.subjectService = subjectService;
         this.classService = classService;
@@ -210,10 +216,11 @@ public class LocalDemoDataSeeder implements ApplicationRunner {
                 leader.getId(),
                 leader.getAccountStatus()
         );
+        ProjectType projectType = ensureProjectType();
         ProjectResponse response = teamProjectService.create(
                 principal,
                 team.getId(),
-                new CreateTeamProjectRequest(PROJECT_NAME),
+                new CreateTeamProjectRequest(PROJECT_NAME, projectType.getId()),
                 "local-demo-seed"
         );
         Project project = team.getProject();
@@ -221,5 +228,16 @@ public class LocalDemoDataSeeder implements ApplicationRunner {
             throw new IllegalStateException("Local demo project was not linked to its team");
         }
         return project;
+    }
+
+    private ProjectType ensureProjectType() {
+        return projectTypeRepository.findAllByOrderByNameAsc().stream()
+                .filter(type -> PROJECT_TYPE_CODE.equals(type.getCode()))
+                .findFirst()
+                .orElseGet(() -> projectTypeRepository.save(ProjectType.builder()
+                        .code(PROJECT_TYPE_CODE)
+                        .name("SAGA Local Demo Project Type")
+                        .description("Local demo project type used only by the opt-in local seeder")
+                        .build()));
     }
 }

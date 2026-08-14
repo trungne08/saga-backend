@@ -30,6 +30,7 @@ import com.saga.be.repository.TeamMemberRepository;
 import com.saga.be.repository.TeamRepository;
 import com.saga.be.security.ApplicationRole;
 import com.saga.be.security.SagaPrincipal;
+import com.saga.be.service.contribution.ContributionSliceWeightResolver;
 import com.saga.be.service.contribution.ContributionSliceWeights;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -69,6 +70,7 @@ public class TeamContributionService {
     private final SprintRepository sprintRepository;
     private final PolicyOverrideRequestRepository policyOverrideRequestRepository;
     private final LecturerRepository lecturerRepository;
+    private final ContributionSliceWeightResolver sliceWeightResolver;
 
     @Transactional(readOnly = true)
     public TeamContributionEvaluationResponse evaluate(SagaPrincipal principal, UUID teamId) {
@@ -222,7 +224,7 @@ public class TeamContributionService {
         double totalAdjustedTaskScore = adjustedSprintScoreByStudent.values().stream()
                 .mapToDouble(Double::doubleValue)
                 .sum();
-        ContributionSliceWeights sliceWeights = ContributionSliceWeights.fromCourse(team.getCourse())
+        ContributionSliceWeights sliceWeights = sliceWeightResolver.resolve(projectId, team)
                 .normalizeForActiveSlices(totalCode > 0.0, totalDocument > 0.0, totalDesign > 0.0);
 
         Map<UUID, Double> codeContributionByStudent = new HashMap<>();
