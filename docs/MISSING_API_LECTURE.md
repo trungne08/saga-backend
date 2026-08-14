@@ -7,7 +7,15 @@
 > - `GET /api/v1/courses/{courseId}/dashboard/trends`
 > - `GET /api/v1/courses/{courseId}/dashboard/at-risk-summary`
 >
-> Early warning vẫn chỉ deterministic `OVERDUE_TASK`. **Không** implement GHOSTING / TOXIC_COMMUNICATION / TECHNICAL_DEBT trừ khi source sau này thêm. OpenAPI baseline hiện hành = **149**. File này không phải FE wishlist authority; ưu tiên `SAGA_SYSTEM_CONTEXT_FOR_AI.md` / `FRONTEND_API_INTEGRATION.md`.
+> Early warning vẫn chỉ deterministic `OVERDUE_TASK`. **Không** implement GHOSTING / TOXIC_COMMUNICATION / TECHNICAL_DEBT trừ khi source sau này thêm.
+>
+> **STUDENT progress supersession (DEC-083):** historical text dưới đây và Lecturer Dashboard vẫn **STUDENT forbidden**. Exception hiện hành **chỉ** cho existing `GET /api/v1/courses/{courseId}/students/{studentId}/progress`:
+>
+> - MEMBER: self 200; teammate 403
+> - LEADER: self + exact same Team 200; cross-Team/cross-Course 403
+> - MENTOR / no membership: 403
+>
+> Graph routes overview/heatmap/interactions/burndown đã được mở STUDENT LEADER/MEMBER từ DEC-080; không rewrite lịch sử đó. Không viết STUDENT có Lecturer Dashboard access. OpenAPI baseline hiện hành = **150**. File này không phải FE wishlist authority; ưu tiên `SAGA_SYSTEM_CONTEXT_FOR_AI.md` / `FRONTEND_API_INTEGRATION.md`.
 
 Trạng thái tại `0156a5e` cộng working tree milestone Lecturer Analytics ngày 2026-08-05.
 File yêu cầu này không tồn tại ở checkpoint ban đầu; nội dung dưới đây ghi lại contract đã triển khai từ yêu cầu milestone.

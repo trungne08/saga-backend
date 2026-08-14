@@ -1,3 +1,15 @@
+## Avatar / Student progress / Lecturer Course weights (2026-08-15)
+
+| Method | Path | Success | Auth / CSRF | Semantics |
+| --- | --- | --- | --- | --- |
+| GET | `/api/auth/me` | 200 `AuthMeResponse` gồm `avatarUrl` nullable | Session; GET may set CSRF cookie | `avatarUrl` từ `SagaPrincipal`; không nhận URL từ browser |
+| GET | `/api/v1/courses/{courseId}/students/{studentId}` | 200 Basic Info; `avatarUrl` nullable | ADMIN / Course LECTURER; STUDENT 403 | Đọc `Student.avatarUrl` |
+| GET | `/api/v1/courses/{courseId}/students/{studentId}/progress` | 200 progress | ADMIN; Course LECTURER; STUDENT MEMBER self / LEADER exact Team. GET no CSRF | MENTOR/teammate-of-MEMBER/cross-Team 403; multi-membership 409; anonymous 401 |
+| GET | `/api/v1/courses/{courseId}/contribution-slice-weights` | 200 Course weights 0..100 | ADMIN all; LECTURER own Course; no CSRF | Course fallback config, không phải Project group weights |
+| PUT | `/api/v1/courses/{courseId}/contribution-slice-weights` | 200 updated Course weights | LECTURER exact instructor + CSRF | No `lecturerId`; ADMIN/STUDENT/other Course 403; sum 100 ± 0.01 |
+
+OpenAPI operation count baseline = **150**. Migration head = **V33**. Browser Bearer = **NO**. `FULL_SUITE_GREEN = NO` (1019 / 23 fail / 8 error).
+
 ## Merged main — Project / Lecturer Dashboard / Admin Dashboard / AI (2026-08-15)
 
 | Method | Path | Success | Auth / CSRF | Semantics |
@@ -14,7 +26,7 @@
 | GET | `/api/admin/reports/graph-processing` | stub envelope | ADMIN; no CSRF | `periodDays=7`, `historySupported=false`, `points=[]` |
 | * | `/api/v1/ai/**` (7 public ops) | see AI section in FRONTEND_API_INTEGRATION | Session; CSRF on POST | Internal `/internal/ai/**` not OpenAPI/FE |
 
-OpenAPI operation count baseline = **149**. Migration head = **V32**. Browser Bearer = **NO**.
+OpenAPI operation count baseline = **149** (DEC-082 historical snapshot). Migration head = **V32**. Browser Bearer = **NO**. Current baseline = **150 / V33** in the section above.
 
 ## J1J — Jira Task Update Priority business resolution (2026-08-10)
 

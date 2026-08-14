@@ -1,3 +1,61 @@
+## Avatar / Student progress / Lecturer Course weights — 2026-08-15
+
+Browser auth: `JSESSIONID` + `credentials: "include"`. GET không CSRF. POST/PUT/PATCH/DELETE cần CSRF. **Không Bearer.** OpenAPI **150**. Migration **V33**. Full suite **không** green (1019 / 23 fail / 8 error).
+
+### Avatar
+
+- Dùng `avatarUrl` từ `GET /api/auth/me` (nullable). Student Basic Info cũng đọc `Student.avatarUrl` (nullable).
+- FE **không** gọi Google API để lấy ảnh, **không** gửi avatar URL hay provider token lên Backend.
+- Picture sync xảy ra lúc login OIDC khi claim `picture` hợp lệ (http/https, host, ≤2048). Absent/invalid: login vẫn thành công, avatar đã lưu không bị xóa.
+- Fallback UI khi `avatarUrl` null. Cognito Google mapping console đã confirmed; runtime login smoke **TBD**.
+
+```ts
+type AuthMeResponse = {
+  cognitoSub: string;
+  email: string;
+  fullName: string;
+  applicationRole: "ADMIN" | "LECTURER" | "STUDENT";
+  localProfileId: string;
+  accountStatus: "ACTIVE" | "INACTIVE" | "SUSPENDED" | "PENDING" | null;
+  avatarUrl: string | null;
+};
+```
+
+### Student progress
+
+`GET /api/v1/courses/{courseId}/students/{studentId}/progress`
+
+- MEMBER: chỉ chính mình → 200; teammate → 403
+- LEADER: chính mình + Student cùng exact Team → 200; Team khác / Course khác → 403
+- MENTOR / không membership → 403
+- LECTURER: chỉ exact Course instructor
+- ADMIN: retained
+- Anonymous → 401
+- Actor luôn từ session `SagaPrincipal.localProfileId`
+- Nhiều Team membership trong một Course → **409**
+- **Không** suy rộng STUDENT sang activities, contribution-detail, early-warnings, Lecturer Dashboard. Graph routes overview/heatmap/interactions/burndown vẫn theo DEC-080 (LEADER/MEMBER exact Team).
+
+### Course contribution slice weights (official new FE)
+
+Scale **0..100**, example `30 / 20 / 50`. Sum = 100 ± 0.01. Không nhầm Project group weights (`0..1`, sum `1.0`).
+
+```http
+GET /api/v1/courses/{courseId}/contribution-slice-weights
+PUT /api/v1/courses/{courseId}/contribution-slice-weights
+```
+
+PUT body — **không** `lecturerId` / `adminId`:
+
+```json
+{ "codeWeight": 30, "documentWeight": 20, "designWeight": 50 }
+```
+
+- GET: ADMIN mọi Course; LECTURER chỉ Course mình dạy
+- PUT: LECTURER exact instructor; other Course / STUDENT / ADMIN → 403
+- PUT cần CSRF; GET không
+- Direct PUT chỉ sửa Course fallback. Precedence: exact Project+Team `ProjectGroupWeightConfig` trước, Course weights sau.
+- Legacy request → Admin decision vẫn tồn tại; **new FE không dùng** cho normal Course-weight editing.
+
 ## J1J Update Priority business contract — 2026-08-10
 
 ## Jira Web sync correctness — 2026-08-13
@@ -301,7 +359,7 @@ type CourseStudentBasicInfoResponse = {
   studentCode: string;
   fullName: string;
   email: string;
-  avatarUrl: string | null; // hiện luôn null: Student chưa có nguồn avatar
+  avatarUrl: string | null; // nullable; đọc Student.avatarUrl sau OIDC picture sync; fallback UI khi null
   accountStatus: AccountStatus; // không phải Course enrollment status
   team: {
     teamId: string;
@@ -445,6 +503,7 @@ type AuthMeResponse = {
   applicationRole: "ADMIN" | "LECTURER" | "STUDENT";
   localProfileId: string; // UUID
   accountStatus: "ACTIVE" | "INACTIVE" | "SUSPENDED" | "PENDING" | null;
+  avatarUrl: string | null; // OIDC picture đã sanitize; null khi chưa có
 };
 ```
 
@@ -1285,14 +1344,15 @@ Contribution API dùng session. Tất cả mutation phải gửi CSRF; GET khôn
 | --- | --- | --- | --- | --- |
 | GET | `/api/v1/teams/{teamId}/contribution-evaluation` | ADMIN, LECTURER, STUDENT | ADMIN mọi Team; LECTURER chỉ Course mình phụ trách; STUDENT chỉ exact `RoleInTeam.LEADER` của chính Team. MEMBER/MENTOR/cross-Team Leader 403 | `200 TeamContributionEvaluationResponse` |
 | POST | `/api/v1/teams/{teamId}/contribution-override` | ADMIN, LECTURER | ADMIN mọi Team; LECTURER phải là Course instructor | `200 ContributionOverrideResponse` |
-| GET | `/api/v1/courses/{courseId}/contribution-slice-weights` | ADMIN, LECTURER | Service hiện chưa kiểm ownership theo principal | `200 CourseContributionSliceWeightResponse` |
-| POST | `/api/v1/courses/{courseId}/contribution-slice-weight-requests` | LECTURER | Body `lecturerId` phải là instructor; chưa bind actor hoàn toàn với principal | `200 CourseContributionSliceWeightRequestResponse` |
-| GET | `/api/v1/courses/contribution-slice-weight-requests` | ADMIN, LECTURER | ADMIN xem theo filter; LECTURER được scope theo principal/Course của mình | `200` danh sách request |
-| PUT | `/api/v1/courses/contribution-slice-weight-requests/{requestId}/decision` | ADMIN | Decision dùng `adminId` nullable từ body | `200 CourseContributionSliceWeightRequestResponse` |
+| GET | `/api/v1/courses/{courseId}/contribution-slice-weights` | ADMIN, LECTURER | ADMIN mọi Course; LECTURER chỉ exact Course instructor. Actor từ `SagaPrincipal` | `200 CourseContributionSliceWeightResponse` |
+| PUT | `/api/v1/courses/{courseId}/contribution-slice-weights` | LECTURER | Official new FE mutation. Exact Course instructor; no `lecturerId`. Other Course / STUDENT / ADMIN 403. CSRF required. Scale 0–100, sum 100 ± 0.01 | `200 CourseContributionSliceWeightResponse` |
+| POST | `/api/v1/courses/{courseId}/contribution-slice-weight-requests` | LECTURER | **Legacy / deprecated for new FE.** Body `lecturerId` phải là instructor; chưa bind actor hoàn toàn với principal | `200 CourseContributionSliceWeightRequestResponse` |
+| GET | `/api/v1/courses/contribution-slice-weight-requests` | ADMIN, LECTURER | Legacy list. ADMIN xem theo filter; LECTURER được scope theo principal/Course của mình | `200` danh sách request |
+| PUT | `/api/v1/courses/contribution-slice-weight-requests/{requestId}/decision` | ADMIN | **Legacy.** Decision dùng `adminId` nullable từ body | `200 CourseContributionSliceWeightRequestResponse` |
 
-Contribution evaluation đã bind actor từ `SagaPrincipal.localProfileId`; FE không gửi actor ID
-và backend 403 là authority. Các actor-binding risk còn lại trong bảng thuộc slice-weight/decision,
-không áp dụng cho GET evaluation. Evaluation chỉ là current aggregate; không hiển thị nó như
+Contribution evaluation và Lecturer direct Course-weight PUT đã bind actor từ `SagaPrincipal.localProfileId`; FE không gửi actor ID
+và backend 403 là authority. Các actor-binding risk còn lại trong bảng thuộc **legacy** slice-weight request/decision,
+không áp dụng cho GET evaluation hay PUT current weights. Evaluation chỉ là current aggregate; không hiển thị nó như
 historical committed snapshot.
 
 Leader gọi:
@@ -1321,7 +1381,14 @@ Giới hạn semantic bắt buộc khi FE hiển thị:
 Tất cả endpoint dưới đây dùng browser session `JSESSIONID`: frontend gọi với
 `credentials: "include"`. Đây đều là GET nên không gửi CSRF header và không dùng
 Bearer token. ADMIN xem mọi Course; LECTURER chỉ xem Course mà mình là instructor;
-STUDENT nhận 403, anonymous nhận 401.
+anonymous nhận 401.
+
+**STUDENT:** default 403 trên Lecturer Analytics. Ngoại lệ hiện hành:
+
+- Graph routes (DEC-080): overview / heatmap / interactions / burndown — LEADER hoặc MEMBER của exact Team.
+- Progress (DEC-083): `GET .../students/{studentId}/progress` — MEMBER self; LEADER exact same Team; MENTOR 403.
+
+Không mở STUDENT cho activities, contribution-detail, early-warnings hay Lecturer Dashboard.
 
 | Path | Query | Response chính |
 |---|---|---|
@@ -1691,6 +1758,8 @@ If canonical confirmation fails after Jira accepted the PUT, retry the identical
 Backend source already accepts business `REQUEST`, but the deployed physical MySQL `task.type` enum must receive Flyway V29 before Jira Request can persist. This does not change the FE payload or error-handling contract. Until deployment smoke completes, sync-history `ITEM_UPSERT_FAILED` at `UPSERT_ISSUES` with the confirmed enum mismatch is a deployment/schema incident; FE must not substitute another type or send a Jira provider ID.
 # Merged main FE contracts — Project / Lecturer / Admin / AI — 2026-08-15
 
+**Current baseline superseded 2026-08-15 later same day:** OpenAPI **150**, migration **V33**. Avatar / progress / Course-weight contracts are in the top section of this file. Numbers **149 / V32 / 994** below are the DEC-082 historical snapshot.
+
 Authority: current merged `main` source + OpenAPI **149** + migration head **V32**. Browser auth always `JSESSIONID` + `credentials: "include"`. CSRF required for unsafe methods. **Do not send Bearer.** Deployed Swagger currency and HF/AI product smoke remain **TBD**.
 
 ## Project V1
@@ -1730,7 +1799,7 @@ Safe GETs: conversations list/detail, artifact download. Unsafe POSTs: create co
 
 ## Verification note for FE
 
-Local OpenAPI includes Project / Admin / Lecturer dashboard / AI public routes. Full clean suite is **not** green (**994 / 23 failures**): 22 CSRF isolation flakes + DEC-023 roster baseline. Feature contracts above are source/test confirmed; do not wait for full-suite green to integrate these routes.
+Local OpenAPI includes Project / Admin / Lecturer dashboard / AI public routes. Full clean suite at DEC-082 snapshot was **not** green (**994 / 23 failures**): 22 CSRF isolation flakes + DEC-023 roster baseline. **Current full suite (DEC-083):** 1019 tests / 23 failures / 8 errors; still not green. Feature contracts above are source/test confirmed; do not wait for full-suite green to integrate these routes.
 
 # Internal AI context is not a frontend contract (2026-08-14)
 

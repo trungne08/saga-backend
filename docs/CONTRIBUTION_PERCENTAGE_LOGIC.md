@@ -19,11 +19,19 @@ Tài liệu này mô tả **đúng theo code hiện tại** cách hệ thống t
 - Service: `TeamContributionService#requestContributionOverride`
 
 ### API quản lý trọng số slice theo course
+
+Official FE:
+
 - `GET /api/v1/courses/{courseId}/contribution-slice-weights`
+- `PUT /api/v1/courses/{courseId}/contribution-slice-weights` (Lecturer exact instructor; CSRF; no `lecturerId`)
+
+Legacy / backward-compatible / deprecated for new FE:
+
 - `POST /api/v1/courses/{courseId}/contribution-slice-weight-requests`
 - `GET /api/v1/courses/contribution-slice-weight-requests`
 - `PUT /api/v1/courses/contribution-slice-weight-requests/{requestId}/decision`
-- Service: `CourseContributionWeightService`
+
+Service: `CourseContributionWeightService`. Direct PUT chỉ sửa Course fallback weights.
 
 ---
 
@@ -121,10 +129,19 @@ Trong `evaluate`:
 
 ### 5.1 Lấy trọng số
 
-`sliceWeights = ContributionSliceWeights.fromCourse(team.course)`
+`sliceWeights = ContributionSliceWeightResolver.resolve(projectId, team)`
+
+Precedence (CONFIRMED_SOURCE):
+
+1. Exact Project+Team `ProjectGroupWeightConfig` nếu tồn tại cho Team đang tính.
+   Stored scale **0..1**, sum **1.0**; resolver `normalizeConfigured` đưa về thang 0..100 cho arithmetic hiện hữu.
+2. Nếu không có → `ContributionSliceWeights.fromCourse(team.course)` (Course fallback, scale **0..100**).
 
 - Nếu course null hoặc weights null -> fallback mặc định 1/3 - 1/3 - 1/3.
 - `normalizeConfigured(...)` luôn chuẩn hóa để tổng = 100.
+
+Lecturer `PUT /api/v1/courses/{courseId}/contribution-slice-weights` chỉ ghi Course fallback.
+Không đổi `ProjectGroupWeightConfig`, không đổi công thức evaluate bên dưới.
 
 ### 5.2 Vô hiệu hóa slice không có dữ liệu
 
@@ -212,15 +229,17 @@ Sau khi có `finalContributionPercentage`, hệ thống tạo warning:
 
 ## 9) Quy tắc validation cho thay đổi slice weight theo course
 
-Trong `CourseContributionWeightService#validateRequestedWeights`:
+Official direct update (`CourseContributionWeightService#updateCurrentWeights` / `validateDirectWeights`):
 
-- Bắt buộc có đủ `codeWeight`, `documentWeight`, `designWeight`
-- Mỗi trọng số phải `>= 0`
+- Body `{codeWeight, documentWeight, designWeight}` — không `lecturerId`
+- Bắt buộc đủ ba field, mỗi field `>= 0`
 - Tổng phải xấp xỉ `100` với tolerance `0.01`
+- Actor = `SagaPrincipal.localProfileId`; LECTURER exact Course instructor
+- Ghi trực tiếp Course `code_contribution_weight` / `document_contribution_weight` / `design_contribution_weight`
 
-Nếu admin duyệt request:
+Legacy request path (`validateRequestedWeights`) giữ cùng scale/tolerance. Nếu admin duyệt request:
 - giá trị được normalize lần nữa qua `ContributionSliceWeights.normalizeConfigured`
-- sau đó ghi vào `course.code_contribution_weight`, `document_contribution_weight`, `design_contribution_weight`.
+- sau đó ghi vào cùng các cột Course như trên.
 
 ---
 
@@ -240,7 +259,9 @@ Nếu admin duyệt request:
   `src/main/java/com/saga/be/service/TeamContributionService.java`
 - Slice weight normalization:  
   `src/main/java/com/saga/be/service/contribution/ContributionSliceWeights.java`
-- Course slice-weight request/approval:  
+- Slice weight source resolution (Project+Team then Course):
+  `src/main/java/com/saga/be/service/contribution/ContributionSliceWeightResolver.java`
+- Course slice-weight GET/PUT and legacy request/approval:
   `src/main/java/com/saga/be/service/CourseContributionWeightService.java`
 - Peer review submit (cách tạo starRating):  
   `src/main/java/com/saga/be/service/PeerReviewService.java`

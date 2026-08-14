@@ -30,8 +30,9 @@ Tài liệu này mô tả đúng các API hiện có trong code để FE tích h
 
 - Peer review
 - Xem đánh giá đóng góp
-- Xem/đề nghị thay đổi trọng số slice theo course
-- Duyệt đơn đổi trọng số
+- Lecturer sửa trực tiếp trọng số slice Course (`PUT .../contribution-slice-weights`)
+- Legacy đề nghị/duyệt trọng số slice (backward-compatible, deprecated for new FE)
+- Individual contribution override (`POST .../contribution-override`) — unchanged
 
 ---
 
@@ -327,14 +328,24 @@ quyết định quyền bằng UI.
 
 ## 3) Slice weight theo course
 
-### 3.1 Xem trọng số hiện tại
+Course Code/Document/Design weights dùng thang **0..100**, tổng 100 ± 0.01.
+Không nhầm với Project group weights (`PUT /api/projects/{projectId}/group-weights`, thang **0..1**, tổng 1.0).
+
+Contribution **calculation** precedence (không đổi arithmetic):
+
+1. exact Project+Team `ProjectGroupWeightConfig` nếu có
+2. nếu không → Course contribution slice weights (fallback)
+
+Lecturer direct PUT chỉ sửa Course fallback config.
+
+### 3.1 Xem trọng số hiện tại (Course fallback)
 
 `GET /api/v1/courses/{courseId}/contribution-slice-weights`
 
 **Controller role annotation:** ADMIN, LECTURER.
 
-**Effective service authorization:** service hiện chỉ resolve Course theo ID và
-chưa kiểm lecturer ownership. Đây là known backend risk.
+**Effective service authorization:** ADMIN đọc mọi Course; LECTURER chỉ exact instructor của Course.
+Actor từ `SagaPrincipal.localProfileId`. Session `JSESSIONID`, `credentials: include`, GET không CSRF, không Bearer.
 
 **Response**
 ```json
@@ -348,7 +359,33 @@ chưa kiểm lecturer ownership. Đây là known backend risk.
 }
 ```
 
-### 3.2 Gửi yêu cầu đổi trọng số
+### 3.2 Official new FE mutation — Lecturer direct update
+
+`PUT /api/v1/courses/{courseId}/contribution-slice-weights`
+
+**Controller role annotation:** LECTURER only.
+
+**Effective service authorization:** exact Course instructor. Other Course / STUDENT / ADMIN direct PUT → 403.
+Không gửi `lecturerId` / `adminId`. Actor từ principal. CSRF required. Không Bearer.
+
+**Request body**
+```json
+{
+  "codeWeight": 30,
+  "documentWeight": 20,
+  "designWeight": 50
+}
+```
+
+**Response:** cùng shape `CourseContributionSliceWeightResponse` như GET.
+
+---
+
+### 3.3 Legacy / backward compatibility / deprecated for new FE
+
+Các endpoint dưới **vẫn tồn tại** trong source. Không ghi REMOVED. New FE **không** dùng Lecturer request → Admin decision cho normal Course-weight editing.
+
+#### Gửi yêu cầu đổi trọng số (legacy)
 
 `POST /api/v1/courses/{courseId}/contribution-slice-weight-requests`
 
@@ -387,7 +424,7 @@ instructor của Course nhưng chưa bind ID đó với principal của phiên.
 }
 ```
 
-### 3.3 Danh sách yêu cầu đổi trọng số
+#### Danh sách yêu cầu đổi trọng số (legacy)
 
 `GET /api/v1/courses/contribution-slice-weight-requests?status=PENDING&courseId={courseId}`
 
@@ -396,7 +433,7 @@ instructor của Course nhưng chưa bind ID đó với principal của phiên.
 **Effective service authorization:** ADMIN xem theo filter; LECTURER được scope
 theo `SagaPrincipal.localProfileId` và chỉ xem Course của mình.
 
-### 3.4 Duyệt / từ chối yêu cầu
+#### Duyệt / từ chối yêu cầu (legacy)
 
 `PUT /api/v1/courses/contribution-slice-weight-requests/{requestId}/decision`
 
@@ -476,9 +513,9 @@ của Course chứa Team. Với LECTURER, actor lấy từ principal; với ADMI
 2. Student submit `POST .../peer-reviews`
 3. Lecturer xem `GET .../peer-reviews`
 4. Lecturer đúng Course hoặc Student LEADER đúng Team xem `GET .../contribution-evaluation`
-5. Lecturer nếu cần thì gửi `POST .../contribution-slice-weight-requests`
-6. Admin duyệt `PUT .../decision`
-7. Lecturer/admin có thể dùng `POST .../contribution-override` khi cần chỉnh tay có lý do
+5. Lecturer đúng Course gọi `PUT .../contribution-slice-weights` (CSRF) khi cần sửa Course fallback weights
+6. Legacy `POST .../contribution-slice-weight-requests` rồi Admin `PUT .../decision` vẫn tồn tại nhưng **deprecated for new FE**
+7. Lecturer/admin có thể dùng `POST .../contribution-override` khi cần chỉnh tay có lý do (individual override, không đổi)
 8. FE lấy `GET /api/v1/projects/{projectId}/sprints` hoặc `GET /api/v1/teams/{teamId}/sprints` để chọn `sprintId` trước khi vào luồng contribution/peer review
 
 ### Quan trọng về `sprintId`

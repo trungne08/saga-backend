@@ -1,5 +1,17 @@
+## Avatar / progress / Course weight constraints — 2026-08-15
+
+- OpenAPI generated operation count baseline = **150**. Migration head = **V33**. DEC-082 snapshot 149 / V32 không được rewrite.
+- Browser FE auth: `JSESSIONID` + `credentials: include`; CSRF cho unsafe; GET không CSRF; **không Bearer**.
+- Avatar chỉ từ OIDC `picture` lúc login; FE không POST avatar URL, không gọi Google image API, không gửi provider token. `avatarUrl` nullable.
+- Cognito Google `picture` mapping: **CONFIRMED_CONSOLE_CONFIGURATION**. Runtime claim on login: **TBD_DEPLOYMENT_SMOKE**.
+- Student progress STUDENT access chỉ `GET .../students/{studentId}/progress`. MEMBER self; LEADER exact Team; MENTOR forbidden. Ambiguous multi-membership trong Course = 409. Không mở activities / contribution-detail / early-warnings / dashboard.
+- Course slice weights: PUT direct chỉ LECTURER owner; scale 0–100 sum 100 ± 0.01. Không nhầm ProjectGroupWeight 0–1. Precedence GroupWeight rồi Course fallback. Legacy request/decision giữ backward-compatible; new FE dùng PUT. ADMIN không có direct PUT.
+- Contribution formula / Peer Review / Rubric / individual override / ProjectGroupWeightConfig **không đổi**.
+- Full suite **1019 / 23 fail / 8 error** — không ghi FULL_SUITE=PASS.
+
 ## Merged main constraints — Project / Lecturer / Admin / AI / OpenAPI — 2026-08-15
 
+- **HISTORICAL SNAPSHOT (DEC-082):** OpenAPI **149** / V32 / 994 tests. **Current baseline** = section Avatar/progress/Course weight ở trên (150 / V33 / 1019).
 - OpenAPI generated operation count baseline = **149** (local contract). Deployed Swagger currency = **TBD**; production springdoc/Swagger mặc định off trừ khi bật explicit (`SWAGGER_ENABLED` / `SPRINGDOC_*` — không ghi secret/env value).
 - Migration head = **V32**. Không seed canonical ProjectType production.
 - Browser FE auth: `JSESSIONID` + `credentials: include`; CSRF cho unsafe mutations; GET không CSRF trừ khi exact source nói khác; **không Bearer**.
@@ -646,7 +658,8 @@ Runtime fact do người dùng cung cấp: Railway từng fail vì DB thiếu `s
 Full `./mvnw.cmd test` tại checkpoint hiện tại: **70 suites, 299 tests, 0 failures, 0 errors, 0 skipped**. Jira/GitHub/webhook, sync UTC serialization, GitHub claim/concurrency/stale recovery, session/CSRF/OIDC callback, master-data authorization và import authorization đều pass.
 ## Lecturer Analytics constraints — 2026-08-05
 
-- Read-only GET; ADMIN mọi Course, LECTURER instructor-only, STUDENT forbidden.
+- Historical: Read-only GET; ADMIN mọi Course, LECTURER instructor-only, STUDENT forbidden.
+- **SUPERSESSION (DEC-083):** STUDENT `/progress` MEMBER self / LEADER exact Team; MENTOR forbidden. Graph routes DEC-080 unchanged. Dashboard/activities/contribution-detail/early-warnings remain STUDENT forbidden.
 - Team/Student phải thuộc đúng Course trong URL; Student+Team filter phải khớp membership.
 - Không có committed story-point snapshot, Jira transition history, AI/NLP signal hay heatmap level rule.
 - Contribution Detail chỉ adapter aggregate hiện hữu; không sao chép công thức và không sửa nhóm 2.
@@ -951,7 +964,7 @@ chặn nullable repair.
 
 ## Student Team graph read constraints — 2026-08-14
 
-- Scope is exactly four GET routes: Team `overview`, Team `heatmap`, per-Team Student `interactions`, and Team Sprint `burndown`. Do not grant STUDENT to other Lecturer Analytics operations.
+- Scope is exactly four GET routes: Team `overview`, Team `heatmap`, per-Team Student `interactions`, and Team Sprint `burndown`. Do not grant STUDENT to other Lecturer Analytics operations except the later DEC-083 `/progress` contract (MEMBER self / LEADER exact Team).
 - A reusable graph-read guard must validate Course→Team, then allow ADMIN; allow LECTURER only when `Course.instructor.id == SagaPrincipal.localProfileId`; allow STUDENT only when an exact `TeamMember(teamId, localProfileId)` has `roleInTeam` equal to `LEADER` or `MEMBER`. `MENTOR` is not included.
 - Do not accept caller identity from request parameters, body, headers, or target `studentId`. The target Student/heatmap filter must be in the exact Team; Sprint must be in the exact Team Project. Cross-scope identifiers fail closed with existing 403/404 semantics.
 - Keep `AccountStatusEnforcementFilter`, `SecurityConfig`, browser session/no-Bearer, GET/no-CSRF, response DTOs, graph calculations, and `CourseService` unchanged.

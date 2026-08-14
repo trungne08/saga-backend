@@ -1,8 +1,18 @@
 # SAGA Frontend Handoff
 
-## Merged main sync — 2026-08-15 (docs authority)
+## Avatar / progress / Course weights — 2026-08-15
 
-Integrate against current merged Backend contracts (OpenAPI **149**, migration head **V32**):
+Current Backend contracts: OpenAPI **150**, migration head **V33**. Browser `JSESSIONID` + `credentials: "include"`; CSRF on unsafe mutations; GET no CSRF; **never Bearer**.
+
+- **Avatar:** render `avatarUrl` từ `GET /api/auth/me` (nullable). Fallback UI khi null. Không gọi Google image API, không gửi provider token/avatar URL.
+- **Progress:** `GET /api/v1/courses/{courseId}/students/{studentId}/progress`. MEMBER self only; LEADER own Team members; Lecturer Course owner; Admin retained; MENTOR forbidden.
+- **Course weights:** `GET` + `PUT /api/v1/courses/{courseId}/contribution-slice-weights`. Lecturer direct edit exact Course only. Body `{codeWeight, documentWeight, designWeight}` scale 0–100. Mutation gửi CSRF. Normal FE **không** dùng old approval flow.
+
+See `FRONTEND_API_INTEGRATION.md` for the detailed 2026-08-15 contracts. DEC-082 (OpenAPI 149 / V32) is a historical snapshot.
+
+## Merged main sync — 2026-08-15 (historical DEC-082 snapshot)
+
+Superseded as **current** baseline by the Avatar/progress/Course weights section above (OpenAPI **150**, V33). Integrate against current merged Backend contracts (OpenAPI **149**, migration head **V32**):
 
 - **Auth:** browser `JSESSIONID` + `credentials: "include"`; CSRF on unsafe mutations; GET no CSRF; **never Bearer**.
 - **Project V1:** `GET/POST /api/project-types`; create Project requires `projectTypeId`; `PUT /api/projects/{projectId}/group-weights`.

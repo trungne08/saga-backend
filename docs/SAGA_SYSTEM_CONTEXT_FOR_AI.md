@@ -1,5 +1,15 @@
+## Avatar / Student progress / Lecturer direct Course weights — 2026-08-15
+
+- **CONFIRMED_SOURCE_TEST:** HEAD `495fe44`. OpenAPI generated count = **150** (contract PASS). Migration head = **V33** (`V33__add_profile_avatar_url.sql`); không collision (migration contract PASS). DEC-082 (OpenAPI 149 / V32) là snapshot lịch sử, không rewrite.
+- **CONFIRMED — Avatar:** OIDC `picture` → nullable `avatar_url` trên Student/Lecturer/Admin. Valid URL persist/update on login; absent/invalid không fail login và không wipe stored avatar. Không nhận URL từ browser, không download binary, không lưu provider token. `GET /api/auth/me` trả `avatarUrl`. Student Basic Info đọc `Student.avatarUrl` (nullable).
+- **CONFIRMED_CONSOLE_CONFIGURATION:** Google IdP scopes `openid email profile`; attribute mapping Google `picture` → Cognito `picture`. **TBD_DEPLOYMENT_SMOKE:** claim có mặt trên login thật và `/api/auth/me` trả URL. Không ghi `COGNITO_PICTURE_RUNTIME = CONFIRMED`.
+- **CONFIRMED — Student progress:** existing `GET /api/v1/courses/{courseId}/students/{studentId}/progress`. MEMBER self 200 / teammate 403. LEADER self + exact same Team 200; cross-Team/cross-Course 403. MENTOR / no membership 403. ADMIN retained; LECTURER exact instructor. Actor = `SagaPrincipal.localProfileId`. Multiple memberships in one Course → **409**. Không mở STUDENT cho activities / contribution-detail / early-warnings / Lecturer Dashboard. GET session, no CSRF, no Bearer.
+- **CONFIRMED — Lecturer direct Course weights:** `PUT /api/v1/courses/{courseId}/contribution-slice-weights` (CSRF). Body `{codeWeight, documentWeight, designWeight}` scale 0–100, sum 100 ± 0.01. No `lecturerId`. LECTURER owner success; other Course / STUDENT / ADMIN PUT 403. GET: ADMIN all; LECTURER own Course only. Legacy request/Admin decision **BACKWARD_COMPATIBLE / DEPRECATED_FOR_NEW_FE**. Precedence: Project+Team GroupWeight (0–1) then Course fallback. Formula / Peer Review / Rubric / individual override **unchanged**.
+- **FULL_SUITE:** **1019 / 23 failures / 8 errors / 0 skipped**. `FULL_SUITE_GREEN = NO`. 22 CSRF isolation (grouped rerun PASS) + DEC-023. `MY_COURSE_FULL_ORDER_CLEANUP_ERRORS = 8`, isolated rerun PASS, classification `TEST_ISOLATION_ORDER_DEPENDENT_TBD`. A/B/C feature regression **NONE_PROVEN**.
+
 ## Merged main authority sync — Project / Lecturer / Admin / AI — 2026-08-15
 
+- **HISTORICAL SNAPSHOT (DEC-082):** các số OpenAPI **149** / V32 / 994 tests bên dưới là baseline lúc merge bốn lane. **Current authority** = section Avatar/progress/weights ở trên (OpenAPI **150**, V33, 1019 tests). Không rewrite DEC-082.
 - **CONFIRMED:** `main` đã chứa Project V1, Lecturer Dashboard, AI Agent Backend và Admin Dashboard V1. Generated OpenAPI operation count = **149** (contract test PASS). Migration head = **V32** (`V30` AI delegation context, `V31` project type, `V32` project group weight config); không version collision (migration contract PASS).
 - **CONFIRMED — Project V1:** `GET /api/project-types` authenticated (ADMIN/LECTURER/STUDENT), session `JSESSIONID`, GET không CSRF. `POST /api/project-types` ADMIN + CSRF; catalog động, không canonical production seed; DB mới có thể trả `[]`. `POST /api/teams/{teamId}/projects` bắt buộc `projectTypeId` (`PROJECT_TYPE_REQUIRED` khi thiếu); unknown type fail controlled; response/detail gồm ProjectType. `PUT /api/projects/{projectId}/group-weights` lưu exact Project+Team Code/Document/Design (tổng 1.0); ADMIN hoặc LECTURER instructor của Course. Contribution đọc Project+Team override trước, fallback Course slice weights; **formula/Peer Review/Rubric không đổi**. Live HTTP Contribution = `TeamContributionService`; `ContributionCalculationService` không phải HTTP authority hiện hành.
 - **CONFIRMED — Lecturer Dashboard:** thêm `GET /api/v1/courses/{courseId}/dashboard/teams-progress|contribution-summary|trends|at-risk-summary` (ADMIN/LECTURER). Các analytics hiện hữu khác vẫn trên `LecturerAnalyticsController` (detail, overview, progress, activities, contribution-detail, early-warnings, student interactions, burndown, heatmap, velocity). Early warning deterministic `OVERDUE_TASK` only. **Không** có GHOSTING / TOXIC_COMMUNICATION / TECHNICAL_DEBT / AI-derived warning trong source hiện hành.
@@ -277,8 +287,8 @@ Evidence: `pom.xml`; `src/main/resources/application*.properties`; `railway.json
   `accountStatus` và `team { teamId, teamName, roleInTeam }`. ADMIN đọc mọi Course;
   LECTURER chỉ Course được phân công; STUDENT 403; anonymous 401. Membership được
   xác định qua `TeamMember -> Team -> Course`; không có membership trả 404, legacy
-  nhiều membership trả 409. `avatarUrl` hiện luôn null vì `Student` chưa có nguồn
-  avatar; `accountStatus` là trạng thái tài khoản, không phải Course enrollment.
+  nhiều membership trả 409. `avatarUrl` nullable, đọc `Student.avatarUrl` sau OIDC
+  `picture` sync (DEC-083); null khi chưa có picture hợp lệ. `accountStatus` là trạng thái tài khoản, không phải Course enrollment.
   Model chưa hỗ trợ Student thuộc Course nhưng chưa có Team vì không có
   `CourseEnrollment` độc lập.
 - **TBD:** runtime production sau V17 chưa được repository chứng minh bằng đủ log
@@ -739,6 +749,8 @@ DO NOT ASSUME: FE implementation, infrastructure wiring, deployment variables, U
 Không có password, credential, token, private key, encryption key, webhook secret, session cookie hoặc CSRF token thực tế trong tài liệu này.
 ## Cập nhật 2026-08-05 — Lecturer Analytics
 
+**SUPERSESSION (DEC-083):** STUDENT access was later opened only for `/progress` (MEMBER self / LEADER exact Team) plus DEC-080 graph routes. Dashboard and other analytics remain STUDENT-forbidden.
+
 **CONFIRMED:** tám Lecturer Analytics GET APIs dùng `JSESSIONID`, không cần CSRF,
 và áp ownership Course trong service trước khi resolve Team/Student. DTO riêng không
 trả Cognito subject, provider credential, token hay JPA entity/version.
@@ -964,7 +976,7 @@ và reliability regression 20 tests đều pass.
 ## Student Team graph read access — 2026-08-14
 
 - **CURRENT AUTHORITY:** exactly four Team graph GET routes (`overview`, `heatmap`, `students/{studentId}/interactions`, `sprints/{sprintId}/burndown`) allow ADMIN globally, LECTURER only for an instructed Course, and STUDENT only through an exact `TeamMember` for the Team in the URL.
-- STUDENT remains the application role. `TeamMember.roleInTeam` is the Team-role authority; both `LEADER` and `MEMBER` may read, while `MENTOR`, no membership, another Team, and another Course fail closed. This does not open other Lecturer Analytics routes.
+- STUDENT remains the application role. `TeamMember.roleInTeam` is the Team-role authority; both `LEADER` and `MEMBER` may read, while `MENTOR`, no membership, another Team, and another Course fail closed. This graph grant does not open dashboard/activities/contribution-detail/early-warnings. **DEC-083 later** additionally opens `GET .../students/{studentId}/progress` (MEMBER self / LEADER exact Team).
 - Course→Team nesting is validated before authorization. Interaction/heatmap targets must belong to the same Team, and a burndown Sprint must belong to that Team's Project. Existing aggregation, scoring, graph-edge, DTO, session, CSRF, AccountStatus, and `CourseService` behavior are unchanged.
 - Browser callers use `JSESSIONID` with `credentials: include`; no Bearer token and no CSRF header for these GETs. Targeted authorization, graph, AccountStatus, OpenAPI, aggregation, and Team-roster regressions pass 50/50. An isolated full clean snapshot ran 147 suites / 936 tests with 4 failures and 0 errors: the existing OpenAPI count, DEC-023 Course roster, historical missing interaction route, and Student progress expectation baselines; no new graph failure.
 

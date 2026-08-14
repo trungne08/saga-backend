@@ -1,5 +1,14 @@
+## Avatar / Student progress / Lecturer direct Course weights — 2026-08-15
+
+- **Đã hoàn thành / CONFIRMED_SOURCE_TEST:** OIDC avatar sync, STUDENT MEMBER/LEADER progress access, Lecturer direct Course slice-weight PUT. OpenAPI **150** (PASS). Migration head **V33** (PASS). DEC-082 (149 / V32) là lịch sử.
+- **Avatar:** `picture` → `avatar_url` nullable; `/api/auth/me.avatarUrl`; Basic Info đọc Student. Cognito mapping console **CONFIRMED**; runtime login smoke **TBD**.
+- **Progress:** existing GET route; MEMBER self; LEADER exact Team; MENTOR/cross-Team forbidden; Lecturer owner / Admin retained. Không mở analytics khác cho STUDENT.
+- **Course weights:** official `PUT .../contribution-slice-weights` scale 100; actor từ principal; ADMIN direct PUT forbidden. Legacy approval flow còn tồn tại, deprecated for new FE. GroupWeight precedence unchanged.
+- **Full clean:** **1019 / 23 fail / 8 error**. Không ghi FULL_SUITE=PASS. 22 CSRF isolation + DEC-023 + 8 MyCourseTeamMembers cleanup order-dependent (isolated PASS). Feature A/B/C **NONE_PROVEN** regression.
+
 ## Merged main — Project V1 / Lecturer Dashboard / Admin Dashboard V1 / AI Agent — 2026-08-15
 
+- **HISTORICAL SNAPSHOT (DEC-082):** OpenAPI **149** / V32 / 994 tests bên dưới. **Current authority** = section Avatar/progress/weights ở trên (150 / V33 / 1019).
 - **Đã hoàn thành / CONFIRMED_SOURCE_TEST:** bốn lane merge vào `main`. OpenAPI generated count **149** (PASS). Migration head **V32** (PASS, no collision).
 - **Project V1:** dynamic ADMIN-managed `ProjectType`; `GET/POST /api/project-types`; create Project bắt buộc `projectTypeId`; `PUT .../group-weights` exact Project+Team; Contribution weight source ưu tiên group config rồi Course fallback; formula/Peer Review/Rubric unchanged; V31/V32.
 - **Lecturer Dashboard:** bốn `GET .../dashboard/*` trên `LecturerAnalyticsController` cộng analytics routes hiện hữu; early warning vẫn `OVERDUE_TASK` deterministic.
@@ -289,7 +298,8 @@
   phân công; STUDENT 403; anonymous hoặc Bearer-only 401.
 - DTO: `courseId`, `studentId`, `studentCode`, `fullName`, `email`, nullable
   `avatarUrl`, `accountStatus`, `team { teamId, teamName, roleInTeam }`.
-  `avatarUrl` luôn null vì `Student` chưa có nguồn avatar. `accountStatus` là
+  `avatarUrl` nullable; đọc `Student.avatarUrl` sau OIDC `picture` sync (DEC-083);
+  fallback UI khi null. `accountStatus` là
   `ACTIVE|INACTIVE|SUSPENDED|PENDING`, không phải Course enrollment status;
   `roleInTeam` là `LEADER|MEMBER|MENTOR`.
 - Membership chỉ được xác định qua `TeamMember -> Team -> Course`: Course/student/
@@ -453,6 +463,7 @@ BASE HEAD của snapshot cũ: `0bc30be`. HEAD audit hiện hành là `4f3dee9`; 
 - **Verification của snapshot lịch sử:** full Maven 70 suites/299 tests; update 2026-08-06 supersede bằng **90 suites/504 tests/0 failures/0 errors/0 skipped**. OAuth callback, role priority, session và import authorization không đổi.
 ## Cập nhật 2026-08-05 — Lecturer Analytics read APIs
 
+- **SUPERSESSION (DEC-083):** STUDENT 403 dưới đây vẫn đúng cho dashboard/activities/contribution-detail/early-warnings. Exception: `GET .../students/{studentId}/progress` (MEMBER self / LEADER exact Team) và graph routes DEC-080.
 - **CONFIRMED:** thêm tám GET route cho Team detail, Student progress/activities,
   Contribution read adapter, Course early warnings, interaction graph, heatmap và velocity.
 - **CONFIRMED:** actor lấy từ `SagaPrincipal`; ADMIN mọi Course, LECTURER đúng instructor,
@@ -717,7 +728,7 @@ BASE HEAD của snapshot cũ: `0bc30be`. HEAD audit hiện hành là `4f3dee9`; 
 - **IMPLEMENTED / CONFIRMED_SOURCE_TEST:** the current graph paths are `GET /api/v1/courses/{courseId}/teams/{teamId}/overview`, `/heatmap`, `/students/{studentId}/interactions`, and `/sprints/{sprintId}/burndown`.
 - ADMIN reads all valid scopes; LECTURER reads an exact Team only in a Course they instruct; STUDENT reads only an exact own Team when `TeamMember.roleInTeam` is `LEADER` or `MEMBER`. `MENTOR`, same-Course other-Team, and other-Course Student access remain 403. Anonymous remains 401.
 - Course/Team ID mix-and-match is 404. Interaction and optional heatmap targets outside the Team are 404; caller and interaction target may be different members of the same Team. Sprint must belong to the Team Project, otherwise 404.
-- No other Lecturer Analytics route was broadened. Account-status enforcement, browser session/no-Bearer, GET/no-CSRF, DTO and graph calculations are unchanged. Targeted scope is 50 tests with zero failures/errors. Isolated full clean is 147 suites / 936 tests / 4 failures / 0 errors / 0 skipped; all four are the existing OpenAPI-count, DEC-023 roster, historical missing interaction-route, and Student-progress expectation baselines, with no graph milestone failure.
+- No other Lecturer Analytics route was broadened **in this graph milestone**. **DEC-083 later** opens `GET .../students/{studentId}/progress` for MEMBER self / LEADER exact Team only. Account-status enforcement, browser session/no-Bearer, GET/no-CSRF, DTO and graph calculations are unchanged. Targeted scope is 50 tests with zero failures/errors. Isolated full clean is 147 suites / 936 tests / 4 failures / 0 errors / 0 skipped; all four are the existing OpenAPI-count, DEC-023 roster, historical missing interaction-route, and Student-progress expectation baselines, with no graph milestone failure.
 
 ## SAGA AI Agent V1 — 2026-08-14
 
