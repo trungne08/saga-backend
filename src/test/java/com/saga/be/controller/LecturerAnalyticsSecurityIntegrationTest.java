@@ -14,6 +14,7 @@ import com.saga.be.security.ApplicationRole;
 import com.saga.be.security.SagaPrincipal;
 import com.saga.be.service.CourseEarlyWarningQueryService;
 import com.saga.be.service.LecturerContributionQueryService;
+import com.saga.be.service.LecturerCourseDashboardQueryService;
 import com.saga.be.service.LecturerStudentAnalyticsQueryService;
 import com.saga.be.service.LecturerTeamAnalyticsQueryService;
 import java.util.List;
@@ -41,13 +42,14 @@ class LecturerAnalyticsSecurityIntegrationTest {
     @MockitoBean LecturerStudentAnalyticsQueryService studentAnalytics;
     @MockitoBean LecturerContributionQueryService contributionAnalytics;
     @MockitoBean CourseEarlyWarningQueryService earlyWarnings;
+    @MockitoBean LecturerCourseDashboardQueryService courseDashboard;
 
     @Test
     void adminAndLecturerCanReachEveryReadRouteWithoutCsrf() throws Exception {
         UUID courseId = UUID.randomUUID();
         UUID teamId = UUID.randomUUID();
         UUID studentId = UUID.randomUUID();
-        for (String path : paths(courseId, teamId, studentId)) {
+        for (String path : mappedPaths(courseId, teamId, studentId)) {
             mockMvc.perform(get(path).with(authentication(auth(ApplicationRole.ADMIN, UUID.randomUUID()))))
                     .andExpect(status().isOk());
             mockMvc.perform(get(path).with(authentication(auth(ApplicationRole.LECTURER, UUID.randomUUID()))))
@@ -56,13 +58,15 @@ class LecturerAnalyticsSecurityIntegrationTest {
     }
 
     @Test
-    void studentIsForbiddenAndAnonymousIsUnauthorizedForEveryReadRoute() throws Exception {
+    void studentIsForbiddenForLecturerOnlyRoutesAndAnonymousIsUnauthorizedForEveryReadRoute() throws Exception {
         UUID courseId = UUID.randomUUID();
         UUID teamId = UUID.randomUUID();
         UUID studentId = UUID.randomUUID();
-        for (String path : paths(courseId, teamId, studentId)) {
+        for (String path : lecturerOnlyPaths(courseId, teamId)) {
             mockMvc.perform(get(path).with(authentication(auth(ApplicationRole.STUDENT, UUID.randomUUID()))))
                     .andExpect(status().isForbidden());
+        }
+        for (String path : mappedPaths(courseId, teamId, studentId)) {
             mockMvc.perform(get(path)).andExpect(status().isUnauthorized());
         }
     }
@@ -114,20 +118,33 @@ class LecturerAnalyticsSecurityIntegrationTest {
                 List.of(new SimpleGrantedAuthority("ROLE_" + role.name())));
     }
 
-    private String[] paths(UUID courseId, UUID teamId, UUID studentId) {
+    private String[] mappedPaths(UUID courseId, UUID teamId, UUID studentId) {
         UUID sprintId = UUID.randomUUID();
         return new String[] {
+                "/api/v1/courses/%s/dashboard/teams-progress".formatted(courseId),
+                "/api/v1/courses/%s/dashboard/contribution-summary".formatted(courseId),
+                "/api/v1/courses/%s/dashboard/trends".formatted(courseId),
+                "/api/v1/courses/%s/dashboard/at-risk-summary".formatted(courseId),
                 "/api/v1/courses/%s/teams/%s/detail".formatted(courseId, teamId),
                 "/api/v1/courses/%s/students/%s/progress".formatted(courseId, studentId),
                 "/api/v1/courses/%s/students/%s/activities".formatted(courseId, studentId),
                 "/api/v1/courses/%s/students/%s/contribution-detail".formatted(courseId, studentId),
                 "/api/v1/courses/%s/early-warnings".formatted(courseId),
-                "/api/v1/courses/%s/teams/%s/interactions".formatted(courseId, teamId),
                 "/api/v1/courses/%s/teams/%s/students/%s/interactions".formatted(courseId, teamId, studentId),
                 "/api/v1/courses/%s/teams/%s/sprints/%s/burndown".formatted(courseId, teamId, sprintId),
                 "/api/v1/courses/%s/teams/%s/overview?startDate=2026-08-01&endDate=2026-08-02".formatted(courseId, teamId),
                 "/api/v1/courses/%s/teams/%s/heatmap?startDate=2026-08-01&endDate=2026-08-02".formatted(courseId, teamId),
                 "/api/v1/courses/%s/teams/%s/sprints/velocity".formatted(courseId, teamId)
+        };
+    }
+
+    private String[] lecturerOnlyPaths(UUID courseId, UUID teamId) {
+        return new String[] {
+                "/api/v1/courses/%s/dashboard/teams-progress".formatted(courseId),
+                "/api/v1/courses/%s/dashboard/contribution-summary".formatted(courseId),
+                "/api/v1/courses/%s/dashboard/trends".formatted(courseId),
+                "/api/v1/courses/%s/dashboard/at-risk-summary".formatted(courseId),
+                "/api/v1/courses/%s/teams/%s/detail".formatted(courseId, teamId)
         };
     }
 }
