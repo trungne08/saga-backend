@@ -3,6 +3,7 @@ package com.saga.be.service;
 import com.saga.be.entity.Course;
 import com.saga.be.entity.Team;
 import com.saga.be.entity.TeamMember;
+import com.saga.be.entity.enums.RoleInTeam;
 import com.saga.be.repository.CourseRepository;
 import com.saga.be.repository.TeamMemberRepository;
 import com.saga.be.repository.TeamRepository;
@@ -50,6 +51,40 @@ public class LecturerAnalyticsAuthorizationService {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy Team trong Course");
         }
         return team;
+    }
+
+    @Transactional(readOnly = true)
+    public Team requireGraphReadAccess(SagaPrincipal principal, UUID courseId, UUID teamId) {
+        Course course = courseRepository.findById(courseId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Course not found"));
+        Team team = teamRepository.findWithCourseAndInstructorById(teamId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy Team trong Course"));
+        if (team.getCourse() == null || !courseId.equals(team.getCourse().getId())) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy Team trong Course");
+        }
+        if (principal == null || principal.localProfileId() == null) {
+            throw new AccessDeniedException("Authentication is required");
+        }
+        if (principal.applicationRole() == ApplicationRole.ADMIN) {
+            return team;
+        }
+        if (principal.applicationRole() == ApplicationRole.LECTURER
+                && course.getInstructor() != null
+                && Objects.equals(principal.localProfileId(), course.getInstructor().getId())) {
+            return team;
+        }
+        if (principal.applicationRole() == ApplicationRole.STUDENT) {
+            TeamMember membership = teamMemberRepository.findByTeamIdAndStudentId(
+                    teamId,
+                    principal.localProfileId()
+            ).orElse(null);
+            if (membership != null
+                    && (membership.getRoleInTeam() == RoleInTeam.LEADER
+                    || membership.getRoleInTeam() == RoleInTeam.MEMBER)) {
+                return team;
+            }
+        }
+        throw new AccessDeniedException("You do not have access to this Team analytics graph");
     }
 
     @Transactional(readOnly = true)

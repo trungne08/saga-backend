@@ -47,10 +47,12 @@ public class LecturerAnalyticsController {
     }
 
     @GetMapping("/teams/{teamId}/overview")
-    @PreAuthorize("hasAnyRole('ADMIN', 'LECTURER')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'LECTURER', 'STUDENT')")
     @io.swagger.v3.oas.annotations.Operation(
             summary = "Xem tổng quan hoạt động của nhóm",
-            description = "Trả chuỗi hoạt động theo ngày và tổng hợp theo loại activity; không gọi provider ngoài."
+            description = "ADMIN đọc mọi Team; LECTURER đọc Team thuộc Course mình phụ trách; "
+                    + "STUDENT có TeamMember role LEADER hoặc MEMBER chỉ đọc exact Team của mình. "
+                    + "Trả chuỗi hoạt động theo ngày và tổng hợp theo loại activity; không gọi provider ngoài."
     )
     public ResponseEntity<LecturerAnalyticsResponses.ActivityOverview> overview(
             @AuthenticationPrincipal SagaPrincipal principal, @PathVariable UUID courseId,
@@ -93,7 +95,9 @@ public class LecturerAnalyticsController {
     @GetMapping("/teams/{teamId}/students/{studentId}/interactions")
     @io.swagger.v3.oas.annotations.Operation(
             summary = "Xem mạng tương tác của một sinh viên trong nhóm",
-            description = "Trả graph tương tác quanh một sinh viên, gồm review, comment reply, assignment và commit hợp tác."
+            description = "ADMIN đọc mọi Team; LECTURER đọc Team thuộc Course mình phụ trách; "
+                    + "STUDENT có TeamMember role LEADER hoặc MEMBER đọc thành viên trong exact Team của mình. "
+                    + "Caller Student không cần trùng target studentId."
     )
     public ResponseEntity<LecturerAnalyticsResponses.StudentInteractionGraph> studentInteractions(
             @AuthenticationPrincipal SagaPrincipal principal, @PathVariable UUID courseId,
@@ -105,7 +109,9 @@ public class LecturerAnalyticsController {
     @PreAuthorize("hasAnyRole('ADMIN', 'LECTURER', 'STUDENT')")
     @io.swagger.v3.oas.annotations.Operation(
             summary = "Xem biểu đồ burndown của sprint",
-            description = "Trả đường ideal và actual remaining theo từng ngày của sprint trong team."
+            description = "ADMIN đọc mọi Team; LECTURER đọc Team thuộc Course mình phụ trách; "
+                    + "STUDENT có TeamMember role LEADER hoặc MEMBER chỉ đọc exact Team của mình. "
+                    + "Sprint phải thuộc Project của Team trong URL."
     )
     public ResponseEntity<LecturerAnalyticsResponses.BurndownChart> burndown(
             @AuthenticationPrincipal SagaPrincipal principal, @PathVariable UUID courseId,
@@ -115,6 +121,12 @@ public class LecturerAnalyticsController {
 
     @PreAuthorize("hasAnyRole('ADMIN', 'LECTURER', 'STUDENT')")
     @GetMapping("/teams/{teamId}/heatmap")
+    @io.swagger.v3.oas.annotations.Operation(
+            summary = "Xem heatmap hoạt động của nhóm",
+            description = "ADMIN đọc mọi Team; LECTURER đọc Team thuộc Course mình phụ trách; "
+                    + "STUDENT có TeamMember role LEADER hoặc MEMBER chỉ đọc exact Team của mình. "
+                    + "studentId tùy chọn phải là thành viên của exact Team đó."
+    )
     public ResponseEntity<LecturerAnalyticsResponses.ActivityHeatmap> heatmap(
             @AuthenticationPrincipal SagaPrincipal principal, @PathVariable UUID courseId,
             @PathVariable UUID teamId, @RequestParam(required = false) UUID studentId,

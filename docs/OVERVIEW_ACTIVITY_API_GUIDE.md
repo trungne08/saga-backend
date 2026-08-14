@@ -83,3 +83,9 @@ Score được tính theo cùng rule với heatmap:
 - API này tổng hợp dữ liệu của toàn team, không tách theo từng sinh viên.
 - Nếu `startDate` lớn hơn `endDate`, API sẽ trả lỗi.
 - Dữ liệu chỉ phản ánh các nguồn hoạt động đã được hệ thống ghi nhận.
+
+## 9. Authorization
+
+ADMIN đọc mọi Team hợp lệ; LECTURER chỉ đọc Team thuộc Course mình phụ trách; STUDENT chỉ đọc exact Team có `TeamMember.roleInTeam=LEADER` hoặc `MEMBER`. MENTOR và Student Team khác bị từ chối. Course và Team trong URL phải khớp nhau.
+
+Frontend dùng browser session với `credentials: "include"`, không dùng Bearer token và không gửi CSRF cho GET. Quyền này không mở các Lecturer Analytics route khác.

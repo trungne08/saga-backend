@@ -8,6 +8,7 @@ import com.saga.be.entity.Course;
 import com.saga.be.entity.Lecturer;
 import com.saga.be.entity.Team;
 import com.saga.be.entity.TeamMember;
+import com.saga.be.entity.enums.RoleInTeam;
 import com.saga.be.repository.CourseRepository;
 import com.saga.be.repository.TeamMemberRepository;
 import com.saga.be.repository.TeamRepository;
@@ -115,6 +116,76 @@ class LecturerAnalyticsAuthorizationServiceTest {
                         principal(ApplicationRole.ADMIN, UUID.randomUUID()), courseId, studentId));
 
         org.junit.jupiter.api.Assertions.assertEquals(409, exception.getStatusCode().value());
+    }
+
+    @Test
+    void graphReadAllowsAdminOwningLecturerLeaderAndMemberForTheExactTeam() {
+        UUID courseId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
+        UUID lecturerId = UUID.randomUUID();
+        UUID leaderId = UUID.randomUUID();
+        UUID memberId = UUID.randomUUID();
+        Lecturer lecturer = id(new Lecturer(), lecturerId);
+        Course course = id(new Course(), courseId);
+        course.setInstructor(lecturer);
+        Team team = id(new Team(), teamId);
+        team.setCourse(course);
+        TeamMember leader = new TeamMember();
+        leader.setRoleInTeam(RoleInTeam.LEADER);
+        TeamMember member = new TeamMember();
+        member.setRoleInTeam(RoleInTeam.MEMBER);
+
+        when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
+        when(teamRepository.findWithCourseAndInstructorById(teamId)).thenReturn(Optional.of(team));
+        when(teamMemberRepository.findByTeamIdAndStudentId(teamId, leaderId)).thenReturn(Optional.of(leader));
+        when(teamMemberRepository.findByTeamIdAndStudentId(teamId, memberId)).thenReturn(Optional.of(member));
+
+        assertSame(team, service.requireGraphReadAccess(principal(ApplicationRole.ADMIN, UUID.randomUUID()), courseId, teamId));
+        assertSame(team, service.requireGraphReadAccess(principal(ApplicationRole.LECTURER, lecturerId), courseId, teamId));
+        assertSame(team, service.requireGraphReadAccess(principal(ApplicationRole.STUDENT, leaderId), courseId, teamId));
+        assertSame(team, service.requireGraphReadAccess(principal(ApplicationRole.STUDENT, memberId), courseId, teamId));
+    }
+
+    @Test
+    void graphReadRejectsMentorAndStudentWithoutExactTeamMembership() {
+        UUID courseId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
+        UUID mentorId = UUID.randomUUID();
+        UUID otherStudentId = UUID.randomUUID();
+        Course course = id(new Course(), courseId);
+        Team team = id(new Team(), teamId);
+        team.setCourse(course);
+        TeamMember mentor = new TeamMember();
+        mentor.setRoleInTeam(RoleInTeam.MENTOR);
+
+        when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
+        when(teamRepository.findWithCourseAndInstructorById(teamId)).thenReturn(Optional.of(team));
+        when(teamMemberRepository.findByTeamIdAndStudentId(teamId, mentorId)).thenReturn(Optional.of(mentor));
+        when(teamMemberRepository.findByTeamIdAndStudentId(teamId, otherStudentId)).thenReturn(Optional.empty());
+
+        assertThrows(AccessDeniedException.class,
+                () -> service.requireGraphReadAccess(principal(ApplicationRole.STUDENT, mentorId), courseId, teamId));
+        assertThrows(AccessDeniedException.class,
+                () -> service.requireGraphReadAccess(principal(ApplicationRole.STUDENT, otherStudentId), courseId, teamId));
+    }
+
+    @Test
+    void graphReadRejectsCourseAndTeamIdMixAndMatchAsNotFound() {
+        UUID requestedCourseId = UUID.randomUUID();
+        UUID actualCourseId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
+        Course requestedCourse = id(new Course(), requestedCourseId);
+        Course actualCourse = id(new Course(), actualCourseId);
+        Team team = id(new Team(), teamId);
+        team.setCourse(actualCourse);
+
+        when(courseRepository.findById(requestedCourseId)).thenReturn(Optional.of(requestedCourse));
+        when(teamRepository.findWithCourseAndInstructorById(teamId)).thenReturn(Optional.of(team));
+
+        ResponseStatusException exception = assertThrows(ResponseStatusException.class,
+                () -> service.requireGraphReadAccess(
+                        principal(ApplicationRole.ADMIN, UUID.randomUUID()), requestedCourseId, teamId));
+        org.junit.jupiter.api.Assertions.assertEquals(404, exception.getStatusCode().value());
     }
 
     private <T> T id(T entity, UUID id) {

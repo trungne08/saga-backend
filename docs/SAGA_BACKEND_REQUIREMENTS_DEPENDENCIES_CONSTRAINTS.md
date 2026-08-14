@@ -938,3 +938,20 @@ chặn nullable repair.
 - Backend may fetch exact commit detail only with the existing Backend-owned GitHub client. Response is a dedicated versioned DTO, excludes credentials/personal session data, and is bounded to 50 files, 20,000 patch characters per file, and 100,000 total context characters with explicit truncation metadata.
 - M5 adds no business migration, public AI review API, n8n flow, webhook trigger, or automatic push review.
 - M5 targeted verification passes 47/47. Full clean runs 909 tests with only the four previously documented baseline failures (OpenAPI 131/133, DEC-023 Course roster, two Lecturer Analytics assertions); the internal endpoint is hidden from browser OpenAPI.
+
+## Student Team graph read constraints — 2026-08-14
+
+- Scope is exactly four GET routes: Team `overview`, Team `heatmap`, per-Team Student `interactions`, and Team Sprint `burndown`. Do not grant STUDENT to other Lecturer Analytics operations.
+- A reusable graph-read guard must validate Course→Team, then allow ADMIN; allow LECTURER only when `Course.instructor.id == SagaPrincipal.localProfileId`; allow STUDENT only when an exact `TeamMember(teamId, localProfileId)` has `roleInTeam` equal to `LEADER` or `MEMBER`. `MENTOR` is not included.
+- Do not accept caller identity from request parameters, body, headers, or target `studentId`. The target Student/heatmap filter must be in the exact Team; Sprint must be in the exact Team Project. Cross-scope identifiers fail closed with existing 403/404 semantics.
+- Keep `AccountStatusEnforcementFilter`, `SecurityConfig`, browser session/no-Bearer, GET/no-CSRF, response DTOs, graph calculations, and `CourseService` unchanged.
+
+## SAGA AI Agent V1 constraints — 2026-08-14
+
+- Public Agent routes require an authenticated `SagaPrincipal`; unsafe routes require the existing CSRF token. Never accept actor/profile/role authority from browser JSON and never expose either directional service token to FE.
+- `SAGA_BACKEND_TO_AI_SERVICE_TOKEN` must be a distinct strong secret for Backend→AI. `SAGA_AI_SERVICE_TOKEN` remains AI→Backend. Backend Agent timeouts are bounded (`PT3S` connect and `PT130S` read by default) for possible Hugging Face cold start; no automatic Jira mutation retry is added.
+- Actor delegation is random opaque material with only SHA-256 persisted. It must be bound to conversation, exact current profile/role audit identity, capability, and TTL no longer than 15 minutes. Service auth alone is insufficient for actor-scoped tools.
+- Internal Agent controllers expose exact typed POST routes only. Each route resolves delegation and reuses domain services; no generic path/method/body proxy, JPA entity dump, or authorization copy in Python is allowed.
+- Task proposals are bounded and immutable. Confirmation owns no mutable request body, claims once, reauthorizes through existing task write service, and preserves its stable idempotency key. Update excludes assignee/Sprint/estimation/status dedicated operations.
+- SRS projection is bounded to 100 tasks and 50 traceability events with explicit truncation metadata. Artifact download must verify current Project access, safe `.docx` filename, media type/size, and proxy content; possession of an artifact UUID is not authority.
+- V30 belongs to Flyway because delegation is Backend-owned authorization state. All conversation/tool/action/artifact rows belong to AI Alembic; no cross-schema business FK is permitted.

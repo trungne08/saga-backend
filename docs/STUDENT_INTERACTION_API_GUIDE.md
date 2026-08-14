@@ -74,3 +74,9 @@ Mỗi phần tử trong `edges` gồm:
 - Graph này chỉ tập trung vào một sinh viên làm trung tâm.
 - Các cạnh được gom theo loại tương tác và số lần xảy ra.
 - Nếu sinh viên không thuộc team, API sẽ trả lỗi.
+
+## 9. Authorization
+
+ADMIN đọc mọi Team hợp lệ; LECTURER chỉ đọc Team thuộc Course mình phụ trách; STUDENT có exact `TeamMember` role `LEADER` hoặc `MEMBER` được đọc interaction của bản thân hoặc thành viên khác trong cùng Team. Caller không cần trùng target `studentId`, nhưng cả hai phải thuộc Team trong URL; target ngoài Team fail closed. MENTOR và Student Team khác không được cấp quyền.
+
+Frontend dùng `credentials: "include"` với browser session, không Bearer token và không CSRF cho GET.

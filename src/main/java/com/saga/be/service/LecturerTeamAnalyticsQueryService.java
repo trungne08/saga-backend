@@ -126,7 +126,7 @@ public class LecturerTeamAnalyticsQueryService {
     @Transactional(readOnly = true)
     public LecturerAnalyticsResponses.StudentInteractionGraph studentInteractions(SagaPrincipal principal,
             UUID courseId, UUID teamId, UUID studentId) {
-        Team team = authorization.requireTeam(principal, courseId, teamId);
+        Team team = authorization.requireGraphReadAccess(principal, courseId, teamId);
         teamMemberRepository.findByTeamIdAndStudentId(teamId, studentId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy Student trong Team"));
 
@@ -181,7 +181,7 @@ public class LecturerTeamAnalyticsQueryService {
     @Transactional(readOnly = true)
     public LecturerAnalyticsResponses.ActivityOverview overview(SagaPrincipal principal, UUID courseId,
             UUID teamId, LocalDate startDate, LocalDate endDate) {
-        Team team = authorization.requireTeam(principal, courseId, teamId);
+        Team team = authorization.requireGraphReadAccess(principal, courseId, teamId);
         if (startDate.isAfter(endDate)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "startDate không được sau endDate");
         }
@@ -226,7 +226,7 @@ public class LecturerTeamAnalyticsQueryService {
     @Transactional(readOnly = true)
     public LecturerAnalyticsResponses.ActivityHeatmap heatmap(SagaPrincipal principal, UUID courseId,
             UUID teamId, UUID studentId, LocalDate startDate, LocalDate endDate) {
-        Team team = authorization.requireTeam(principal, courseId, teamId);
+        Team team = authorization.requireGraphReadAccess(principal, courseId, teamId);
         if (startDate.isAfter(endDate)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "startDate không được sau endDate");
         }
@@ -309,7 +309,7 @@ public class LecturerTeamAnalyticsQueryService {
     @Transactional(readOnly = true)
     public LecturerAnalyticsResponses.BurndownChart burndown(SagaPrincipal principal, UUID courseId,
             UUID teamId, UUID sprintId) {
-        Team team = authorization.requireTeam(principal, courseId, teamId);
+        Team team = authorization.requireGraphReadAccess(principal, courseId, teamId);
         if (team.getProject() == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Team chưa có Project");
         }

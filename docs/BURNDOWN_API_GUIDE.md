@@ -176,3 +176,9 @@ const chartData = data.points.map((point) => ({
 ## 11. Kết luận
 
 Burndown API là công cụ quan trọng để theo dõi tiến độ sprint của team. Nó phù hợp cho dashboard giảng viên, báo cáo tiến độ nhóm, và cảnh báo sớm khi team đang chậm so với kế hoạch.
+
+## 12. Authorization
+
+ADMIN đọc mọi Team hợp lệ; LECTURER chỉ đọc Team thuộc Course mình phụ trách; STUDENT có exact `TeamMember` role `LEADER` hoặc `MEMBER` được đọc burndown của chính Team. Sprint phải thuộc Project của Team trong URL; Sprint Team/Project khác hoặc không tồn tại fail closed. MENTOR và Student Team khác không được cấp quyền.
+
+Frontend dùng `credentials: "include"` với browser session, không Bearer token và không CSRF cho GET.

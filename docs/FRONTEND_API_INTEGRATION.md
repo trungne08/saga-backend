@@ -1692,3 +1692,41 @@ Backend source already accepts business `REQUEST`, but the deployed physical MyS
 # Internal AI context is not a frontend contract (2026-08-14)
 
 `/internal/ai/**` is reserved for authenticated `saga-ai-service` reads and uses `X-SAGA-AI-Service-Token`. Frontend code must not send, store, or request this credential and must not call the internal commit-review context endpoint. Existing browser APIs continue to use `JSESSIONID`, `credentials: include`, and CSRF for unsafe methods; M5 adds no public/browser AI review API.
+
+## Student Team graph read contract — 2026-08-14
+
+FE may render these exact four widgets for a STUDENT whose current Team membership has either `roleInTeam=LEADER` or `roleInTeam=MEMBER`:
+
+- `GET /api/v1/courses/{courseId}/teams/{teamId}/overview?startDate=...&endDate=...`
+- `GET /api/v1/courses/{courseId}/teams/{teamId}/heatmap?startDate=...&endDate=...&studentId=...` (`studentId` optional)
+- `GET /api/v1/courses/{courseId}/teams/{teamId}/students/{studentId}/interactions`
+- `GET /api/v1/courses/{courseId}/teams/{teamId}/sprints/{sprintId}/burndown`
+
+Use `credentials: "include"` with the browser `JSESSIONID`; do not send an Authorization Bearer token or CSRF header for these GETs. Do not hide these widgets merely because `roleInTeam != LEADER`: MEMBER has the same read permission. The caller must belong to the exact Team; interaction/heatmap targets must be members of that Team and Sprint must belong to its Project. Other Lecturer Analytics endpoints, including historical `/api/analytics/...` designs, are not opened by this contract.
+
+## SAGA AI Agent V1 frontend contract — 2026-08-14
+
+No frontend repository was discovered during this milestone, so this is an integration contract, not a UI implementation claim. Browser code calls only Backend and always uses `credentials: "include"`. It must never contain or send `SAGA_BACKEND_TO_AI_SERVICE_TOKEN`, `SAGA_AI_SERVICE_TOKEN`, provider keys, AI DB URL, or a Hugging Face URL.
+
+Safe GETs (session, no CSRF header):
+
+- `GET /api/v1/ai/conversations`
+- `GET /api/v1/ai/conversations/{conversationId}`
+- `GET /api/v1/ai/artifacts/{artifactId}/download`
+
+Unsafe calls (session plus the existing CSRF header/cookie contract):
+
+- `POST /api/v1/ai/conversations` with `{ "title": "optional, max 160" }`
+- `POST /api/v1/ai/conversations/{conversationId}/messages` with `{ "content": "required, max 8000" }`
+- `POST /api/v1/ai/pending-actions/{actionId}/confirm` with no mutable action body
+- `POST /api/v1/ai/pending-actions/{actionId}/reject` with no mutable action body
+
+Do not send `actorId`, `ownerId`, `applicationRole`, provider, model, Backend path, or tool name. Backend derives the current local owner and role.
+
+A chat response includes `conversationId`, `messageId`, `text`, `status`, citations, optional `pendingAction`, optional `generatedArtifact`, optional `jobReference`, suggested follow-ups, and safe provider/model metadata. Render factual errors as unavailable/forbidden/not found; do not convert a failed tool or mutation into success text.
+
+For `pendingAction`, show the immutable summary and expiry with explicit **Confirm** and **Cancel** controls. No Task exists before Confirm. Disable repeated confirmation after the first request; Backend/AI also enforce atomic claim and stable idempotency. Expired/rejected/completed actions require a new proposal.
+
+For `generatedArtifact`, use only the Backend download endpoint. Do not construct AI URLs. For `jobReference`, render `PENDING`, `RUNNING`, `WAITING_RETRY`, `COMPLETED`, or `FAILED`; the chat can ask for the latest conversation-scoped result without requiring the user to know a job ID.
+
+Logout destroys the Backend session and therefore Agent access. Chat delete/retention UI is deferred until product data policy is defined.

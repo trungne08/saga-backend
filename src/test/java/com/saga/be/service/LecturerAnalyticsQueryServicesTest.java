@@ -144,7 +144,7 @@ class LecturerAnalyticsQueryServicesTest {
     @Test
     void heatmapRejectsInvalidDateRangeAndDoesNotInventLevels() {
         Fixture f = fixture(false);
-        when(f.authorization.requireTeam(any(), any(), any())).thenReturn(f.team);
+        when(f.authorization.requireGraphReadAccess(any(), any(), any())).thenReturn(f.team);
         assertThrows(ResponseStatusException.class, () -> teamService(f).heatmap(null, f.courseId, f.teamId,
                 null, LocalDate.of(2026, 8, 2), LocalDate.of(2026, 8, 1)));
     }
@@ -154,7 +154,7 @@ class LecturerAnalyticsQueryServicesTest {
         Fixture f = fixture(true);
         LocalDate start = LocalDate.of(2026, 8, 1);
         LocalDate end = LocalDate.of(2026, 8, 3);
-        when(f.authorization.requireTeam(any(), any(), any())).thenReturn(f.team);
+        when(f.authorization.requireGraphReadAccess(any(), any(), any())).thenReturn(f.team);
         when(f.members.findByTeamId(f.teamId)).thenReturn(List.of(f.membership));
         when(f.commits.aggregateDailyCountsByProjectAndAuthorIds(any(), any(), any(), any()))
                 .thenReturn(List.<Object[]>of(
@@ -177,7 +177,7 @@ class LecturerAnalyticsQueryServicesTest {
         Fixture f = fixture(true);
         LocalDate start = LocalDate.of(2026, 8, 1);
         LocalDate end = LocalDate.of(2026, 8, 2);
-        when(f.authorization.requireTeam(any(), any(), any())).thenReturn(f.team);
+        when(f.authorization.requireGraphReadAccess(any(), any(), any())).thenReturn(f.team);
         when(f.members.findByTeamId(f.teamId)).thenReturn(List.of(f.membership));
         when(f.commits.aggregateDailyCountsByProjectAndAuthorIds(any(), any(), any(), any()))
                 .thenReturn(List.<Object[]>of(
@@ -216,7 +216,7 @@ class LecturerAnalyticsQueryServicesTest {
         Fixture f = fixture(true);
         LocalDate start = LocalDate.of(2026, 8, 1);
         LocalDate end = LocalDate.of(2026, 8, 2);
-        when(f.authorization.requireTeam(any(), any(), any())).thenReturn(f.team);
+        when(f.authorization.requireGraphReadAccess(any(), any(), any())).thenReturn(f.team);
         when(f.members.findDistinctStudentIdsByTeamId(f.teamId)).thenReturn(List.of(f.studentId));
         when(f.commits.aggregateDailyCountsByProjectAndAuthorIds(any(), any(), any(), any()))
                 .thenReturn(List.<Object[]>of(
@@ -267,7 +267,7 @@ class LecturerAnalyticsQueryServicesTest {
         Task assignedTask = Task.builder().project(f.team.getProject()).reporter(studentA).assignee(studentC).build();
         CommitData commit = CommitData.builder().task(assignedTask).author(studentB).build();
 
-        when(f.authorization.requireTeam(any(), any(), any())).thenReturn(f.team);
+        when(f.authorization.requireGraphReadAccess(any(), any(), any())).thenReturn(f.team);
         when(f.members.findByTeamIdAndStudentId(f.teamId, f.studentId)).thenReturn(java.util.Optional.of(f.membership));
         when(f.members.findByTeamId(f.teamId)).thenReturn(List.of(memberA, memberB, memberC));
         when(f.peers.findBySprintBoardProjectIdOrderByCreatedAtAscIdAsc(f.projectId)).thenReturn(List.of(review));
@@ -303,7 +303,7 @@ class LecturerAnalyticsQueryServicesTest {
         Task openTask = Task.builder().sprint(sprint).status(TaskStatus.IN_PROGRESS).build();
         ReflectionTestUtils.setField(openTask, "createdAt", LocalDateTime.of(2026, 8, 2, 11, 0));
 
-        when(f.authorization.requireTeam(any(), any(), any())).thenReturn(f.team);
+        when(f.authorization.requireGraphReadAccess(any(), any(), any())).thenReturn(f.team);
         when(f.sprints.findByIdAndBoardProjectIdAndDeletedAtIsNull(sprintId, f.projectId))
                 .thenReturn(java.util.Optional.of(sprint));
         when(f.tasks.findByProjectId(f.projectId)).thenReturn(List.of(doneTask, openTask));

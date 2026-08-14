@@ -702,3 +702,19 @@ BASE HEAD của snapshot cũ: `0bc30be`. HEAD audit hiện hành là `4f3dee9`; 
 - **SECURITY:** dedicated `X-SAGA-AI-Service-Token` authentication is configured from `SAGA_AI_SERVICE_TOKEN`, compared constant-time, and scoped only to `/internal/ai/**`. Browser `JSESSIONID`/CSRF/CORS behavior is unchanged, and the service token grants no browser API authority.
 - **PAYLOAD:** response schema `saga-commit-review-context-v1` is an immutable safe DTO. It omits personal/session/provider credentials and bounds files/patch/total text with explicit truncation reasons. GitHub safe failure taxonomy is preserved; raw provider bodies are not returned.
 - **VERIFICATION:** targeted M5 plus browser/OpenAPI security regressions pass 47/47. Full clean runs 909 tests with the same four documented baseline failures (OpenAPI 131/133, DEC-023 Course roster, two Lecturer Analytics assertions), and no M5 failure. Real SAGA context plus real-model runtime is **TBD_NO_SAFE_FIXTURE**; no arbitrary production fixture was selected.
+
+## Student Team graph read access — 2026-08-14
+
+- **IMPLEMENTED / CONFIRMED_SOURCE_TEST:** the current graph paths are `GET /api/v1/courses/{courseId}/teams/{teamId}/overview`, `/heatmap`, `/students/{studentId}/interactions`, and `/sprints/{sprintId}/burndown`.
+- ADMIN reads all valid scopes; LECTURER reads an exact Team only in a Course they instruct; STUDENT reads only an exact own Team when `TeamMember.roleInTeam` is `LEADER` or `MEMBER`. `MENTOR`, same-Course other-Team, and other-Course Student access remain 403. Anonymous remains 401.
+- Course/Team ID mix-and-match is 404. Interaction and optional heatmap targets outside the Team are 404; caller and interaction target may be different members of the same Team. Sprint must belong to the Team Project, otherwise 404.
+- No other Lecturer Analytics route was broadened. Account-status enforcement, browser session/no-Bearer, GET/no-CSRF, DTO and graph calculations are unchanged. Targeted scope is 50 tests with zero failures/errors. Isolated full clean is 147 suites / 936 tests / 4 failures / 0 errors / 0 skipped; all four are the existing OpenAPI-count, DEC-023 roster, historical missing interaction-route, and Student-progress expectation baselines, with no graph milestone failure.
+
+## SAGA AI Agent V1 — 2026-08-14
+
+- **IMPLEMENTED_SOURCE_TEST:** Backend now provides a session/CSRF public Agent gateway, a dedicated directional Backend→AI client, hashed short-lived actor delegation, ten exact internal typed tool routes plus commit-review target validation, current-authorization projections, two-phase Task confirmation, and authorized SRS download proxy.
+- V30 is required because opaque actor delegations must survive a single request safely enough to bind AI→Backend tool calls to conversation/current actor; only token hash and bounded audit metadata are stored. AI conversation, message, tool, action, artifact, and job state remain Alembic-owned with no cross-domain foreign keys.
+- No business mutation occurs during model/tool proposal. Confirm calls existing Jira write semantics and rechecks current authorization. AI never receives Jira/GitHub credentials or queries Backend persistence directly.
+- Backend Agent targeted suite passes **21/21**. Full clean runs **944 tests / 5 failures / 0 errors / 0 skipped**: four stable pre-milestone baselines (OpenAPI operation count, DEC-023 Course roster, and two Lecturer Analytics assertions) plus the already documented non-deterministic notification newest-first assertion; that exact notification method passes its immediate isolated rerun **1/1**. No Agent/M5/migration test fails.
+- No frontend application repository was discovered in the audited roots. Public API contract is ready; FE implementation and web product runtime are `NOT_IMPLEMENTED/TBD`.
+- Hugging Face source readiness is in the AI repository; actual Space deployment and runtime integration remain `TBD_DEPLOYMENT_SMOKE`.

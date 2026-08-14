@@ -117,3 +117,9 @@ Màu sắc thường được hiểu như sau:
 - Nếu `studentId` có truyền, API chỉ trả heatmap của sinh viên đó.
 - `startDate` không được sau `endDate`.
 
+## 9. Authorization
+
+ADMIN đọc mọi Team hợp lệ; LECTURER chỉ đọc Team thuộc Course mình phụ trách; STUDENT có exact `TeamMember` role `LEADER` hoặc `MEMBER` được đọc heatmap toàn Team. Nếu truyền `studentId`, target phải thuộc chính Team trong URL; target ngoài Team fail closed. MENTOR và Student Team khác không được cấp quyền.
+
+Frontend dùng `credentials: "include"` với browser session, không Bearer token và không CSRF cho GET.
+

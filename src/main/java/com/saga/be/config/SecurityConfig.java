@@ -87,7 +87,18 @@ public class SecurityConfig {
                                 PathPatternRequestMatcher.pathPattern(
                                         HttpMethod.POST,
                                         "/api/webhooks/jira"
-                                )
+                                ),
+                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/project-summary"),
+                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/project-tasks"),
+                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/task-detail"),
+                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/student-progress"),
+                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/team-progress"),
+                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/team-contribution"),
+                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/project-traceability"),
+                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/validate-commit-review"),
+                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/srs-context"),
+                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/validate-task-create"),
+                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/validate-task-update")
                         )
                 )
                 .addFilterBefore(

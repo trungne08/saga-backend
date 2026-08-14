@@ -23,6 +23,10 @@ import org.springframework.web.bind.annotation.RequestMethod;
 public class VietnameseOpenApiDocumentationConfiguration {
 
     private static final Map<String, Documentation> SPECIAL_OPERATIONS = Map.ofEntries(
+            entry("LecturerAnalyticsController#overview", "Xem tổng quan hoạt động theo ngày của nhóm", "ADMIN đọc mọi Team; LECTURER đọc Team thuộc Course mình phụ trách; STUDENT có TeamMember role LEADER hoặc MEMBER chỉ đọc exact Team của mình."),
+            entry("LecturerAnalyticsController#heatmap", "Xem bản đồ nhiệt hoạt động của nhóm", "ADMIN đọc mọi Team; LECTURER đọc Team thuộc Course mình phụ trách; STUDENT có TeamMember role LEADER hoặc MEMBER chỉ đọc exact Team của mình; studentId tùy chọn phải thuộc Team đó."),
+            entry("LecturerAnalyticsController#studentInteractions", "Xem mạng tương tác của một sinh viên trong nhóm", "ADMIN đọc mọi Team; LECTURER đọc Team thuộc Course mình phụ trách; STUDENT có TeamMember role LEADER hoặc MEMBER đọc thành viên trong exact Team của mình; caller không cần trùng target studentId."),
+            entry("LecturerAnalyticsController#burndown", "Xem biểu đồ burndown của sprint", "ADMIN đọc mọi Team; LECTURER đọc Team thuộc Course mình phụ trách; STUDENT có TeamMember role LEADER hoặc MEMBER chỉ đọc exact Team của mình; Sprint phải thuộc Project của Team."),
             entry("ProjectDetailController#dashboardStats", "Xem thống kê tổng quan dự án", "Chỉ đọc snapshot local; không gọi Jira hoặc GitHub. Task đã tombstone không được tính và task hoàn thành dùng trạng thái DONE."),
             entry("ProjectGitHubReadController#branches", "Lấy danh sách nhánh GitHub", "Repository phải thuộc đúng Project. Backend dùng installation credential nội bộ, frontend không gửi GitHub token. Endpoint chỉ đọc; phân trang bắt đầu từ 0."),
             entry("ProjectGitHubReadController#commits", "Lấy commit theo nhánh GitHub", "Tên branch nằm ở query parameter và có thể chứa dấu '/'; frontend phải URL-encode giá trị. Không trả credential hoặc raw provider payload."),
