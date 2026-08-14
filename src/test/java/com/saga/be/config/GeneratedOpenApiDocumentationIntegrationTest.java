@@ -94,12 +94,15 @@ class GeneratedOpenApiDocumentationIntegrationTest {
             }
         }
 
-        assertEquals(133, operationCount, "Admin dashboard V1 thêm đúng hai API report operation");
+        assertEquals(149, operationCount,
+                "Merged main gồm Admin reports, Lecturer dashboard, Project Type/weights và public Agent AI routes");
         System.out.println("Generated OpenAPI operation count: " + operationCount);
         assertEquals(usedTags, documentedTags, "Global tags phải đúng bằng tập tag thực sự có operation");
         assertEquals(documentedTags.size(), root.path("tags").size(), "Global tags không được trùng tên");
         assertFalse(documentedTags.contains("Notifications"));
         assertTrue(documentedTags.contains("Thông báo"));
+        assertTrue(documentedTags.contains("Trợ lý AI"));
+        assertTrue(documentedTags.contains("Loại dự án"));
         assertFalse(root.path("components").path("securitySchemes").has("bearerAuth"));
         root.path("components").path("securitySchemes").properties().forEach(entry ->
                 assertFalse("http".equalsIgnoreCase(entry.getValue().path("type").asText())
@@ -108,6 +111,16 @@ class GeneratedOpenApiDocumentationIntegrationTest {
 
         assertTrue(root.path("paths").has("/api/admin/reports/anomalies"));
         assertTrue(root.path("paths").has("/api/admin/reports/graph-processing"));
+        assertTrue(root.path("paths").has("/api/project-types"));
+        assertTrue(root.at("/paths/~1api~1projects~1{projectId}~1group-weights/put").isObject());
+        assertTrue(root.at("/paths/~1api~1teams~1{teamId}~1projects/post").isObject());
+        assertTrue(root.at("/paths/~1api~1v1~1courses~1{courseId}~1dashboard~1teams-progress/get").isObject());
+        assertTrue(root.at("/paths/~1api~1v1~1courses~1{courseId}~1dashboard~1contribution-summary/get").isObject());
+        assertTrue(root.at("/paths/~1api~1v1~1courses~1{courseId}~1dashboard~1trends/get").isObject());
+        assertTrue(root.at("/paths/~1api~1v1~1courses~1{courseId}~1dashboard~1at-risk-summary/get").isObject());
+        assertTrue(root.path("paths").has("/api/v1/ai/conversations"));
+        assertTrue(root.at("/paths/~1api~1v1~1ai~1conversations~1{conversationId}~1messages/post").isObject());
+        assertFalse(root.path("paths").has("/internal/ai/v1/agent/tools/project-summary"));
         assertTrue(root.at("/paths/~1api~1projects~1{projectId}~1github~1issues/get").isObject());
         assertTrue(root.at("/paths/~1api~1projects~1{projectId}~1github~1issues~1{issueId}/get").isObject());
         assertTrue(root.at("/paths/~1api~1v1~1projects~1{projectId}~1tasks~1{taskId}~1github-issues~1{issueId}/post").isObject());

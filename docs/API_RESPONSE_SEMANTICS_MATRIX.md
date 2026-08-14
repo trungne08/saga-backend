@@ -1,3 +1,21 @@
+## Merged main — Project / Lecturer Dashboard / Admin Dashboard / AI (2026-08-15)
+
+| Method | Path | Success | Auth / CSRF | Semantics |
+| --- | --- | --- | --- | --- |
+| GET | `/api/project-types` | 200 catalog (may be `[]`) | Authenticated ADMIN/LECTURER/STUDENT; no CSRF | Dynamic; no production seed |
+| POST | `/api/project-types` | 201/200 created type | ADMIN + CSRF | ADMIN-managed catalog |
+| POST | `/api/teams/{teamId}/projects` | created Project with ProjectType | existing TeamProject auth + CSRF | `projectTypeId` required → `PROJECT_TYPE_REQUIRED` |
+| PUT | `/api/projects/{projectId}/group-weights` | saved Project+Team weights | ADMIN or instructor LECTURER + CSRF | Code/Document/Design sum = 1.0 |
+| GET | `/api/v1/courses/{courseId}/dashboard/teams-progress` | dashboard payload | ADMIN/LECTURER; no CSRF | Implemented Lecturer Dashboard |
+| GET | `/api/v1/courses/{courseId}/dashboard/contribution-summary` | dashboard payload | ADMIN/LECTURER; no CSRF | Implemented Lecturer Dashboard |
+| GET | `/api/v1/courses/{courseId}/dashboard/trends` | dashboard payload | ADMIN/LECTURER; no CSRF | Implemented Lecturer Dashboard |
+| GET | `/api/v1/courses/{courseId}/dashboard/at-risk-summary` | dashboard payload | ADMIN/LECTURER; no CSRF | Deterministic risk; no AI-derived warning types |
+| GET | `/api/admin/reports/anomalies` | signals array | ADMIN; no CSRF | OVERDUE_TASK supported; unsupported = TBD + `count: null` |
+| GET | `/api/admin/reports/graph-processing` | stub envelope | ADMIN; no CSRF | `periodDays=7`, `historySupported=false`, `points=[]` |
+| * | `/api/v1/ai/**` (7 public ops) | see AI section in FRONTEND_API_INTEGRATION | Session; CSRF on POST | Internal `/internal/ai/**` not OpenAPI/FE |
+
+OpenAPI operation count baseline = **149**. Migration head = **V32**. Browser Bearer = **NO**.
+
 ## J1J — Jira Task Update Priority business resolution (2026-08-10)
 
 | Method | Path | Normal input | Success | Local failure trước provider | Compatibility / idempotency |

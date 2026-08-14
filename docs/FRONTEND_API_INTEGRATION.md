@@ -51,7 +51,7 @@ FE gửi sparse body. `description` non-null luôn requested vì ADF canonicaliz
 
 Không có API Admin mới trong A13. FE reuse shared route khi ADMIN đã được source cho phép: `/api/v1/courses/**` (bao gồm roster), Team roster, Task/Sprint, analytics, Peer Review và Contribution theo exact route hiện hữu. Không gọi `/api/admin/courses/**` vì không tồn tại.
 
-Các capability vẫn chưa có endpoint: per-user audit history, đổi role, reset password và generic evaluation settings. Course membership mutation và notification broadcast đã được bổ sung ở milestone sau và được mô tả trong quick start cuối tài liệu. FE không dựng request giả, không gửi `actorId`/`adminId`, không dùng Bearer hay Cognito Admin flow. Dashboard anomaly/graph-processing chart không thuộc A13.
+Các capability vẫn chưa có endpoint: per-user audit history, đổi role, reset password và generic evaluation settings. Course membership mutation và notification broadcast đã được bổ sung ở milestone sau và được mô tả trong quick start cuối tài liệu. FE không dựng request giả, không gửi `actorId`/`adminId`, không dùng Bearer hay Cognito Admin flow. Dashboard anomaly/graph-processing chart không thuộc A13 (lịch sử scope); Admin Dashboard V1 sau đó đã thêm `/api/admin/reports/anomalies` và `/api/admin/reports/graph-processing` — xem section Merged main FE contracts 2026-08-15.
 
 ## A12 — Bàn giao Admin cho FE, 2026-08-09
 
@@ -1689,6 +1689,49 @@ If canonical confirmation fails after Jira accepted the PUT, retry the identical
 ## J1K.1 TaskType.REQUEST deployment note — 2026-08-13
 
 Backend source already accepts business `REQUEST`, but the deployed physical MySQL `task.type` enum must receive Flyway V29 before Jira Request can persist. This does not change the FE payload or error-handling contract. Until deployment smoke completes, sync-history `ITEM_UPSERT_FAILED` at `UPSERT_ISSUES` with the confirmed enum mismatch is a deployment/schema incident; FE must not substitute another type or send a Jira provider ID.
+# Merged main FE contracts — Project / Lecturer / Admin / AI — 2026-08-15
+
+Authority: current merged `main` source + OpenAPI **149** + migration head **V32**. Browser auth always `JSESSIONID` + `credentials: "include"`. CSRF required for unsafe methods. **Do not send Bearer.** Deployed Swagger currency and HF/AI product smoke remain **TBD**.
+
+## Project V1
+
+| Method | Path | Roles | CSRF | Notes |
+| --- | --- | --- | --- | --- |
+| GET | `/api/project-types` | ADMIN, LECTURER, STUDENT | No | Dynamic catalog; fresh DB may return `[]` |
+| POST | `/api/project-types` | ADMIN | Yes | No canonical production seed |
+| POST | `/api/teams/{teamId}/projects` | existing TeamProject auth | Yes | **`projectTypeId` mandatory** → `PROJECT_TYPE_REQUIRED` if missing |
+| PUT | `/api/projects/{projectId}/group-weights` | ADMIN or Course instructor LECTURER | Yes | Exact Project+Team Code/Document/Design; sum must be 1.0 |
+
+Contribution weight **source** (not formula): exact Project+Team group config first; Course-level slice weights when absent. Peer Review / Rubric / Contribution formula unchanged. Do not treat ProjectType `criteriaConfig` as scoring authority.
+
+## Lecturer Dashboard (implemented routes)
+
+Dashboard:
+
+- `GET /api/v1/courses/{courseId}/dashboard/teams-progress`
+- `GET /api/v1/courses/{courseId}/dashboard/contribution-summary`
+- `GET /api/v1/courses/{courseId}/dashboard/trends`
+- `GET /api/v1/courses/{courseId}/dashboard/at-risk-summary`
+
+Also present on `LecturerAnalyticsController` (existing): detail, overview, progress, activities, contribution-detail, early-warnings, student interactions, burndown, heatmap, velocity. Auth ADMIN/LECTURER (plus Student Team graph reads already documented separately). Early warning = deterministic `OVERDUE_TASK` only. Do **not** implement FE for GHOSTING / TOXIC_COMMUNICATION / TECHNICAL_DEBT unless Backend later adds them.
+
+## Admin Dashboard V1
+
+| Method | Path | Auth | CSRF |
+| --- | --- | --- | --- |
+| GET | `/api/admin/reports/anomalies` | ADMIN session | No |
+| GET | `/api/admin/reports/graph-processing` | ADMIN session | No |
+
+Anomalies: `OVERDUE_TASK` supported with real `count`; `MSR` / `DEADLINE_PROCESS` / `SNA_ISOLATION` = `supportStatus: "TBD"` and **`count: null`** (never treat null as zero). Graph-processing: `periodDays: 7`, `historySupported: false`, `points: []` — do not invent charts. LECTURER/STUDENT forbidden; anonymous unauthorized.
+
+## AI Agent V1 (public only)
+
+Safe GETs: conversations list/detail, artifact download. Unsafe POSTs: create conversation, send message, confirm/reject pending action. Internal `/internal/ai/**` is **not** a frontend contract. AI does not accept browser `JSESSIONID`, does not read SAGA business DB, and does not call Jira/GitHub. Confirm/reject runs through Backend mutation path; no automatic Task mutation.
+
+## Verification note for FE
+
+Local OpenAPI includes Project / Admin / Lecturer dashboard / AI public routes. Full clean suite is **not** green (**994 / 23 failures**): 22 CSRF isolation flakes + DEC-023 roster baseline. Feature contracts above are source/test confirmed; do not wait for full-suite green to integrate these routes.
+
 # Internal AI context is not a frontend contract (2026-08-14)
 
 `/internal/ai/**` is reserved for authenticated `saga-ai-service` reads and uses `X-SAGA-AI-Service-Token`. Frontend code must not send, store, or request this credential and must not call the internal commit-review context endpoint. Existing browser APIs continue to use `JSESSIONID`, `credentials: include`, and CSRF for unsafe methods; M5 adds no public/browser AI review API.

@@ -1,5 +1,7 @@
 # Ma trận trạng thái Admin backend — A12 closure, 2026-08-09
 
+> **2026-08-15 supersession (Admin Dashboard V1):** `GET /api/admin/reports/anomalies` và `GET /api/admin/reports/graph-processing` đã IMPLEMENTED trên merged `main` (ADMIN session, GET không CSRF, không Bearer). `OVERDUE_TASK` SUPPORTED; `MSR`/`DEADLINE_PROCESS`/`SNA_ISOLATION` = TBD + `count=null`. Graph-processing: `periodDays=7`, `historySupported=false`, `points=[]`. Ghi chú A13 “Charts anomaly/graph-processing không thuộc A13” chỉ còn là lịch sử scope A13, không còn nghĩa “API chưa tồn tại”.
+
 Tài liệu này là ma trận trạng thái hiện hành từ controller/service/repository, không phải wishlist.
 Các ghi chú milestone cũ được supersede khi mâu thuẫn với bảng này.
 
@@ -15,6 +17,8 @@ Các ghi chú milestone cũ được supersede khi mâu thuẫn với bảng nà
 | Global rubric | ROLLED_BACK_BY_SCOPE_OWNERSHIP | Không có route Admin rubric | M4B CRUD Peer Review/Rubric đã được gỡ; không suy diễn API thay thế. |
 | Course progress | IMPLEMENTED | `GET /api/admin/course-progress-overview` | Current local counts, không final grade/Assessment. |
 | Course XLSX export | IMPLEMENTED | `GET /api/admin/reports/courses/{courseId}/export` | Local snapshot, không official grade/Cognito/provider data. |
+| Admin anomalies report | IMPLEMENTED | `GET /api/admin/reports/anomalies` | OVERDUE_TASK supported; MSR/DEADLINE_PROCESS/SNA_ISOLATION TBD + null count. |
+| Admin graph-processing report | IMPLEMENTED | `GET /api/admin/reports/graph-processing` | periodDays=7; historySupported=false; points=[]; no fake history. |
 | Global audit/statistics/health | IMPLEMENTED | `/api/admin/audit-logs`, `/system-stats`, `/integrations/health` | Sanitized/local-only; health không gọi provider. |
 | Global teams/projects | IMPLEMENTED | `GET /api/admin/teams`, `/api/admin/projects` | Read-only; không Project DELETE. |
 | A11A durable audit identity | PARTIAL | `SystemAuditLog.actorLocalProfileId`, `actorRole` | Chỉ event mới có exact local actor; không backfill Mongo. |
@@ -51,7 +55,7 @@ Source/test integration xác nhận contract; browser E2E/deployed smoke là **T
 | Lecturer analytics | Allowed | Reuse `/api/v1/courses/{courseId}/...` |
 | Peer Review, Contribution | Allowed ở route đã khai báo | Reuse exact route; không suy diễn route khác |
 
-`ADMIN_COURSE_DUPLICATE_ROUTES_NEEDED = false`: namespace đẹp không đủ lý do duplicate; shared Course contract đã có ADMIN authorization. Charts anomaly/graph-processing không thuộc A13.
+`ADMIN_COURSE_DUPLICATE_ROUTES_NEEDED = false`: namespace đẹp không đủ lý do duplicate; shared Course contract đã có ADMIN authorization. Charts anomaly/graph-processing **không thuộc scope A13** (lịch sử); Admin Dashboard V1 sau đó đã thêm route riêng `/api/admin/reports/anomalies` và `/api/admin/reports/graph-processing` — xem supersession 2026-08-15 ở đầu file.
 
 ## Cập nhật contract Admin users/audit — 2026-08-09
 

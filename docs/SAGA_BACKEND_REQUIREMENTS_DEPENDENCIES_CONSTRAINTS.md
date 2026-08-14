@@ -1,3 +1,13 @@
+## Merged main constraints — Project / Lecturer / Admin / AI / OpenAPI — 2026-08-15
+
+- OpenAPI generated operation count baseline = **149** (local contract). Deployed Swagger currency = **TBD**; production springdoc/Swagger mặc định off trừ khi bật explicit (`SWAGGER_ENABLED` / `SPRINGDOC_*` — không ghi secret/env value).
+- Migration head = **V32**. Không seed canonical ProjectType production.
+- Browser FE auth: `JSESSIONID` + `credentials: include`; CSRF cho unsafe mutations; GET không CSRF trừ khi exact source nói khác; **không Bearer**.
+- Project create bắt buộc `projectTypeId`. Group weights lưu exact Project+Team; Contribution fallback Course; **không đổi** Contribution formula / Peer Review / Rubric.
+- Admin unsupported anomaly counts phải JSON `null`, không `0`. Graph-processing không fabricate history.
+- AI public chỉ `/api/v1/ai/**`. `/internal/ai/**` không phải FE contract. AI không là business authority.
+- Full suite sau reconciliation: **994 / 23 fail / 0 error** — không ghi FULL_SUITE=PASS.
+
 ## J1K.1 TaskType.REQUEST physical schema constraints — 2026-08-13
 
 - Java `TaskType` and the physical MySQL `task.type` enum are one persistence contract. V29 must contain exactly `BUG, EPIC, FEATURE, REQUEST, STORY, SUBTASK, TASK`; adding a Java value without matching Flyway support must fail the migration contract test.

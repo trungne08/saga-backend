@@ -1,3 +1,12 @@
+## Merged main — Project V1 / Lecturer Dashboard / Admin Dashboard V1 / AI Agent — 2026-08-15
+
+- **Đã hoàn thành / CONFIRMED_SOURCE_TEST:** bốn lane merge vào `main`. OpenAPI generated count **149** (PASS). Migration head **V32** (PASS, no collision).
+- **Project V1:** dynamic ADMIN-managed `ProjectType`; `GET/POST /api/project-types`; create Project bắt buộc `projectTypeId`; `PUT .../group-weights` exact Project+Team; Contribution weight source ưu tiên group config rồi Course fallback; formula/Peer Review/Rubric unchanged; V31/V32.
+- **Lecturer Dashboard:** bốn `GET .../dashboard/*` trên `LecturerAnalyticsController` cộng analytics routes hiện hữu; early warning vẫn `OVERDUE_TASK` deterministic.
+- **Admin Dashboard V1:** anomalies + graph-processing ADMIN GETs; unsupported anomaly signals TBD+null; graph history unsupported empty points.
+- **AI Agent:** public `/api/v1/ai/**` trong OpenAPI; internal tools hidden; Backend-authoritative trust boundary; deployment smoke **TBD**.
+- **Full clean:** **994 / 23 failures / 0 errors** — 22 CSRF isolation flakes + DEC-023 roster. Không ghi full suite PASS. A13 ghi “anomaly/graph-processing ngoài A13” đã được **supersede** bởi Admin Dashboard V1 trên.
+
 ## J1K.1 TaskType.REQUEST database enum migration — 2026-08-13
 
 - **CONFIRMED_RUNTIME_SCHEMA_MISMATCH:** production-compatible runtime metadata for nullable `task.type` lacked `REQUEST`; Jira reconciliation therefore reached HTTP 200/search success but failed canonical `saveAndFlush` at `UPSERT_ISSUES` with MySQL 1265.

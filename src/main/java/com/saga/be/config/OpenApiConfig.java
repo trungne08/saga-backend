@@ -83,15 +83,17 @@ public class OpenApiConfig {
         tags.put("Khóa học", "Quản lý khóa học, danh sách sinh viên và import.");
         tags.put("Nhóm", "Thông tin nhóm và thành viên nhóm.");
         tags.put("Dự án", "Thông tin, thống kê và thiết lập dự án.");
+        tags.put("Loại dự án", "Danh mục loại dự án dùng khi tạo dự án.");
         tags.put("Jira Task", "Đọc và thay đổi Task có Jira làm source of truth.");
         tags.put("Jira Sprint", "Đọc và thay đổi Sprint có Jira làm source of truth.");
         tags.put("Tích hợp cá nhân", "Kết nối Jira và GitHub cho tài khoản đang đăng nhập.");
         tags.put("Tích hợp dự án", "Liên kết, trạng thái và đồng bộ Jira/GitHub của dự án.");
-        tags.put("GitHub", "Đọc repository, nhánh và commit GitHub qua backend.");
+        tags.put("GitHub", "Đọc repository, nhánh, commit, Issue và traceability GitHub qua backend.");
         tags.put("Đồng bộ dữ liệu", "Ánh xạ danh tính và nhận kết quả callback đã lưu an toàn.");
         tags.put("Thông báo", "Notification Bell, phát thông báo và đăng ký trình duyệt nhận FCM.");
         tags.put("Đóng góp", "Cấu hình và đánh giá tỷ lệ đóng góp.");
         tags.put("Đánh giá", "Peer Review, rubric và phân tích học tập.");
+        tags.put("Trợ lý AI", "Hội thoại Agent AI, pending action và artifact trong phạm vi browser session.");
         tags.put("Webhook", "Endpoint hệ thống dành cho webhook của nhà cung cấp; FE không gọi thủ công.");
         tags.put("Chính sách riêng tư", "Nội dung chính sách công khai.");
         return tags;

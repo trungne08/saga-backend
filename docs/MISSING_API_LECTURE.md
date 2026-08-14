@@ -1,5 +1,14 @@
 # Lecturer Analytics API còn thiếu
 
+> **2026-08-15 — HISTORICAL vs IMPLEMENTED:** nội dung gốc bên dưới mô tả milestone Lecturer Analytics 2026-08-05 và các gap thời điểm đó. Trên merged `main` hiện hành, Lecturer Course Dashboard đã **IMPLEMENTED** các route sau (ADMIN/LECTURER, GET, session `JSESSIONID`, không CSRF, không Bearer):
+>
+> - `GET /api/v1/courses/{courseId}/dashboard/teams-progress`
+> - `GET /api/v1/courses/{courseId}/dashboard/contribution-summary`
+> - `GET /api/v1/courses/{courseId}/dashboard/trends`
+> - `GET /api/v1/courses/{courseId}/dashboard/at-risk-summary`
+>
+> Early warning vẫn chỉ deterministic `OVERDUE_TASK`. **Không** implement GHOSTING / TOXIC_COMMUNICATION / TECHNICAL_DEBT trừ khi source sau này thêm. OpenAPI baseline hiện hành = **149**. File này không phải FE wishlist authority; ưu tiên `SAGA_SYSTEM_CONTEXT_FOR_AI.md` / `FRONTEND_API_INTEGRATION.md`.
+
 Trạng thái tại `0156a5e` cộng working tree milestone Lecturer Analytics ngày 2026-08-05.
 File yêu cầu này không tồn tại ở checkpoint ban đầu; nội dung dưới đây ghi lại contract đã triển khai từ yêu cầu milestone.
 

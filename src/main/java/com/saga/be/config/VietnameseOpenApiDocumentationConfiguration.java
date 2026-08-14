@@ -116,17 +116,30 @@ public class VietnameseOpenApiDocumentationConfiguration {
             summary("IdentityMappingReviewController#review", "Duyệt một ánh xạ danh tính"),
             summary("IntegrationCallbackResultController#consume", "Nhận kết quả liên kết tài khoản sau callback"),
             summary("JiraIntegrationCallbackController#callback", "Hoàn tất callback liên kết Jira"),
+            summary("AgentGatewayController#create", "Tạo hội thoại Agent AI"),
+            summary("AgentGatewayController#list", "Xem danh sách hội thoại Agent AI"),
+            summary("AgentGatewayController#get", "Xem chi tiết hội thoại Agent AI"),
+            summary("AgentGatewayController#send", "Gửi tin nhắn tới Agent AI"),
+            summary("AgentGatewayController#confirm", "Xác nhận hành động chờ của Agent AI"),
+            summary("AgentGatewayController#reject", "Từ chối hành động chờ của Agent AI"),
+            summary("AgentGatewayController#download", "Tải artifact do Agent AI tạo"),
+            summary("LecturerAnalyticsController#teamsProgress", "Xem tiến độ các nhóm trong khóa học"),
+            summary("LecturerAnalyticsController#contributionSummary", "Xem tóm tắt đóng góp của khóa học"),
+            summary("LecturerAnalyticsController#trends", "Xem xu hướng hoạt động của khóa học"),
+            summary("LecturerAnalyticsController#atRiskSummary", "Xem tóm tắt sinh viên có rủi ro trong khóa học"),
             summary("LecturerAnalyticsController#teamDetail", "Xem tổng quan hoạt động của nhóm"),
             summary("LecturerAnalyticsController#progress", "Xem tiến độ của sinh viên"),
             summary("LecturerAnalyticsController#activities", "Xem dòng thời gian hoạt động của sinh viên"),
             summary("LecturerAnalyticsController#contributionDetail", "Xem chi tiết đóng góp của sinh viên"),
             summary("LecturerAnalyticsController#earlyWarnings", "Xem cảnh báo sớm của khóa học"),
-            summary("LecturerAnalyticsController#interactions", "Xem tương tác giữa các thành viên nhóm"),
             summary("LecturerAnalyticsController#studentInteractions", "Xem mạng tương tác của một sinh viên trong nhóm"),
             summary("LecturerAnalyticsController#burndown", "Xem biểu đồ burndown của sprint"),
             summary("LecturerAnalyticsController#heatmap", "Xem bản đồ nhiệt hoạt động của nhóm"),
             summary("LecturerAnalyticsController#overview", "Xem tổng quan hoạt động theo ngày của nhóm"),
             summary("LecturerAnalyticsController#velocity", "Xem vận tốc Sprint của nhóm"),
+            summary("ProjectGroupWeightConfigController#update", "Cập nhật trọng số nhóm của dự án"),
+            summary("ProjectTypeController#list", "Xem danh sách loại dự án"),
+            summary("ProjectTypeController#create", "Tạo loại dự án mới"),
             summary("MyCourseTeamController#getMyCourseTeamMembers", "Xem thành viên nhóm của tôi trong khóa học"),
             summary("MyFirebaseInstallationController#register", "Đăng ký trình duyệt hiện tại để nhận thông báo đẩy"),
             summary("MyFirebaseInstallationController#unregister", "Ngừng nhận thông báo đẩy trên trình duyệt này"),
@@ -327,9 +340,10 @@ public class VietnameseOpenApiDocumentationConfiguration {
                     "AdminReadController", "AdminUserImportController" -> "Quản trị";
             case "SubjectController" -> "Môn học";
             case "MyCourseTeamController", "TeamRosterController" -> "Nhóm";
-            case "TeamProjectController", "ProjectDetailController" -> "Dự án";
+            case "TeamProjectController", "ProjectDetailController", "ProjectGroupWeightConfigController" -> "Dự án";
+            case "ProjectTypeController" -> "Loại dự án";
             case "ProjectIntegrationController", "ProjectIntegrationCallbackController" -> "Tích hợp dự án";
-            case "ProjectGitHubReadController" -> "GitHub";
+            case "ProjectGitHubReadController", "ProjectGitHubIssueController", "ProjectTraceabilityController" -> "GitHub";
             case "ProjectTaskReadController" -> "Jira Task";
             case "ProjectSprintController" -> "Jira Sprint";
             case "PersonalIntegrationController" -> "Tích hợp cá nhân";
@@ -337,6 +351,7 @@ public class VietnameseOpenApiDocumentationConfiguration {
                     "MyFirebaseInstallationController", "MyNotificationController" -> "Thông báo";
             case "IdentityMappingReviewController", "IntegrationCallbackResultController", "JiraIntegrationCallbackController" -> "Đồng bộ dữ liệu";
             case "LecturerAnalyticsController", "PeerReviewController", "PeerReviewDefaultRubricController", "PeerReviewRubricController" -> "Đánh giá";
+            case "AgentGatewayController" -> "Trợ lý AI";
             case "WebhookController" -> "Webhook";
             case "PrivacyPolicyController" -> "Chính sách riêng tư";
             default -> "Dự án";
@@ -400,10 +415,13 @@ public class VietnameseOpenApiDocumentationConfiguration {
                     "Dành cho giảng viên trong phạm vi Course được phân công; chỉ dùng dữ liệu SAGA đã lưu.";
             case "PeerReviewController", "PeerReviewDefaultRubricController", "PeerReviewRubricController" ->
                     "Dữ liệu được giới hạn theo Team, Sprint và quyền Peer Review hiện có.";
-            case "ProjectIntegrationController", "ProjectDetailController", "TeamProjectController" ->
+            case "ProjectIntegrationController", "ProjectDetailController", "TeamProjectController",
+                    "ProjectGroupWeightConfigController", "ProjectTypeController" ->
                     "Dữ liệu được giới hạn theo Project và quyền Project Manager hiện có.";
             case "ProjectTaskReadController", "ProjectSprintController" ->
                     "Jira là source of truth; backend xác nhận dữ liệu canonical rồi mới trả kết quả.";
+            case "AgentGatewayController" ->
+                    "Hội thoại Agent AI theo browser session; không nhận Bearer và không lộ credential provider.";
             default -> "Dữ liệu được giới hạn theo phạm vi quyền hiện có của tài khoản đang đăng nhập.";
         };
     }

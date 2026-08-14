@@ -1,5 +1,17 @@
 # SAGA Frontend Handoff
 
+## Merged main sync — 2026-08-15 (docs authority)
+
+Integrate against current merged Backend contracts (OpenAPI **149**, migration head **V32**):
+
+- **Auth:** browser `JSESSIONID` + `credentials: "include"`; CSRF on unsafe mutations; GET no CSRF; **never Bearer**.
+- **Project V1:** `GET/POST /api/project-types`; create Project requires `projectTypeId`; `PUT /api/projects/{projectId}/group-weights`.
+- **Lecturer Dashboard:** four `GET .../dashboard/*` routes; early warning remains `OVERDUE_TASK` only.
+- **Admin Dashboard V1:** `GET /api/admin/reports/anomalies` and `.../graph-processing` (ADMIN); unsupported anomaly counts are JSON `null`.
+- **AI:** only public `/api/v1/ai/**`; do not call `/internal/ai/**`. Full suite is **not** green (994/23 failures classified); contracts above remain source-confirmed.
+
+See `FRONTEND_API_INTEGRATION.md` for the detailed 2026-08-15 matrix.
+
 ## Student Team Leader — Contribution read
 
 Student có exact `RoleInTeam.LEADER` gọi API hiện hữu của chính Team:
