@@ -116,6 +116,19 @@ class CourseStudentBasicInfoIntegrationTest {
     }
 
     @Test
+    void persistedStudentAvatarUrlIsReturnedInBasicInfo() throws Exception {
+        Course course = course(lecturer("owner"));
+        Student student = student("SE000007", AccountStatus.ACTIVE);
+        student.setAvatarUrl("https://cdn.example.test/se000007.png");
+        students.save(student);
+        membership(team(course, "Team Avatar"), student, RoleInTeam.MEMBER);
+
+        request(ApplicationRole.ADMIN, UUID.randomUUID(), course, student)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.avatarUrl").value("https://cdn.example.test/se000007.png"));
+    }
+
+    @Test
     void assignedLecturerMayReadOwnCourseStudent() throws Exception {
         Lecturer owner = lecturer("assigned");
         Course course = course(owner);

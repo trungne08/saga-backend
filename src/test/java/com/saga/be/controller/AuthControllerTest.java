@@ -62,6 +62,7 @@ class AuthControllerTest {
         assertEquals(ApplicationRole.STUDENT, response.applicationRole());
         assertEquals(localProfileId, response.localProfileId());
         assertEquals(AccountStatus.ACTIVE, response.accountStatus());
+        assertNull(response.avatarUrl());
         assertEquals(
                 List.of(
                         "cognitoSub",
@@ -69,7 +70,8 @@ class AuthControllerTest {
                         "fullName",
                         "applicationRole",
                         "localProfileId",
-                        "accountStatus"
+                        "accountStatus",
+                        "avatarUrl"
                 ),
                 Arrays.stream(AuthMeResponse.class.getRecordComponents())
                         .map(component -> component.getName())
@@ -83,6 +85,27 @@ class AuthControllerTest {
                 UnauthenticatedRequestException.class,
                 () -> controller.me(null, new MockHttpServletRequest())
         );
+    }
+
+    @Test
+    void meReturnsSynchronizedAvatarUrlFromTheSessionPrincipal() {
+        UUID localProfileId = UUID.randomUUID();
+        SagaPrincipal principal = new SagaPrincipal(
+                "cognito-subject",
+                "student@fpt.edu.vn",
+                "Student Name",
+                ApplicationRole.STUDENT,
+                localProfileId,
+                AccountStatus.ACTIVE,
+                "https://cdn.example.test/student.png"
+        );
+        when(accountStatusService.currentStatusForAuthRoute(principal)).thenReturn(AccountStatus.ACTIVE);
+
+        AuthMeResponse response = controller.me(principal, new MockHttpServletRequest());
+
+        assertEquals("https://cdn.example.test/student.png", response.avatarUrl());
+        assertEquals(localProfileId, response.localProfileId());
+        assertEquals(AccountStatus.ACTIVE, response.accountStatus());
     }
 
     @Test

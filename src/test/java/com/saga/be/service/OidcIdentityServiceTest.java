@@ -61,6 +61,30 @@ class OidcIdentityServiceTest {
         assertUnverified(user(null, null));
     }
 
+    @Test
+    void extractsStandardPictureClaimWhenPresent() {
+        AuthenticatedIdentity identity = identityService.extract(userWithPicture(
+                "https://lh3.googleusercontent.com/a/safe-avatar"
+        ));
+
+        assertEquals("https://lh3.googleusercontent.com/a/safe-avatar", identity.avatarUrl());
+        assertEquals(ApplicationRole.STUDENT, identity.role());
+    }
+
+    @Test
+    void ignoresMissingPictureWithoutFailingLogin() {
+        AuthenticatedIdentity identity = identityService.extract(user(true, null));
+
+        assertEquals(null, identity.avatarUrl());
+    }
+
+    @Test
+    void ignoresUnsafePictureWithoutFailingLogin() {
+        AuthenticatedIdentity identity = identityService.extract(userWithPicture("javascript:alert(1)"));
+
+        assertEquals(null, identity.avatarUrl());
+    }
+
     private void assertUnverified(OidcUser user) {
         InvalidIdentityException exception = assertThrows(
                 InvalidIdentityException.class,
@@ -99,6 +123,27 @@ class OidcIdentityServiceTest {
                 List.of(new SimpleGrantedAuthority("OIDC_USER")),
                 idToken,
                 userInfo
+        );
+    }
+
+    private OidcUser userWithPicture(String picture) {
+        Map<String, Object> idTokenClaims = new java.util.HashMap<>();
+        idTokenClaims.put("sub", "cognito-subject");
+        idTokenClaims.put("email", "student@fpt.edu.vn");
+        idTokenClaims.put("name", "Student User");
+        idTokenClaims.put("email_verified", true);
+        idTokenClaims.put("cognito:groups", List.of("STUDENT"));
+        idTokenClaims.put("picture", picture);
+        Instant issuedAt = Instant.now();
+        OidcIdToken idToken = new OidcIdToken(
+                "test-id-token",
+                issuedAt,
+                issuedAt.plusSeconds(300),
+                idTokenClaims
+        );
+        return new DefaultOidcUser(
+                List.of(new SimpleGrantedAuthority("OIDC_USER")),
+                idToken
         );
     }
 }

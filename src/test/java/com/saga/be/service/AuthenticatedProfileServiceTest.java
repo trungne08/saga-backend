@@ -452,6 +452,100 @@ class AuthenticatedProfileServiceTest {
         }
     }
 
+    @Test
+    void persistsAvatarWhenPictureIsPresentOnCreate() {
+        String subject = "avatar-student-subject";
+        String email = "avatartdse170506@fpt.edu.vn";
+        UUID profileId = UUID.randomUUID();
+        stubNoSubjectMatches(subject);
+        stubNoEmailMatches(email);
+        when(studentRepository.saveAndFlush(any(Student.class))).thenAnswer(invocation -> {
+            Student student = invocation.getArgument(0);
+            student.setId(profileId);
+            return student;
+        });
+
+        AuthenticatedProfile profile = profileService.synchronize(new AuthenticatedIdentity(
+                subject,
+                email,
+                "Avatar Student",
+                ApplicationRole.STUDENT,
+                "https://cdn.example.test/student.png"
+        ));
+
+        ArgumentCaptor<Student> studentCaptor = ArgumentCaptor.forClass(Student.class);
+        verify(studentRepository).saveAndFlush(studentCaptor.capture());
+        assertEquals("https://cdn.example.test/student.png", studentCaptor.getValue().getAvatarUrl());
+        assertEquals("https://cdn.example.test/student.png", profile.avatarUrl());
+        assertEquals(AccountStatus.ACTIVE, profile.accountStatus());
+        assertEquals(profileId, profile.localProfileId());
+    }
+
+    @Test
+    void updatesAvatarWhenPictureChangesOnNextLogin() {
+        String subject = "existing-avatar-subject";
+        String email = "studenthe123456@fpt.edu.vn";
+        Student existing = Student.builder()
+                .cognitoSub(subject)
+                .email(email)
+                .fullName("Existing Student")
+                .studentCode("HE123456")
+                .avatarUrl("https://cdn.example.test/old.png")
+                .accountStatus(AccountStatus.ACTIVE)
+                .build();
+        existing.setId(UUID.randomUUID());
+        when(adminRepository.findByCognitoSub(subject)).thenReturn(Optional.empty());
+        when(lecturerRepository.findByCognitoSub(subject)).thenReturn(Optional.empty());
+        when(studentRepository.findByCognitoSub(subject)).thenReturn(Optional.of(existing));
+        when(studentRepository.findForIdentityBindingById(existing.getId()))
+                .thenReturn(Optional.of(existing));
+        when(studentRepository.saveAndFlush(existing)).thenReturn(existing);
+
+        AuthenticatedProfile profile = profileService.synchronize(new AuthenticatedIdentity(
+                subject,
+                email,
+                "Existing Student",
+                ApplicationRole.STUDENT,
+                "https://cdn.example.test/new.png"
+        ));
+
+        assertEquals("https://cdn.example.test/new.png", existing.getAvatarUrl());
+        assertEquals("https://cdn.example.test/new.png", profile.avatarUrl());
+        assertEquals(AccountStatus.ACTIVE, existing.getAccountStatus());
+        assertEquals(subject, existing.getCognitoSub());
+    }
+
+    @Test
+    void keepsStoredAvatarWhenPictureIsAbsentOnNextLogin() {
+        String subject = "keep-avatar-subject";
+        String email = "studenthe123456@fpt.edu.vn";
+        Student existing = Student.builder()
+                .cognitoSub(subject)
+                .email(email)
+                .fullName("Existing Student")
+                .studentCode("HE123456")
+                .avatarUrl("https://cdn.example.test/keep.png")
+                .accountStatus(AccountStatus.ACTIVE)
+                .build();
+        existing.setId(UUID.randomUUID());
+        when(adminRepository.findByCognitoSub(subject)).thenReturn(Optional.empty());
+        when(lecturerRepository.findByCognitoSub(subject)).thenReturn(Optional.empty());
+        when(studentRepository.findByCognitoSub(subject)).thenReturn(Optional.of(existing));
+        when(studentRepository.findForIdentityBindingById(existing.getId()))
+                .thenReturn(Optional.of(existing));
+        when(studentRepository.saveAndFlush(existing)).thenReturn(existing);
+
+        AuthenticatedProfile profile = profileService.synchronize(new AuthenticatedIdentity(
+                subject,
+                email,
+                "Existing Student",
+                ApplicationRole.STUDENT
+        ));
+
+        assertEquals("https://cdn.example.test/keep.png", existing.getAvatarUrl());
+        assertEquals("https://cdn.example.test/keep.png", profile.avatarUrl());
+    }
+
     private void stubImportedStudentForBinding(String subject, String email, Student imported) {
         stubNoSubjectMatches(subject);
         when(adminRepository.findByEmailIgnoreCase(email)).thenReturn(Optional.empty());

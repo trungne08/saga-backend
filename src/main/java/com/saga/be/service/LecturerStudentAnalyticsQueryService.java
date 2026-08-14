@@ -36,7 +36,7 @@ public class LecturerStudentAnalyticsQueryService {
 
     @Transactional(readOnly = true)
     public LecturerAnalyticsResponses.StudentProgress progress(SagaPrincipal principal, UUID courseId, UUID studentId) {
-        TeamMember membership = authorization.requireStudentInCourse(principal, courseId, studentId);
+        TeamMember membership = authorization.requireStudentProgressAccess(principal, courseId, studentId);
         Team team = membership.getTeam();
         if (team.getProject() == null) {
             return new LecturerAnalyticsResponses.StudentProgress(courseId, studentId, team.getId(), null,

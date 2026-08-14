@@ -1,0 +1,8 @@
+ALTER TABLE student
+    ADD COLUMN avatar_url VARCHAR(2048) NULL;
+
+ALTER TABLE lecturer
+    ADD COLUMN avatar_url VARCHAR(2048) NULL;
+
+ALTER TABLE admin
+    ADD COLUMN avatar_url VARCHAR(2048) NULL;

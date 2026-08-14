@@ -30,7 +30,7 @@ public record CourseStudentBasicInfoResponse(
                 student.getStudentCode(),
                 student.getFullName(),
                 student.getEmail(),
-                null,
+                student.getAvatarUrl(),
                 student.getAccountStatus(),
                 new TeamInfo(
                         team.getId(),

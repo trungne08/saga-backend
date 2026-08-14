@@ -2,6 +2,7 @@ package com.saga.be.service;
 
 import com.saga.be.dto.request.ContributionOverrideDecisionRequest;
 import com.saga.be.dto.request.CourseContributionSliceWeightRequest;
+import com.saga.be.dto.request.CourseContributionSliceWeightUpdateRequest;
 import com.saga.be.dto.response.CourseContributionSliceWeightRequestResponse;
 import com.saga.be.dto.response.CourseContributionSliceWeightResponse;
 import com.saga.be.entity.Admin;
@@ -40,10 +41,25 @@ public class CourseContributionWeightService {
     private final AdminRepository adminRepository;
 
     @Transactional(readOnly = true)
-    public CourseContributionSliceWeightResponse getCurrentWeights(UUID courseId) {
-        Course course = requireCourse(courseId);
+    public CourseContributionSliceWeightResponse getCurrentWeights(SagaPrincipal principal, UUID courseId) {
+        Course course = requireReadableCourse(principal, courseId);
         ContributionSliceWeights weights = ContributionSliceWeights.fromCourse(course);
         return toCurrentWeightResponse(course, weights);
+    }
+
+    @Transactional
+    public CourseContributionSliceWeightResponse updateCurrentWeights(
+            SagaPrincipal principal,
+            UUID courseId,
+            CourseContributionSliceWeightUpdateRequest request
+    ) {
+        Course course = requireLecturerOwnedCourse(principal, courseId);
+        ContributionSliceWeights requestedWeights = validateDirectWeights(request);
+        course.setCodeContributionWeight(requestedWeights.codeValue());
+        course.setDocumentContributionWeight(requestedWeights.documentValue());
+        course.setDesignContributionWeight(requestedWeights.designValue());
+        Course saved = courseRepository.save(course);
+        return toCurrentWeightResponse(saved, ContributionSliceWeights.fromCourse(saved));
     }
 
     @Transactional
@@ -197,27 +213,74 @@ public class CourseContributionWeightService {
         return toRequestResponse(savedRequest, course);
     }
 
-    private ContributionSliceWeights validateRequestedWeights(CourseContributionSliceWeightRequest request) {
-        if (request.codeWeight() == null
-                || request.documentWeight() == null
-                || request.designWeight() == null) {
+    private ContributionSliceWeights validateDirectWeights(CourseContributionSliceWeightUpdateRequest request) {
+        if (request == null) {
             throw new ResponseStatusException(
                     HttpStatus.BAD_REQUEST,
                     "Code, document, and design weights are all required"
             );
         }
-        if (request.codeWeight() < 0.0 || request.documentWeight() < 0.0 || request.designWeight() < 0.0) {
+        return validateWeightValues(request.codeWeight(), request.documentWeight(), request.designWeight());
+    }
+
+    private ContributionSliceWeights validateRequestedWeights(CourseContributionSliceWeightRequest request) {
+        return validateWeightValues(request.codeWeight(), request.documentWeight(), request.designWeight());
+    }
+
+    private ContributionSliceWeights validateWeightValues(
+            Double codeWeight,
+            Double documentWeight,
+            Double designWeight
+    ) {
+        if (codeWeight == null || documentWeight == null || designWeight == null) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Code, document, and design weights are all required"
+            );
+        }
+        if (codeWeight < 0.0 || documentWeight < 0.0 || designWeight < 0.0) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Slice weights must be non-negative");
         }
-        double total = request.codeWeight() + request.documentWeight() + request.designWeight();
+        double total = codeWeight + documentWeight + designWeight;
         if (Math.abs(total - EXPECTED_WEIGHT_TOTAL) > WEIGHT_TOLERANCE) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Slice weights must add up to 100");
         }
         return ContributionSliceWeights.normalizeConfigured(
-                java.math.BigDecimal.valueOf(request.codeWeight()),
-                java.math.BigDecimal.valueOf(request.documentWeight()),
-                java.math.BigDecimal.valueOf(request.designWeight())
+                java.math.BigDecimal.valueOf(codeWeight),
+                java.math.BigDecimal.valueOf(documentWeight),
+                java.math.BigDecimal.valueOf(designWeight)
         );
+    }
+
+    private Course requireReadableCourse(SagaPrincipal principal, UUID courseId) {
+        Course course = requireCourse(courseId);
+        if (principal == null || principal.localProfileId() == null) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Authentication is required");
+        }
+        if (principal.applicationRole() == ApplicationRole.ADMIN) {
+            return course;
+        }
+        requireLecturerOwnsCourse(principal, course);
+        return course;
+    }
+
+    private Course requireLecturerOwnedCourse(SagaPrincipal principal, UUID courseId) {
+        Course course = requireCourse(courseId);
+        requireLecturerOwnsCourse(principal, course);
+        return course;
+    }
+
+    private void requireLecturerOwnsCourse(SagaPrincipal principal, Course course) {
+        if (principal == null
+                || principal.applicationRole() != ApplicationRole.LECTURER
+                || principal.localProfileId() == null
+                || course.getInstructor() == null
+                || !Objects.equals(course.getInstructor().getId(), principal.localProfileId())) {
+            throw new ResponseStatusException(
+                    HttpStatus.FORBIDDEN,
+                    "Only the assigned lecturer can manage slice weights for this course"
+            );
+        }
     }
 
     private Course requireCourse(UUID courseId) {

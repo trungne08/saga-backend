@@ -2,6 +2,7 @@ package com.saga.be.controller;
 
 import com.saga.be.dto.request.ContributionOverrideDecisionRequest;
 import com.saga.be.dto.request.CourseContributionSliceWeightRequest;
+import com.saga.be.dto.request.CourseContributionSliceWeightUpdateRequest;
 import com.saga.be.dto.response.CourseContributionSliceWeightRequestResponse;
 import com.saga.be.dto.response.CourseContributionSliceWeightResponse;
 import com.saga.be.entity.enums.PolicyOverrideStatus;
@@ -33,9 +34,20 @@ public class CourseContributionWeightController {
     @GetMapping("/{courseId}/contribution-slice-weights")
     @PreAuthorize("hasAnyRole('ADMIN', 'LECTURER')")
     public ResponseEntity<CourseContributionSliceWeightResponse> getCurrentWeights(
+            @AuthenticationPrincipal SagaPrincipal principal,
             @PathVariable UUID courseId
     ) {
-        return ResponseEntity.ok(courseContributionWeightService.getCurrentWeights(courseId));
+        return ResponseEntity.ok(courseContributionWeightService.getCurrentWeights(principal, courseId));
+    }
+
+    @PutMapping("/{courseId}/contribution-slice-weights")
+    @PreAuthorize("hasRole('LECTURER')")
+    public ResponseEntity<CourseContributionSliceWeightResponse> updateCurrentWeights(
+            @AuthenticationPrincipal SagaPrincipal principal,
+            @PathVariable UUID courseId,
+            @RequestBody CourseContributionSliceWeightUpdateRequest request
+    ) {
+        return ResponseEntity.ok(courseContributionWeightService.updateCurrentWeights(principal, courseId, request));
     }
 
     @PostMapping("/{courseId}/contribution-slice-weight-requests")

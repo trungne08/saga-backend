@@ -7,7 +7,9 @@ import static org.mockito.Mockito.when;
 
 import com.saga.be.dto.request.ContributionOverrideDecisionRequest;
 import com.saga.be.dto.request.CourseContributionSliceWeightRequest;
+import com.saga.be.dto.request.CourseContributionSliceWeightUpdateRequest;
 import com.saga.be.dto.response.CourseContributionSliceWeightRequestResponse;
+import com.saga.be.dto.response.CourseContributionSliceWeightResponse;
 import com.saga.be.entity.Admin;
 import com.saga.be.entity.Course;
 import com.saga.be.entity.Lecturer;
@@ -234,6 +236,79 @@ class CourseContributionWeightServiceTest {
         );
 
         assertEquals("400 BAD_REQUEST \"Slice weights must add up to 100\"", exception.getMessage());
+    }
+
+    @Test
+    void lecturerOwnerCanUpdateCourseWeightsDirectlyWithoutAdminDecision() {
+        UUID courseId = UUID.randomUUID();
+        UUID lecturerId = UUID.randomUUID();
+        Course course = entityWithId(new Course(), courseId);
+        course.setCourseCode("SE101");
+        course.setName("Software Engineering");
+        Lecturer lecturer = entityWithId(new Lecturer(), lecturerId);
+        course.setInstructor(lecturer);
+        when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
+        when(courseRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        CourseContributionSliceWeightResponse response = service.updateCurrentWeights(
+                principal(ApplicationRole.LECTURER, lecturerId),
+                courseId,
+                new CourseContributionSliceWeightUpdateRequest(30.0, 20.0, 50.0)
+        );
+
+        assertEquals(30.0, response.codeWeight(), 0.0001);
+        assertEquals(20.0, response.documentWeight(), 0.0001);
+        assertEquals(50.0, response.designWeight(), 0.0001);
+        assertEquals(30.0, course.getCodeContributionWeight(), 0.0001);
+    }
+
+    @Test
+    void lecturerCannotDirectlyUpdateAnotherCourseAndStudentIsForbidden() {
+        UUID courseId = UUID.randomUUID();
+        Course course = entityWithId(new Course(), courseId);
+        course.setInstructor(entityWithId(new Lecturer(), UUID.randomUUID()));
+        when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
+
+        assertThrows(ResponseStatusException.class, () -> service.updateCurrentWeights(
+                principal(ApplicationRole.LECTURER, UUID.randomUUID()),
+                courseId,
+                new CourseContributionSliceWeightUpdateRequest(30.0, 20.0, 50.0)
+        ));
+        assertThrows(ResponseStatusException.class, () -> service.updateCurrentWeights(
+                principal(ApplicationRole.STUDENT, UUID.randomUUID()),
+                courseId,
+                new CourseContributionSliceWeightUpdateRequest(30.0, 20.0, 50.0)
+        ));
+        assertThrows(ResponseStatusException.class, () -> service.updateCurrentWeights(
+                principal(ApplicationRole.ADMIN, UUID.randomUUID()),
+                courseId,
+                new CourseContributionSliceWeightUpdateRequest(30.0, 20.0, 50.0)
+        ));
+    }
+
+    @Test
+    void lecturerCanReadOwnCourseWeightsButNotAnotherCourse() {
+        UUID courseId = UUID.randomUUID();
+        UUID lecturerId = UUID.randomUUID();
+        Course course = entityWithId(new Course(), courseId);
+        course.setCourseCode("SE101");
+        course.setName("Software Engineering");
+        course.setCodeContributionWeight(30.0);
+        course.setDocumentContributionWeight(20.0);
+        course.setDesignContributionWeight(50.0);
+        course.setInstructor(entityWithId(new Lecturer(), lecturerId));
+        when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
+
+        CourseContributionSliceWeightResponse response = service.getCurrentWeights(
+                principal(ApplicationRole.LECTURER, lecturerId),
+                courseId
+        );
+        assertEquals(30.0, response.codeWeight(), 0.0001);
+
+        assertThrows(ResponseStatusException.class, () -> service.getCurrentWeights(
+                principal(ApplicationRole.LECTURER, UUID.randomUUID()),
+                courseId
+        ));
     }
 
     private <T extends com.saga.be.entity.BaseEntity> T entityWithId(T entity, UUID id) {

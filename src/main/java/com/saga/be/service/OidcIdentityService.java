@@ -45,7 +45,23 @@ public class OidcIdentityService {
                         "No supported Cognito application group was assigned"
                 ));
 
-        return new AuthenticatedIdentity(subject, email, fullName, role);
+        return new AuthenticatedIdentity(subject, email, fullName, role, optionalAvatarUrl(user));
+    }
+
+    private String optionalAvatarUrl(OidcUser user) {
+        String picture = user.getPicture();
+        if (picture == null || picture.isBlank()) {
+            Object idTokenPicture = user.getIdToken() == null
+                    ? null
+                    : user.getIdToken().getClaim("picture");
+            if (idTokenPicture instanceof String idTokenValue) {
+                picture = idTokenValue;
+            }
+        }
+        if (picture == null || picture.isBlank()) {
+            picture = user.getClaimAsString("picture");
+        }
+        return OidcAvatarUrl.sanitize(picture);
     }
 
     private String requireText(String value, String message) {

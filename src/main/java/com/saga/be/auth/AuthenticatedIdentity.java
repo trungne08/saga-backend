@@ -6,6 +6,15 @@ public record AuthenticatedIdentity(
         String cognitoSub,
         String email,
         String fullName,
-        ApplicationRole role
+        ApplicationRole role,
+        String avatarUrl
 ) {
+    public AuthenticatedIdentity(
+            String cognitoSub,
+            String email,
+            String fullName,
+            ApplicationRole role
+    ) {
+        this(cognitoSub, email, fullName, role, null);
+    }
 }

@@ -240,6 +240,7 @@ public class AuthenticatedProfileService {
         if (student.getAccountStatus() == AccountStatus.PENDING) {
             student.setAccountStatus(AccountStatus.ACTIVE);
         }
+        applyAvatarIfPresent(student, identity);
         Student saved = studentRepository.saveAndFlush(student);
         return toProfile(saved);
     }
@@ -321,6 +322,7 @@ public class AuthenticatedProfileService {
         admin.setCognitoSub(identity.cognitoSub());
         admin.setEmail(identity.email());
         admin.setFullName(identity.fullName());
+        applyAvatarIfPresent(admin, identity);
         Admin saved = adminRepository.saveAndFlush(admin);
         return toProfile(saved);
     }
@@ -332,6 +334,7 @@ public class AuthenticatedProfileService {
         lecturer.setCognitoSub(identity.cognitoSub());
         lecturer.setEmail(identity.email());
         lecturer.setFullName(identity.fullName());
+        applyAvatarIfPresent(lecturer, identity);
         if (lecturer.getAccountStatus() == null) {
             lecturer.setAccountStatus(AccountStatus.ACTIVE);
         }
@@ -348,6 +351,7 @@ public class AuthenticatedProfileService {
         student.setCognitoSub(identity.cognitoSub());
         student.setEmail(identity.email());
         student.setFullName(identity.fullName());
+        applyAvatarIfPresent(student, identity);
         if (student.getAccountStatus() == null) {
             student.setAccountStatus(AccountStatus.PENDING);
         }
@@ -383,6 +387,7 @@ public class AuthenticatedProfileService {
                         .cognitoSub(identity.cognitoSub())
                         .email(identity.email())
                         .fullName(identity.fullName())
+                        .avatarUrl(identity.avatarUrl())
                         .build();
                 yield toProfile(adminRepository.saveAndFlush(admin));
             }
@@ -391,6 +396,7 @@ public class AuthenticatedProfileService {
                         .cognitoSub(identity.cognitoSub())
                         .email(identity.email())
                         .fullName(identity.fullName())
+                        .avatarUrl(identity.avatarUrl())
                         .accountStatus(AccountStatus.ACTIVE)
                         .build();
                 yield toProfile(lecturerRepository.saveAndFlush(lecturer));
@@ -400,6 +406,7 @@ public class AuthenticatedProfileService {
                         .cognitoSub(identity.cognitoSub())
                         .email(identity.email())
                         .fullName(identity.fullName())
+                        .avatarUrl(identity.avatarUrl())
                         .studentCode(extractedStudentCode)
                         .accountStatus(AccountStatus.ACTIVE)
                         .build();
@@ -415,7 +422,8 @@ public class AuthenticatedProfileService {
                 admin.getFullName(),
                 ApplicationRole.ADMIN,
                 admin.getId(),
-                null
+                null,
+                admin.getAvatarUrl()
         );
     }
 
@@ -426,7 +434,8 @@ public class AuthenticatedProfileService {
                 lecturer.getFullName(),
                 ApplicationRole.LECTURER,
                 lecturer.getId(),
-                lecturer.getAccountStatus()
+                lecturer.getAccountStatus(),
+                lecturer.getAvatarUrl()
         );
     }
 
@@ -437,7 +446,8 @@ public class AuthenticatedProfileService {
                 student.getFullName(),
                 ApplicationRole.STUDENT,
                 student.getId(),
-                student.getAccountStatus()
+                student.getAccountStatus(),
+                student.getAvatarUrl()
         );
     }
 
@@ -447,9 +457,28 @@ public class AuthenticatedProfileService {
             String fullName,
             ApplicationRole role,
             UUID id,
-            AccountStatus status
+            AccountStatus status,
+            String avatarUrl
     ) {
-        return new AuthenticatedProfile(cognitoSub, email, fullName, role, id, status);
+        return new AuthenticatedProfile(cognitoSub, email, fullName, role, id, status, avatarUrl);
+    }
+
+    private void applyAvatarIfPresent(Admin admin, AuthenticatedIdentity identity) {
+        if (identity.avatarUrl() != null) {
+            admin.setAvatarUrl(identity.avatarUrl());
+        }
+    }
+
+    private void applyAvatarIfPresent(Lecturer lecturer, AuthenticatedIdentity identity) {
+        if (identity.avatarUrl() != null) {
+            lecturer.setAvatarUrl(identity.avatarUrl());
+        }
+    }
+
+    private void applyAvatarIfPresent(Student student, AuthenticatedIdentity identity) {
+        if (identity.avatarUrl() != null) {
+            student.setAvatarUrl(identity.avatarUrl());
+        }
     }
 
     private String cognitoSub(BaseEntity entity) {

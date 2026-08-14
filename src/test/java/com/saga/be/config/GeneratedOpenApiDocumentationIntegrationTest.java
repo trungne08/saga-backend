@@ -94,8 +94,8 @@ class GeneratedOpenApiDocumentationIntegrationTest {
             }
         }
 
-        assertEquals(149, operationCount,
-                "Merged main gồm Admin reports, Lecturer dashboard, Project Type/weights và public Agent AI routes");
+        assertEquals(150, operationCount,
+                "Merged main plus Lecturer direct Course slice-weight PUT");
         System.out.println("Generated OpenAPI operation count: " + operationCount);
         assertEquals(usedTags, documentedTags, "Global tags phải đúng bằng tập tag thực sự có operation");
         assertEquals(documentedTags.size(), root.path("tags").size(), "Global tags không được trùng tên");
@@ -114,6 +114,7 @@ class GeneratedOpenApiDocumentationIntegrationTest {
         assertTrue(root.path("paths").has("/api/project-types"));
         assertTrue(root.at("/paths/~1api~1projects~1{projectId}~1group-weights/put").isObject());
         assertTrue(root.at("/paths/~1api~1teams~1{teamId}~1projects/post").isObject());
+        assertTrue(root.at("/paths/~1api~1v1~1courses~1{courseId}~1contribution-slice-weights/put").isObject());
         assertTrue(root.at("/paths/~1api~1v1~1courses~1{courseId}~1dashboard~1teams-progress/get").isObject());
         assertTrue(root.at("/paths/~1api~1v1~1courses~1{courseId}~1dashboard~1contribution-summary/get").isObject());
         assertTrue(root.at("/paths/~1api~1v1~1courses~1{courseId}~1dashboard~1trends/get").isObject());

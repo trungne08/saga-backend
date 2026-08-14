@@ -6,6 +6,7 @@ import static org.mockito.Mockito.when;
 
 import com.saga.be.entity.Course;
 import com.saga.be.entity.Lecturer;
+import com.saga.be.entity.Student;
 import com.saga.be.entity.Team;
 import com.saga.be.entity.TeamMember;
 import com.saga.be.entity.enums.RoleInTeam;
@@ -119,6 +120,59 @@ class LecturerAnalyticsAuthorizationServiceTest {
     }
 
     @Test
+    void memberMayReadOwnProgressButNotATeammate() {
+        UUID courseId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
+        UUID memberId = UUID.randomUUID();
+        UUID teammateId = UUID.randomUUID();
+        Course course = id(new Course(), courseId);
+        Team team = id(new Team(), teamId);
+        team.setCourse(course);
+        TeamMember member = membership(team, memberId, RoleInTeam.MEMBER);
+        TeamMember teammate = membership(team, teammateId, RoleInTeam.MEMBER);
+        when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
+        when(teamMemberRepository.findByStudentIdAndTeamCourseId(memberId, courseId)).thenReturn(java.util.List.of(member));
+        when(teamMemberRepository.findByStudentIdAndTeamCourseId(teammateId, courseId)).thenReturn(java.util.List.of(teammate));
+
+        assertSame(member, service.requireStudentProgressAccess(principal(ApplicationRole.STUDENT, memberId), courseId, memberId));
+        assertThrows(AccessDeniedException.class,
+                () -> service.requireStudentProgressAccess(principal(ApplicationRole.STUDENT, memberId), courseId, teammateId));
+    }
+
+    @Test
+    void leaderMayReadSameTeamProgressButNotAnotherTeamOrMentor() {
+        UUID courseId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
+        UUID otherTeamId = UUID.randomUUID();
+        UUID leaderId = UUID.randomUUID();
+        UUID memberId = UUID.randomUUID();
+        UUID otherTeamMemberId = UUID.randomUUID();
+        UUID mentorId = UUID.randomUUID();
+        Course course = id(new Course(), courseId);
+        Team team = id(new Team(), teamId);
+        team.setCourse(course);
+        Team otherTeam = id(new Team(), otherTeamId);
+        otherTeam.setCourse(course);
+        TeamMember leader = membership(team, leaderId, RoleInTeam.LEADER);
+        TeamMember member = membership(team, memberId, RoleInTeam.MEMBER);
+        TeamMember otherTeamMember = membership(otherTeam, otherTeamMemberId, RoleInTeam.MEMBER);
+        TeamMember mentor = membership(team, mentorId, RoleInTeam.MENTOR);
+        when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
+        when(teamMemberRepository.findByStudentIdAndTeamCourseId(leaderId, courseId)).thenReturn(java.util.List.of(leader));
+        when(teamMemberRepository.findByStudentIdAndTeamCourseId(memberId, courseId)).thenReturn(java.util.List.of(member));
+        when(teamMemberRepository.findByStudentIdAndTeamCourseId(otherTeamMemberId, courseId))
+                .thenReturn(java.util.List.of(otherTeamMember));
+        when(teamMemberRepository.findByStudentIdAndTeamCourseId(mentorId, courseId)).thenReturn(java.util.List.of(mentor));
+
+        assertSame(leader, service.requireStudentProgressAccess(principal(ApplicationRole.STUDENT, leaderId), courseId, leaderId));
+        assertSame(member, service.requireStudentProgressAccess(principal(ApplicationRole.STUDENT, leaderId), courseId, memberId));
+        assertThrows(AccessDeniedException.class,
+                () -> service.requireStudentProgressAccess(principal(ApplicationRole.STUDENT, leaderId), courseId, otherTeamMemberId));
+        assertThrows(AccessDeniedException.class,
+                () -> service.requireStudentProgressAccess(principal(ApplicationRole.STUDENT, mentorId), courseId, memberId));
+    }
+
+    @Test
     void graphReadAllowsAdminOwningLecturerLeaderAndMemberForTheExactTeam() {
         UUID courseId = UUID.randomUUID();
         UUID teamId = UUID.randomUUID();
@@ -186,6 +240,15 @@ class LecturerAnalyticsAuthorizationServiceTest {
                 () -> service.requireGraphReadAccess(
                         principal(ApplicationRole.ADMIN, UUID.randomUUID()), requestedCourseId, teamId));
         org.junit.jupiter.api.Assertions.assertEquals(404, exception.getStatusCode().value());
+    }
+
+    private TeamMember membership(Team team, UUID studentId, RoleInTeam role) {
+        Student student = id(new Student(), studentId);
+        TeamMember membership = new TeamMember();
+        membership.setTeam(team);
+        membership.setStudent(student);
+        membership.setRoleInTeam(role);
+        return membership;
     }
 
     private <T> T id(T entity, UUID id) {

@@ -11,7 +11,8 @@ public record AuthMeResponse(
         String fullName,
         ApplicationRole applicationRole,
         UUID localProfileId,
-        AccountStatus accountStatus
+        AccountStatus accountStatus,
+        String avatarUrl
 ) {
     public static AuthMeResponse from(SagaPrincipal principal) {
         return from(principal, principal.accountStatus());
@@ -24,7 +25,8 @@ public record AuthMeResponse(
                 principal.fullName(),
                 principal.applicationRole(),
                 principal.localProfileId(),
-                accountStatus
+                accountStatus,
+                principal.avatarUrl()
         );
     }
 }

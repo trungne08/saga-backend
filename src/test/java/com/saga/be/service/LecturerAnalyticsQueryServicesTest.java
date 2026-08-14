@@ -115,7 +115,7 @@ class LecturerAnalyticsQueryServicesTest {
     @Test
     void progressWithNoTasksDoesNotDivideByZeroAndShowsUnclassifiedCount() {
         Fixture f = fixture(true);
-        when(f.authorization.requireStudentInCourse(any(), any(), any())).thenReturn(f.membership);
+        when(f.authorization.requireStudentProgressAccess(any(), any(), any())).thenReturn(f.membership);
         when(f.tasks.findByProjectIdAndAssigneeId(f.projectId, f.studentId)).thenReturn(List.of());
         LecturerStudentAnalyticsQueryService service = new LecturerStudentAnalyticsQueryService(
                 f.authorization, f.tasks, f.commits, f.documents);

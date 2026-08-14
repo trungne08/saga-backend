@@ -102,6 +102,7 @@ public class LecturerAnalyticsController {
     }
 
     @GetMapping("/students/{studentId}/progress")
+    @PreAuthorize("hasAnyRole('ADMIN', 'LECTURER', 'STUDENT')")
     public ResponseEntity<LecturerAnalyticsResponses.StudentProgress> progress(
             @AuthenticationPrincipal SagaPrincipal principal, @PathVariable UUID courseId,
             @PathVariable UUID studentId) {
