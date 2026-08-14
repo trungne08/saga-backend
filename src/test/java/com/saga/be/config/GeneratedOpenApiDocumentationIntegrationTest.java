@@ -94,7 +94,7 @@ class GeneratedOpenApiDocumentationIntegrationTest {
             }
         }
 
-        assertEquals(131, operationCount, "Traceability milestone phải thêm đúng sáu API operation");
+        assertEquals(133, operationCount, "Admin dashboard V1 thêm đúng hai API report operation");
         System.out.println("Generated OpenAPI operation count: " + operationCount);
         assertEquals(usedTags, documentedTags, "Global tags phải đúng bằng tập tag thực sự có operation");
         assertEquals(documentedTags.size(), root.path("tags").size(), "Global tags không được trùng tên");
@@ -106,6 +106,8 @@ class GeneratedOpenApiDocumentationIntegrationTest {
                                 && "bearer".equalsIgnoreCase(entry.getValue().path("scheme").asText()),
                         () -> "Không được sinh Bearer security scheme: " + entry.getKey()));
 
+        assertTrue(root.path("paths").has("/api/admin/reports/anomalies"));
+        assertTrue(root.path("paths").has("/api/admin/reports/graph-processing"));
         assertTrue(root.at("/paths/~1api~1projects~1{projectId}~1github~1issues/get").isObject());
         assertTrue(root.at("/paths/~1api~1projects~1{projectId}~1github~1issues~1{issueId}/get").isObject());
         assertTrue(root.at("/paths/~1api~1v1~1projects~1{projectId}~1tasks~1{taskId}~1github-issues~1{issueId}/post").isObject());

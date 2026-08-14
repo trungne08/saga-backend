@@ -60,6 +60,28 @@ public interface TaskRepository extends JpaRepository<Task, UUID>, JpaSpecificat
 
     List<Task> findByProjectCourseId(UUID courseId);
 
+    /**
+     * Global count matching Course early-warning OVERDUE_TASK:
+     * dueDate before nowUtc, status not DONE (null status counts), project and assignee present,
+     * and assignee is a TeamMember of a Team that owns the task Project.
+     */
+    @Query("""
+            select count(task)
+            from Task task
+            where task.dueDate is not null
+              and task.dueDate < :nowUtc
+              and (task.status is null or task.status <> com.saga.be.entity.enums.TaskStatus.DONE)
+              and task.project is not null
+              and task.assignee is not null
+              and exists (
+                  select 1
+                  from TeamMember member
+                  where member.team.project.id = task.project.id
+                    and member.student.id = task.assignee.id
+              )
+            """)
+    long countOverdueAssignedTeamMemberTasks(@Param("nowUtc") LocalDateTime nowUtc);
+
     boolean existsByProjectCourseIdAndAssigneeId(UUID courseId, UUID assigneeId);
 
     boolean existsByProjectCourseIdAndReporterId(UUID courseId, UUID reporterId);
