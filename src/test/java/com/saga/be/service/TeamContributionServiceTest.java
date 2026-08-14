@@ -17,6 +17,7 @@ import com.saga.be.entity.Sprint;
 import com.saga.be.entity.Student;
 import com.saga.be.entity.Subject;
 import com.saga.be.entity.Task;
+import com.saga.be.entity.ProjectGroupWeightConfig;
 import com.saga.be.entity.Team;
 import com.saga.be.entity.TeamMember;
 import com.saga.be.entity.enums.DocumentType;
@@ -27,13 +28,17 @@ import com.saga.be.repository.DocumentRepository;
 import com.saga.be.repository.LecturerRepository;
 import com.saga.be.repository.PeerReviewRepository;
 import com.saga.be.repository.PolicyOverrideRequestRepository;
+import com.saga.be.repository.ProjectGroupWeightConfigRepository;
 import com.saga.be.repository.SprintRepository;
 import com.saga.be.repository.TaskRepository;
 import com.saga.be.repository.TeamMemberRepository;
 import com.saga.be.repository.TeamRepository;
 import com.saga.be.security.ApplicationRole;
 import com.saga.be.security.SagaPrincipal;
+import com.saga.be.service.contribution.ContributionSliceWeightResolver;
+import java.math.BigDecimal;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -72,6 +77,9 @@ class TeamContributionServiceTest {
     @Mock
     private LecturerRepository lecturerRepository;
 
+    @Mock
+    private ProjectGroupWeightConfigRepository projectGroupWeightConfigRepository;
+
     private TeamContributionService service;
 
     @BeforeEach
@@ -85,7 +93,8 @@ class TeamContributionServiceTest {
                 peerReviewRepository,
                 sprintRepository,
                 policyOverrideRequestRepository,
-                lecturerRepository
+                lecturerRepository,
+                new ContributionSliceWeightResolver(projectGroupWeightConfigRepository)
         );
     }
 
@@ -286,6 +295,135 @@ class TeamContributionServiceTest {
 
         assertEquals(75.0, alice.finalContributionPercentage(), 0.001);
         assertEquals(25.0, bob.finalContributionPercentage(), 0.001);
+    }
+
+    @Test
+    void exactProjectGroupWeightConfigOverridesCourseSliceWeights() {
+        SliceWeightFixture fixture = sliceWeightFixture();
+
+        when(projectGroupWeightConfigRepository.findByProjectId(fixture.projectId()))
+                .thenReturn(Optional.of(ProjectGroupWeightConfig.builder()
+                        .project(fixture.project())
+                        .team(fixture.team())
+                        .codeWeight(new BigDecimal("0.2"))
+                        .documentWeight(new BigDecimal("0.3"))
+                        .designWeight(new BigDecimal("0.5"))
+                        .build()));
+
+        TeamContributionEvaluationResponse response = service.evaluate(
+                principal(ApplicationRole.ADMIN, UUID.randomUUID()),
+                fixture.teamId()
+        );
+
+        var alice = response.members().stream()
+                .filter(member -> member.studentId().equals(fixture.studentOneId()))
+                .findFirst()
+                .orElseThrow();
+        var bob = response.members().stream()
+                .filter(member -> member.studentId().equals(fixture.studentTwoId()))
+                .findFirst()
+                .orElseThrow();
+
+        assertEquals(28.5714, alice.finalContributionPercentage(), 0.0001);
+        assertEquals(71.4286, bob.finalContributionPercentage(), 0.0001);
+    }
+
+    @Test
+    void projectGroupWeightConfigBelongingToAnotherTeamDoesNotLeakAndFallsBackToCourseWeights() {
+        SliceWeightFixture fixture = sliceWeightFixture();
+        Team otherTeam = entityWithId(new Team(), UUID.randomUUID());
+
+        when(projectGroupWeightConfigRepository.findByProjectId(fixture.projectId()))
+                .thenReturn(Optional.of(ProjectGroupWeightConfig.builder()
+                        .project(fixture.project())
+                        .team(otherTeam)
+                        .codeWeight(new BigDecimal("0.2"))
+                        .documentWeight(new BigDecimal("0.3"))
+                        .designWeight(new BigDecimal("0.5"))
+                        .build()));
+
+        TeamContributionEvaluationResponse response = service.evaluate(
+                principal(ApplicationRole.ADMIN, UUID.randomUUID()),
+                fixture.teamId()
+        );
+
+        var alice = response.members().stream()
+                .filter(member -> member.studentId().equals(fixture.studentOneId()))
+                .findFirst()
+                .orElseThrow();
+        var bob = response.members().stream()
+                .filter(member -> member.studentId().equals(fixture.studentTwoId()))
+                .findFirst()
+                .orElseThrow();
+
+        assertEquals(75.0, alice.finalContributionPercentage(), 0.001);
+        assertEquals(25.0, bob.finalContributionPercentage(), 0.001);
+    }
+
+    private SliceWeightFixture sliceWeightFixture() {
+        UUID teamId = UUID.randomUUID();
+        UUID projectId = UUID.randomUUID();
+        UUID studentOneId = UUID.randomUUID();
+        UUID studentTwoId = UUID.randomUUID();
+
+        Course course = entityWithId(new Course(), UUID.randomUUID());
+        course.setCodeContributionWeight(60.0);
+        course.setDocumentContributionWeight(20.0);
+        course.setDesignContributionWeight(20.0);
+
+        Project project = entityWithId(new Project(), projectId);
+        project.setCourse(course);
+
+        Team team = entityWithId(new Team(), teamId);
+        team.setCourse(course);
+        team.setProject(project);
+
+        Student studentOne = entityWithId(new Student(), studentOneId);
+        studentOne.setFullName("Alice Nguyen");
+        studentOne.setStudentCode("SE001");
+
+        Student studentTwo = entityWithId(new Student(), studentTwoId);
+        studentTwo.setFullName("Bob Tran");
+        studentTwo.setStudentCode("SE002");
+
+        TeamMember memberOne = entityWithId(new TeamMember(), UUID.randomUUID());
+        memberOne.setTeam(team);
+        memberOne.setStudent(studentOne);
+
+        TeamMember memberTwo = entityWithId(new TeamMember(), UUID.randomUUID());
+        memberTwo.setTeam(team);
+        memberTwo.setStudent(studentTwo);
+
+        Task codeTask = new Task();
+        codeTask.setStoryPoint(2);
+        codeTask.setLabels(List.of("backend"));
+        Document designDocument = new Document();
+        designDocument.setAuthor(studentTwo);
+        designDocument.setType(DocumentType.DESIGN);
+
+        when(teamRepository.findWithCourseAndInstructorById(teamId)).thenReturn(java.util.Optional.of(team));
+        when(teamMemberRepository.findByTeamId(teamId)).thenReturn(List.of(memberOne, memberTwo));
+        when(taskRepository.findByProjectId(projectId)).thenReturn(List.of());
+        when(documentRepository.findByProjectId(projectId)).thenReturn(List.of(designDocument));
+        when(commitDataRepository.findByAuthorIdAndProjectIdAndTaskIsNotNull(studentOneId, projectId))
+                .thenReturn(List.of(commitWithTask(codeTask)));
+        when(commitDataRepository.findByAuthorIdAndProjectIdAndTaskIsNotNull(studentTwoId, projectId))
+                .thenReturn(List.of());
+        when(peerReviewRepository.findByRevieweeIdInAndSprintBoardProjectId(List.of(studentOneId, studentTwoId), projectId))
+                .thenReturn(List.of());
+        when(sprintRepository.findByBoardProjectIdOrderByStartDateAsc(projectId)).thenReturn(List.of());
+
+        return new SliceWeightFixture(teamId, projectId, studentOneId, studentTwoId, project, team);
+    }
+
+    private record SliceWeightFixture(
+            UUID teamId,
+            UUID projectId,
+            UUID studentOneId,
+            UUID studentTwoId,
+            Project project,
+            Team team
+    ) {
     }
 
     @Test

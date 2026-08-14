@@ -13,6 +13,7 @@ import com.saga.be.dto.response.ProjectResponse;
 import com.saga.be.entity.Course;
 import com.saga.be.entity.Lecturer;
 import com.saga.be.entity.Project;
+import com.saga.be.entity.ProjectType;
 import com.saga.be.entity.Semester;
 import com.saga.be.entity.Student;
 import com.saga.be.entity.Subject;
@@ -23,6 +24,7 @@ import com.saga.be.integration.project.TeamProjectService;
 import com.saga.be.repository.ClassRepository;
 import com.saga.be.repository.CourseRepository;
 import com.saga.be.repository.LecturerRepository;
+import com.saga.be.repository.ProjectTypeRepository;
 import com.saga.be.repository.SemesterRepository;
 import com.saga.be.repository.StudentRepository;
 import com.saga.be.repository.SubjectRepository;
@@ -54,6 +56,7 @@ class LocalDemoDataSeederTest {
     private LecturerRepository lecturerRepository;
     private TeamRepository teamRepository;
     private TeamMemberRepository teamMemberRepository;
+    private ProjectTypeRepository projectTypeRepository;
     private SemesterService semesterService;
     private SubjectService subjectService;
     private ClassService classService;
@@ -70,11 +73,18 @@ class LocalDemoDataSeederTest {
         lecturerRepository = mock(LecturerRepository.class);
         teamRepository = mock(TeamRepository.class);
         teamMemberRepository = mock(TeamMemberRepository.class);
+        projectTypeRepository = mock(ProjectTypeRepository.class);
         semesterService = mock(SemesterService.class);
         subjectService = mock(SubjectService.class);
         classService = mock(ClassService.class);
         courseService = mock(CourseService.class);
         teamProjectService = mock(TeamProjectService.class);
+        when(projectTypeRepository.findAllByOrderByNameAsc()).thenReturn(List.of());
+        when(projectTypeRepository.save(any(ProjectType.class))).thenAnswer(invocation -> {
+            ProjectType projectType = invocation.getArgument(0);
+            projectType.setId(UUID.randomUUID());
+            return projectType;
+        });
     }
 
     @Test
@@ -152,7 +162,7 @@ class LocalDemoDataSeederTest {
             project.setName(LocalDemoDataSeeder.PROJECT_NAME);
             project.setCreatedByCognitoSub(LEADER_SUB);
             team.setProject(project);
-            return new ProjectResponse(projectId, team.getId(), LocalDemoDataSeeder.PROJECT_NAME);
+            return new ProjectResponse(projectId, team.getId(), LocalDemoDataSeeder.PROJECT_NAME, null);
         });
 
         LocalDemoDataSeeder seeder = seeder();
@@ -190,6 +200,7 @@ class LocalDemoDataSeederTest {
                 lecturerRepository,
                 teamRepository,
                 teamMemberRepository,
+                projectTypeRepository,
                 semesterService,
                 subjectService,
                 classService,
