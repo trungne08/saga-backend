@@ -1,9 +1,11 @@
 package com.saga.be.controller;
 
 import com.saga.be.dto.response.LecturerAnalyticsResponses;
+import com.saga.be.dto.response.LecturerCourseDashboardResponses;
 import com.saga.be.security.SagaPrincipal;
 import com.saga.be.service.CourseEarlyWarningQueryService;
 import com.saga.be.service.LecturerContributionQueryService;
+import com.saga.be.service.LecturerCourseDashboardQueryService;
 import com.saga.be.service.LecturerStudentAnalyticsQueryService;
 import com.saga.be.service.LecturerTeamAnalyticsQueryService;
 import java.time.LocalDate;
@@ -32,6 +34,43 @@ public class LecturerAnalyticsController {
     private final LecturerStudentAnalyticsQueryService studentAnalytics;
     private final LecturerContributionQueryService contributionAnalytics;
     private final CourseEarlyWarningQueryService earlyWarningAnalytics;
+    private final LecturerCourseDashboardQueryService courseDashboard;
+
+    @GetMapping("/dashboard/teams-progress")
+    @PreAuthorize("hasAnyRole('ADMIN', 'LECTURER')")
+    public ResponseEntity<LecturerCourseDashboardResponses.TeamsProgress> teamsProgress(
+            @AuthenticationPrincipal SagaPrincipal principal,
+            @PathVariable UUID courseId
+    ) {
+        return ResponseEntity.ok(courseDashboard.teamsProgress(principal, courseId));
+    }
+
+    @GetMapping("/dashboard/contribution-summary")
+    @PreAuthorize("hasAnyRole('ADMIN', 'LECTURER')")
+    public ResponseEntity<LecturerCourseDashboardResponses.ContributionSummary> contributionSummary(
+            @AuthenticationPrincipal SagaPrincipal principal,
+            @PathVariable UUID courseId
+    ) {
+        return ResponseEntity.ok(courseDashboard.contributionSummary(principal, courseId));
+    }
+
+    @GetMapping("/dashboard/trends")
+    @PreAuthorize("hasAnyRole('ADMIN', 'LECTURER')")
+    public ResponseEntity<LecturerCourseDashboardResponses.Trends> trends(
+            @AuthenticationPrincipal SagaPrincipal principal,
+            @PathVariable UUID courseId
+    ) {
+        return ResponseEntity.ok(courseDashboard.trends(principal, courseId));
+    }
+
+    @GetMapping("/dashboard/at-risk-summary")
+    @PreAuthorize("hasAnyRole('ADMIN', 'LECTURER')")
+    public ResponseEntity<LecturerCourseDashboardResponses.AtRiskSummary> atRiskSummary(
+            @AuthenticationPrincipal SagaPrincipal principal,
+            @PathVariable UUID courseId
+    ) {
+        return ResponseEntity.ok(courseDashboard.atRiskSummary(principal, courseId));
+    }
 
     @GetMapping("/teams/{teamId}/detail")
     @PreAuthorize("hasAnyRole('ADMIN', 'LECTURER')")

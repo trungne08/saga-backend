@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.stereotype.Repository;
 
 @Repository
@@ -24,6 +25,7 @@ public interface SprintRepository extends JpaRepository<Sprint, UUID> {
 
     List<Sprint> findByBoardProjectIdAndDeletedAtIsNullOrderByStartDateAsc(UUID projectId);
 
+    @EntityGraph(attributePaths = {"board", "board.project"})
     List<Sprint> findByBoardProjectCourseIdAndDeletedAtIsNullOrderByStartDateAscIdAsc(UUID courseId);
 
     Optional<Sprint> findByIdAndBoardProjectId(UUID id, UUID projectId);
