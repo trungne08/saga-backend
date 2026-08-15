@@ -94,8 +94,8 @@ class GeneratedOpenApiDocumentationIntegrationTest {
             }
         }
 
-        assertEquals(149, operationCount,
-                "Added POST project task Jira attachments");
+        assertEquals(150, operationCount,
+                "Added GET team contribution flowchart");
         System.out.println("Generated OpenAPI operation count: " + operationCount);
         assertEquals(usedTags, documentedTags, "Global tags phải đúng bằng tập tag thực sự có operation");
         assertEquals(documentedTags.size(), root.path("tags").size(), "Global tags không được trùng tên");
@@ -127,6 +127,12 @@ class GeneratedOpenApiDocumentationIntegrationTest {
         assertTrue(contributionMemberProperties.has("sliceScore"));
         assertTrue(contributionMemberProperties.has("sliceContributionPercentage"));
         assertTrue(contributionMemberProperties.has("finalContributionPercentage"));
+        JsonNode sprintBreakdownProperties = root.at("/components/schemas/SprintContributionBreakdown/properties");
+        assertTrue(sprintBreakdownProperties.has("codeStoryPoints"));
+        assertTrue(sprintBreakdownProperties.has("testStoryPoints"));
+        assertTrue(sprintBreakdownProperties.has("documentStoryPoints"));
+        assertTrue(sprintBreakdownProperties.has("researchStoryPoints"));
+        assertTrue(sprintBreakdownProperties.has("contributionPercentage"));
         JsonNode teamProgressProperties = root.at("/components/schemas/TeamProgress/properties");
         assertTrue(teamProgressProperties.has("currentSprint"));
         assertTrue(teamProgressProperties.has("activeSprints"));

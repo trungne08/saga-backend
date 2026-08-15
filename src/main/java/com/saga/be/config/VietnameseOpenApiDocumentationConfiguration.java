@@ -56,7 +56,8 @@ public class VietnameseOpenApiDocumentationConfiguration {
             entry("CourseNotificationBroadcastController#broadcast", "Gửi thông báo đến sinh viên của các khóa học đang giảng dạy", "Chỉ LECTURER và chỉ chấp nhận các Course active do chính giảng viên phụ trách. Người nhận được lấy từ TeamMember, course và người nhận trùng được loại; request cần Idempotency-Key."),
             entry("CourseController#importStudents", "Import sinh viên và phân nhóm trong khóa học", "ADMIN hoặc giảng viên phụ trách Course tải file XLSX đúng mẫu. Sau khi membership được tạo thành công, backend enqueue email mời bất đồng bộ; lỗi gửi email không rollback import và FE không gọi API gửi mail riêng."),
             entry("CourseController#importStudentsByAdminTemplate", "Import sinh viên vào khóa học bằng mẫu Admin", "Chỉ ADMIN tải file XLSX theo mẫu 5 cột. Backend enqueue email mời bất đồng bộ sau khi dữ liệu import được lưu; lỗi gửi email không rollback import và không có API SMTP/send-mail cho FE."),
-            entry("TeamContributionController#getContributionEvaluation", "Xem đánh giá đóng góp hiện tại của nhóm", "ADMIN xem mọi Team. LECTURER chỉ xem Team thuộc Course mình phụ trách. STUDENT chỉ xem khi có đúng TeamMember role LEADER của chính Team đang yêu cầu; MEMBER và MENTOR không có quyền. Response chỉ chứa định danh học vụ tối thiểu và metric Contribution, không chứa email, Cognito subject, reviewer/comment, token, credential hoặc raw provider payload."),
+            entry("TeamContributionController#getContributionEvaluation", "Xem đánh giá đóng góp hiện tại của nhóm", "LECTURER chỉ xem Team thuộc Course mình phụ trách. STUDENT chỉ xem khi có đúng TeamMember role LEADER của chính Team đang yêu cầu. ADMIN, MEMBER và MENTOR không có quyền. Response chỉ chứa định danh học vụ tối thiểu và metric Contribution, không chứa email, Cognito subject, reviewer/comment, token, credential hoặc raw provider payload."),
+            entry("TeamContributionController#getContributionGraph", "Xem sơ đồ flowchart đóng góp của nhóm", "Cùng quyền với đánh giá đóng góp: LECTURER chỉ Course mình phụ trách; STUDENT chỉ exact TeamMember role LEADER. ADMIN, MEMBER và MENTOR không có quyền. Node và cạnh dùng công thức SAGA (CODE/TEST/DOCUMENT/RESEARCH và P = sao / sao team), không dùng hệ số mockup. Response không chứa email, Cognito subject, reviewer/comment, token hoặc credential."),
             entry("PersonalIntegrationController#connections", "Xem trạng thái liên kết Jira và GitHub của tôi", "Trả trạng thái liên kết Jira/GitHub của tài khoản đang đăng nhập; không trả access token hoặc provider credential."),
             entry("PersonalIntegrationController#connectJira", "Bắt đầu liên kết tài khoản Jira", "Trả redirect để browser đi vào luồng ủy quyền Jira. FE dùng browser navigation và không gửi Jira token."),
             entry("PersonalIntegrationController#connectGitHub", "Bắt đầu liên kết tài khoản GitHub", "Trả redirect để browser đi vào luồng ủy quyền GitHub. FE dùng browser navigation và không gửi GitHub token."),
@@ -209,6 +210,7 @@ public class VietnameseOpenApiDocumentationConfiguration {
             summary("SubjectController#deleteSubject", "Xóa môn học"),
             summary("SubjectController#getSubjects", "Xem danh sách môn học"),
             summary("TeamContributionController#getContributionEvaluation", "Xem đánh giá đóng góp của nhóm"),
+            summary("TeamContributionController#getContributionGraph", "Xem sơ đồ flowchart đóng góp của nhóm"),
             summary("TeamContributionController#requestContributionOverride", "Đề nghị điều chỉnh đóng góp của nhóm"),
             summary("TeamProjectController#create", "Tạo dự án cho nhóm"),
             summary("TeamRosterController#getMembers", "Xem danh sách thành viên của nhóm trong khóa học"),
@@ -412,6 +414,10 @@ public class VietnameseOpenApiDocumentationConfiguration {
             case "SprintContributionBreakdown.sliceScore" -> "Hệ số slice của đúng sprint này, trước khi nhân P_s.";
             case "SprintContributionBreakdown.sliceContributionPercentage" -> "% slice trong sprint, chuẩn hóa team = 100, chưa nhân peer của sprint.";
             case "SprintContributionBreakdown.contributionPercentage" -> "% đóng góp trong sprint sau khi nhân P_s rồi chuẩn hóa team = 100.";
+            case "SprintContributionBreakdown.codeStoryPoints" -> "Tổng story point CODE được công nhận trong sprint; dùng cho stacked bar, không phải %.";
+            case "SprintContributionBreakdown.testStoryPoints" -> "Tổng story point TEST được công nhận trong sprint; dùng cho stacked bar, không phải %.";
+            case "SprintContributionBreakdown.documentStoryPoints" -> "Tổng story point DOCUMENT được công nhận trong sprint; Task thiếu file/link không cộng.";
+            case "SprintContributionBreakdown.researchStoryPoints" -> "Tổng story point RESEARCH được công nhận trong sprint; Task thiếu file/link không cộng.";
             default -> "Trường " + vietnameseSchemaName(propertyName) + ".";
         };
     }
