@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -121,6 +122,32 @@ class CourseContributionWeightDirectUpdateIntegrationTest {
         update(fixture, ApplicationRole.LECTURER, fixture.owner().getId(), fixture.course().getId(),
                 "30", "10", "20", "40", false)
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void legacyWeightRequestAndAdminDecisionRoutesNoLongerExist() throws Exception {
+        Fixture fixture = fixture();
+        UUID requestId = UUID.randomUUID();
+
+        mockMvc.perform(post("/api/v1/courses/{courseId}/contribution-slice-weight-requests", fixture.course().getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"codeWeight":50,"documentWeight":30,"designWeight":20,"reason":"x","lecturerId":"%s"}
+                                """.formatted(fixture.owner().getId()))
+                        .with(authentication(authenticationFor(ApplicationRole.LECTURER, fixture.owner().getId())))
+                        .with(csrf()))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/v1/courses/contribution-slice-weight-requests")
+                        .with(authentication(authenticationFor(ApplicationRole.ADMIN, UUID.randomUUID()))))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(put("/api/v1/courses/contribution-slice-weight-requests/{requestId}/decision", requestId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"decision":"APPROVED","note":"ok","adminId":"%s"}
+                                """.formatted(UUID.randomUUID()))
+                        .with(authentication(authenticationFor(ApplicationRole.ADMIN, UUID.randomUUID())))
+                        .with(csrf()))
+                .andExpect(status().isNotFound());
     }
 
     @Test

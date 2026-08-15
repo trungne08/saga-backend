@@ -94,9 +94,8 @@ class GeneratedOpenApiDocumentationIntegrationTest {
             }
         }
 
-        assertEquals(151, operationCount,
-                "Course/Team dual-mode Contribution weights: revived PUT /api/projects/{projectId}/group-weights, "
-                        + "added PUT .../contribution-config-mode and GET .../contribution-team-weights");
+        assertEquals(149, operationCount,
+                "Added POST project task Jira attachments");
         System.out.println("Generated OpenAPI operation count: " + operationCount);
         assertEquals(usedTags, documentedTags, "Global tags phải đúng bằng tập tag thực sự có operation");
         assertEquals(documentedTags.size(), root.path("tags").size(), "Global tags không được trùng tên");
@@ -118,7 +117,16 @@ class GeneratedOpenApiDocumentationIntegrationTest {
         assertTrue(root.at("/paths/~1api~1v1~1courses~1{courseId}~1contribution-team-weights/get").isObject());
         assertTrue(root.at("/paths/~1api~1teams~1{teamId}~1projects/post").isObject());
         assertTrue(root.at("/paths/~1api~1v1~1courses~1{courseId}~1contribution-slice-weights/put").isObject());
+        assertFalse(root.path("paths").has("/api/v1/courses/contribution-slice-weight-requests"));
+        assertFalse(root.at("/paths/~1api~1v1~1courses~1{courseId}~1contribution-slice-weight-requests/post").isObject());
+        assertFalse(root.at("/paths/~1api~1v1~1courses~1contribution-slice-weight-requests~1{requestId}~1decision/put").isObject());
         assertTrue(root.at("/paths/~1api~1v1~1courses~1{courseId}~1dashboard~1teams-progress/get").isObject());
+        assertTrue(root.at("/paths/~1api~1v1~1projects~1{projectId}~1tasks~1{taskId}~1attachments/post").isObject());
+        assertTrue(root.at("/components/schemas/JiraTaskAttachmentsResponse/properties").has("links"));
+        JsonNode contributionMemberProperties = root.at("/components/schemas/TeamContributionMemberResponse/properties");
+        assertTrue(contributionMemberProperties.has("sliceScore"));
+        assertTrue(contributionMemberProperties.has("sliceContributionPercentage"));
+        assertTrue(contributionMemberProperties.has("finalContributionPercentage"));
         JsonNode teamProgressProperties = root.at("/components/schemas/TeamProgress/properties");
         assertTrue(teamProgressProperties.has("currentSprint"));
         assertTrue(teamProgressProperties.has("activeSprints"));

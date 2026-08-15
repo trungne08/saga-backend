@@ -12,15 +12,22 @@ universe đổi từ CODE/TEST/DOCUMENT/DESIGN sang **CODE/TEST/DOCUMENT/RESEARC
 là Contribution criterion active (vẫn là ProjectType catalog value độc lập). Evidence từng gán
 DESIGN (task keyword + `DocumentType.DESIGN`) nay gộp thẳng vào `DOCUMENT` — xem section 3.1/3.2.
 
-**Cập nhật (DEC-089 — Task-is-sole-numeric-authority + reserved Contribution markers, foundation
-only):** Task giờ có thể được classify TEST/RESEARCH qua exact reserved marker
-(`saga:code`/`saga:test`/`saga:document`/`saga:research`) trên `Task.labels`, được kiểm tra **trước**
-legacy keyword classifier (marker precedence — xem section 3.0). `TEST_SLICE_CLASSIFICATION` và
-`RESEARCH_SLICE_CLASSIFICATION` **không còn `= TBD_PRODUCT_RULE` tuyệt đối** — chúng có evidence
-source thật cho path Task-marker (xem section 3.0/5.2), nhưng **vẫn TBD cho provider-sourced
-evidence** (Jira/GitHub attachment, commit-via-traceability — chưa implement, block bởi runtime
-TBD chưa xác nhận). Đồng thời: khi evidence là commit liên kết Task, **Task là numeric authority
-duy nhất** — commit không còn cộng điểm bổ sung (double-count fix, xem section 3.1 đã viết lại).
+**Cập nhật (DEC-092 — slice tuyệt đối × P, cộng slice rồi nhân P cả dự án):** `% sprint` = `(slice × P_s) / Σ adjust sprint`. `slice = Σ SP cùng tiêu chí × trọng số` (không chia share trong tiêu chí, không phân bổ lại trọng số slice trống). `% cuối` = `(Σ slice × P cả dự án) / Σ adjust team`. Sprint nhiều việc nặng hơn. Sprint giữa kỳ chưa peer: `P_s = 1`. Task không gắn sprint **không tính điểm**. `peerReviewScore` vẫn là hệ số peer cả dự án (hiển thị). Chi tiết + ví dụ: `docs/CONTRIBUTION_CALCULATION_SPEC.md`.
+
+**Cập nhật (DEC-091 — sprint-first contribution, superseded by DEC-092):** `% đóng góp` từng sprint rồi trung bình đều — **không còn**. DEC-092 cộng slice theo khối lượng rồi nhân P cả dự án.
+
+**Cập nhật (DEC-090 — labels-only classification + attachment gate for DOCUMENT/RESEARCH):**
+Task chỉ vào tiêu chí Contribution khi có đúng một reserved label
+(`saga:code`/`saga:test`/`saga:document`/`saga:research`). Không còn fallback keyword/title/type.
+Task không nhãn hoặc nhãn xung đột không vào criterion nào (sprint/`adjustedSprintScore` vẫn đếm
+story point). DOCUMENT và RESEARCH **chỉ công nhận story point khi Task có ít nhất một Jira
+attachment hoặc một link sinh viên nộp** — đó là điều kiện, không cộng thêm điểm. CODE/TEST không cần file/link.
+Document SAGA không phải nguồn điểm. GitHub attachment vẫn chưa ingest.
+
+**Cập nhật (DEC-089 — Task-is-sole-numeric-authority + reserved Contribution markers):** Task
+classify TEST/RESEARCH qua exact reserved marker trên `Task.labels`. Khi evidence là commit liên
+kết Task, **Task là numeric authority duy nhất** — commit không còn cộng điểm bổ sung. DEC-090
+gỡ keyword fallback mà DEC-089 từng giữ.
 
 ---
 
@@ -45,11 +52,7 @@ Official FE:
 - `GET /api/v1/courses/{courseId}/contribution-slice-weights`
 - `PUT /api/v1/courses/{courseId}/contribution-slice-weights` (Lecturer exact instructor; CSRF; no `lecturerId`)
 
-Legacy / backward-compatible / deprecated for new FE:
-
-- `POST /api/v1/courses/{courseId}/contribution-slice-weight-requests`
-- `GET /api/v1/courses/contribution-slice-weight-requests`
-- `PUT /api/v1/courses/contribution-slice-weight-requests/{requestId}/decision`
+Luồng gửi đơn / Admin duyệt trọng số đã gỡ. Lecturer sửa trực tiếp, không xin quyền Admin.
 
 Service: `CourseContributionWeightService`. Direct PUT chỉ có hiệu lực khi Course đang ở `COURSE`
 mode (xem section 5). Team-scope: `PUT /api/projects/{projectId}/group-weights`
@@ -68,7 +71,7 @@ Trong `TeamContributionService#evaluate(teamId)`:
 2. Nếu team chưa gắn project hoặc không có member -> trả `members = []`.
 3. Lấy dữ liệu thô:
    - `Task` theo project.
-   - `Document` theo project.
+   - `TaskAttachment` theo project (metadata Jira; DOCUMENT/RESEARCH cần ≥1 file để công nhận story point).
    - `PeerReview` theo danh sách reviewee thuộc team + project.
    - `PolicyOverrideRequest` đã `APPROVED` cho loại `TEAM_CONTRIBUTION_OVERRIDE` trong cùng class.
 
@@ -80,29 +83,28 @@ Hệ thống duy trì 4 cụm điểm/metrics per-student: `codeScore`, `testSco
 `researchScore`, cộng `adjustedSprintScore` (task score đã nhân hệ số retrospective/peer theo
 sprint — **công thức numeric không đổi**, xem 3.3/3.4).
 
-### 3.0 Marker-first classification (`classifyTaskContribution`, DEC-089)
+### 3.0 Labels-only classification (`TaskContributionClassifier`, DEC-090)
 
-Mỗi Task DONE được route vào đúng MỘT trong bốn `ContributionCriterion` (CODE/TEST/DOCUMENT/RESEARCH)
-theo thứ tự ưu tiên sau, KHÔNG BAO GIỜ cộng vào nhiều hơn một:
+Mỗi Task DONE được route vào đúng MỘT trong bốn `ContributionCriterion` (CODE/TEST/DOCUMENT/RESEARCH).
+Authority duy nhất là reserved label trên `Task.labels` (`ReservedContributionMarkerClassifier`):
 
-1. **Reserved marker exact-match** (`ReservedContributionMarkerClassifier`, đọc `Task.labels`):
-   `saga:code` -> CODE, `saga:test` -> TEST, `saga:document` -> DOCUMENT, `saga:research` -> RESEARCH.
-   Exact string match sau khi trim, case-sensitive, không substring/fuzzy/AI (`saga:test-extra`,
-   `SAGA:TEST` đều KHÔNG match). Nếu Task có **>1 marker xung đột** (ví dụ `saga:test` +
-   `saga:research`) -> `AMBIGUOUS`: Task đó bị loại khỏi cả 4 criteria hoàn toàn (không tính vào
-   `codeScore`/`testScore`/`documentScore`/`researchScore` nào cả) cho tới khi label được sửa —
-   không pick-first. Nhãn business khác không phải reserved marker không gây conflict.
-2. **Không có reserved marker nào** -> fallback nguyên vẹn vào `classifyTaskSlice` (legacy keyword
-   classifier, xem 3.1) — hàm này **không đổi**, vẫn chỉ trả về CODE hoặc DOCUMENT, vẫn pick-first
-   trên keyword conflict, vẫn CODE-default cho Task không nhãn.
+- `saga:code` -> CODE, `saga:test` -> TEST, `saga:document` -> DOCUMENT, `saga:research` -> RESEARCH.
+- Exact string match sau khi trim, case-sensitive, không substring/fuzzy/AI (`saga:test-extra`,
+  `SAGA:TEST` đều KHÔNG match).
+- **>1 marker xung đột** (ví dụ `saga:test` + `saga:research`) -> `AMBIGUOUS`: không vào criterion nào.
+- **Không có reserved marker** (kể cả Task có label business như `backend`/`ui-ux`, hoặc title/type
+  gợi ý): không vào criterion nào. **Không** fallback keyword/title/`TaskType`.
 
-Lưu ý quan trọng: dù Task bị `AMBIGUOUS` (không vào criterion nào), `adjustedSprintScore`/
-`taskContributionPercentage` (section 3.3/3.4, pipeline riêng biệt) vẫn cộng storyPoint của Task đó
-như bình thường — công thức numeric task/sprint không bị ảnh hưởng bởi kết quả classification.
+Dù Task không vào criterion, `adjustedSprintScore`/`taskContributionPercentage` (section 3.3/3.4)
+vẫn cộng storyPoint như bình thường.
 
-`TeamContributionService` và `ContributionCalculationService` mỗi bên có bản `classifyTaskSlice`
-riêng, hơi khác nhau về cách ghép text (thứ tự title/description/labels/components) — technical
-debt có sẵn trước DEC-089, không được unify (không có test/source nào chứng minh unify là an toàn).
+DOCUMENT/RESEARCH: story point (hoặc 1.0) **chỉ được cộng vào criterion khi Task có ≥1 Jira
+attachment hoặc ≥1 link sinh viên nộp**. Số lượng file/link không làm tăng điểm. Không có cả hai → story point không vào
+DOCUMENT/RESEARCH (sprint score vẫn đếm). CODE/TEST luôn công nhận story point, bỏ qua attachment/link.
+Metadata attachment được upsert cùng Jira issue (`V38__add_task_attachment.sql`);
+link nộp qua SAGA lưu `task_web_link` (`V39__add_task_web_link.sql`).
+thiếu field `attachment` trên response Jira = danh sách rỗng (xóa snapshot cũ, không đụng web link). Không tải nội dung
+file, không persist content URL. GitHub attachment không ingest.
 
 ### 3.1 Điểm từ commit — Task là numeric authority duy nhất (DEC-089)
 
@@ -114,11 +116,11 @@ là numeric scoring authority duy nhất** — commit chỉ là supporting/prove
 điểm riêng, kể cả khi có 1 hay nhiều commit cùng liên kết một Task (`commitCountByStudent` vẫn đếm
 đúng số commit cho mục đích evidence/warning, chỉ phần cộng điểm bị xóa).
 
-### 3.2 Điểm từ document
+### 3.2 Điểm DOCUMENT / RESEARCH
 
-Đếm theo author trong project — cả `DocumentType.DESIGN` lẫn mọi `DocumentType` khác đều cộng vào
-**`documentScore`** (`documentAndDesignCount` trong code) — không còn cụm điểm DESIGN riêng.
-Standalone, hoàn toàn không phụ thuộc Task — không bị ảnh hưởng bởi DEC-089.
+Không đọc bảng `Document`. DOCUMENT chỉ từ Task DONE `saga:document` có ≥1 Jira attachment.
+RESEARCH chỉ từ Task DONE `saga:research` có ≥1 Jira attachment. Story point (hoặc 1.0) được công
+nhận nguyên vẹn; số file không làm tăng điểm. Thiếu file thì không vào tiêu chí.
 
 ### 3.3 Điểm từ task DONE
 
@@ -126,8 +128,10 @@ Lọc task theo assignee là sinh viên và `status == DONE`.
 
 Với từng task DONE:
 - `taskWeight = storyPoint` nếu có, ngược lại `1.0` — **công thức numeric không đổi bởi DEC-089**.
-- Cộng `taskWeight` vào đúng MỘT trong bốn criterion theo `classifyTaskContribution` (section 3.0);
-  nếu AMBIGUOUS thì không cộng vào criterion nào (nhưng vẫn cộng vào `taskScoreBySprint` bên dưới).
+- Cộng `taskWeight` vào đúng MỘT criterion theo `TaskContributionClassifier` khi story point được
+  công nhận (DOCUMENT/RESEARCH cần ≥1 attachment, section 3.0); nếu không có marker / AMBIGUOUS /
+  DOCUMENT-RESEARCH thiếu file thì không cộng vào criterion nào (nhưng vẫn cộng `taskWeight` vào
+  `taskScoreBySprint` bên dưới).
 - Gom `taskWeight` theo từng sprint để tính breakdown (luôn thực hiện, không điều kiện theo
   classification).
 
@@ -158,15 +162,17 @@ Trong `PeerReviewService#submit`:
 
 => Luồng contribution chỉ dùng `peerReview.starRating` đã lưu.
 
-### 4.2 Peer coefficient toàn project
+### 4.2 Peer coefficient toàn project (hiển thị)
 
 Trong `evaluate`:
 
 - `peerScoreByStudent = tổng starRating của các review mà sinh viên là reviewee`
 - `totalPeerScore = tổng peerScoreByStudent toàn team`
-- `peerCoefficient(student)`:
+- `peerCoefficient(student)` (field `peerReviewScore`):
   - Nếu `totalPeerScore > 0`: `peerScoreByStudent / totalPeerScore`
   - Nếu `totalPeerScore == 0`: `1.0`
+
+Hệ số này **không** nhân lần nữa vào `% cuối`. Peer từng sprint (`retrospectiveMultiplier` / `P_s`) mới là hệ số đi vào công thức contribution của sprint đó (section 6).
 
 ---
 
@@ -193,57 +199,58 @@ Authority (CONFIRMED_SOURCE, **mode-aware, fail-closed**): resolver đọc `team
 Lecturer `PUT /api/v1/courses/{courseId}/contribution-slice-weights` ghi bốn cột Course, chỉ có
 hiệu lực khi Course đang ở `COURSE` mode. `PUT /api/projects/{projectId}/group-weights` ghi
 `ProjectGroupWeightConfig`, có hiệu lực khi Course ở `TEAM` mode (ghi được bất kỳ lúc nào như
-"draft", chỉ được resolver đọc sau khi mode chuyển sang `TEAM`). Không đổi công thức evaluate bên dưới.
+Không đổi nguồn trọng số. Công thức evaluate (DEC-092, section 6): cộng SP cùng tiêu chí rồi nhân trọng số đã cấu hình — **không** `normalizeForActiveSlices` trong sprint.
 
-### 5.2 Vô hiệu hóa slice không có dữ liệu
+### 5.2 Trọng số slice trống không được phân bổ lại
 
-`normalizeForActiveSlices(totalCode > 0, testActive, totalDocument > 0, researchActive)`
+`normalizeForActiveSlices` vẫn tồn tại trên `ContributionSliceWeights` nhưng **evaluate không gọi**. Slice không có Task được công nhận đóng góp `0` vào `slice`; trọng số các tiêu chí khác giữ nguyên (CODE 40% vẫn là 0.40 dù sprint không có TEST).
 
-Nghĩa là:
-- Slice nào total = 0 (hoặc `testActive`/`researchActive` = false) sẽ bị set về 0 trước khi
-  normalize lại.
-- Tránh chia ngân sách vào slice không có evidence.
-- **(DEC-089) `testActive`/`researchActive` không còn hardcode `false`** — nay là `totalTest > 0.0`
-  / `totalResearch > 0.0`, giống hệt cách `codeActive`/`documentActive` đã hoạt động từ trước. Nếu
-  có ít nhất một Task DONE mang `saga:test`/`saga:research` trong Team/Project, slice đó active và
-  nhận đúng tỷ trọng cấu hình; nếu không có Task nào mang marker đó, slice vẫn bị coi là không
-  evidence và ngân sách phân bổ lại cho các slice active khác — cơ chế fallback không đổi, chỉ có
-  input (`totalTest`/`totalResearch`) là giờ phản ánh evidence thật thay vì hardcode.
-  `TEST_SLICE_CLASSIFICATION`/`RESEARCH_SLICE_CLASSIFICATION` không còn `= TBD_PRODUCT_RULE` tuyệt
-  đối cho path Task-marker; vẫn TBD cho provider-sourced evidence (attachment, commit-via-traceability).
+`TEST`/`RESEARCH` nhận điểm khi có Task DONE đúng marker (DEC-089/090). DOCUMENT/RESEARCH còn cần attachment Jira. GitHub attachment và commit-via-traceability vẫn chưa là nguồn điểm.
 
 ---
 
-## 6) Công thức tính contribution
+## 6) Công thức tính contribution (DEC-092)
 
 Ký hiệu:
-- `C%`: % contribution trong slice code của sinh viên
-- `T%`: % contribution trong slice test
-- `D%`: % contribution trong slice document
-- `R%`: % contribution trong slice research
-- `Wc, Wt, Wd, Wr`: trọng số slice code/test/document/research (tổng 100 hoặc 1.0 tuỳ scope — xem section 5)
-- `P`: peerCoefficient
+- `Wc, Wt, Wd, Wr`: trọng số Course/Team dạng tỷ lệ (`40% → 0.40`). Tổng 1.0. **Không** phân bổ lại khi một tiêu chí không có Task.
+- `P_s`: `sao_i / tổng sao sprint`. Sprint chưa có peer → `P_s = 1`.
+- `P`: `tổng sao_i mọi sprint / tổng sao team mọi sprint`. Cả dự án chưa peer → `P = 1`.
 
-### 6.1 Contribution theo từng slice
+### 6.1 Từng sprint
 
-Với mỗi slice:
-- nếu total slice > 0:
-  - `sliceContribution% = studentSliceScore / totalSliceScore * 100`
-- ngược lại = `0`
+Với mỗi sprint có ít nhất một Task DONE được công nhận tiêu chí:
 
-### 6.2 Raw contribution
+```
+slice_i = (Σ SP_code)×Wc + (Σ SP_test)×Wt + (Σ SP_doc)×Wd + (Σ SP_research)×Wr
+adjust_i = slice_i × P_s(i)
+%_sprint(i) = adjust_i / Σ adjust × 100
+```
 
-`rawContribution = (C% * Wc + T% * Wt + D% * Wd + R% * Wr) / 100`
+Cộng SP **cùng tiêu chí** rồi mới nhân trọng số một lần. Không `(điểm sv / tổng team)×100` rồi mix. Không nhân kép trọng số.
 
-Lưu ý (DEC-089): `T%`/`R%` không còn hardcode 0 — nếu có ít nhất một Task DONE mang
-`saga:test`/`saga:research` trong Team/Project, `T%`/`R%` phản ánh tỷ trọng thật của sinh viên đó
-trong slice, và `Wt`/`Wr` nhận đúng phần trăm cấu hình (thay vì bị `normalizeForActiveSlices` set
-về 0). Nếu không có Task nào mang marker đó, `totalTest`/`totalResearch = 0` nên `T%`/`R% = 0` và
-`Wt`/`Wr = 0` như trước — cơ chế fallback identical, chỉ input thay đổi.
+Sprint không có tiêu chí được công nhận bị **bỏ qua**. Task unlabeled / Document-Research thiếu file vẫn vào `taskScore` của breakdown; `adjustedTaskScore = taskScore × P_s`.
 
-### 6.3 Adjusted contribution trước override
+Task không gắn sprint **không tính điểm**.
 
-`baseAdjustedContribution = rawContribution * P`
+`sprintBreakdowns[].contributionPercentage` là `%_sprint` của đúng sinh viên đó.
+
+### 6.2 % đóng góp cuối dự án
+
+```
+Σslice_i   = slice_sprint1(i) + slice_sprint2(i) + …
+adjust_i   = Σslice_i × P(i)
+%_final(i) = adjust_i / Σ adjust × 100
+```
+
+Không trung bình đều bốn % sprint. Sprint nhiều slice nặng hơn. Override giảng viên áp sau `%_final`, rồi chuẩn hóa tổng team = 100.
+
+Radar `code/test/document/researchContributionPercentage` vẫn là tỷ lệ **cả project** của từng slice.
+
+### 6.3 Peer review cuối
+
+`peerReviewScore` = `P` toàn project (section 4.2). `% cuối` **đã nhân** `P` rồi chuẩn hóa theo tổng adjust team — không nhân thêm lần nữa trên client.
+
+Response evaluation cũng trả hệ số slice **trước** peer: `sliceScore` (Σ slice) và `sliceContributionPercentage` (`slice / Σ slice team × 100`). Cùng cặp field trên từng `sprintBreakdowns[]`. Override giảng viên không đụng hai field này.
 
 ---
 
@@ -330,11 +337,12 @@ ghi verbatim vào cột inactive `design_contribution_weight` (giữ lại, khô
 
 ## 10) Các lưu ý kỹ thuật quan trọng
 
-1. `taskContributionPercentage` trong response là tỉ lệ từ `adjustedSprintScore` (task theo sprint đã nhân retrospective multiplier), không phải trực tiếp từ raw slice.
-2. `peerReviewScore` field hiện trả `peerCoefficient` (0..1), không phải tổng sao thô.
+1. `taskContributionPercentage` trong response là tỉ lệ từ `adjustedSprintScore` (task theo sprint đã nhân retrospective multiplier), không phải trực tiếp từ raw slice. `finalContributionPercentage` là `(Σ slice × P) / Σ adjust` (DEC-092), khác `taskContributionPercentage`.
+2. `peerReviewScore` field hiện trả `peerCoefficient` toàn project (0..1). `% cuối` đã dùng đúng hệ số này rồi chuẩn hóa team; client không nhân thêm. `sliceContributionPercentage` là % cùng công thức nhưng **chưa** nhân P.
 3. Nếu team không có project hoặc rỗng member thì API trả danh sách members rỗng.
 4. Override team-level hiện được lưu dạng `APPROVED` ngay khi tạo request trong `requestContributionOverride`.
 5. Tất cả phép tính cuối cùng vẫn đưa về budget 100%.
+6. `sprintBreakdowns[].sliceContributionPercentage` là % slice **trước** peer trong sprint; `contributionPercentage` là % đã mix + peer **trong sprint đó**.
 
 ---
 
@@ -346,6 +354,8 @@ ghi verbatim vào cột inactive `design_contribution_weight` (giữ lại, khô
   `src/main/java/com/saga/be/service/contribution/ContributionSliceWeights.java`
 - Slice weight source resolution (mode-aware, fail-closed COURSE/TEAM):
   `src/main/java/com/saga/be/service/contribution/ContributionSliceWeightResolver.java`
+- Sprint mix (slice × P, rồi Σ slice × P cả dự án):
+  `src/main/java/com/saga/be/service/contribution/SprintFirstContributionMixer.java`
 - Course slice-weight GET/PUT, mode switch, team-menu read, legacy request/approval:
   `src/main/java/com/saga/be/service/CourseContributionWeightService.java`
 - Team/Project weight override:

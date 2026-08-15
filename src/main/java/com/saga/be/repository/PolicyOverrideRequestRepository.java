@@ -10,12 +10,4 @@ import org.springframework.stereotype.Repository;
 @Repository
 public interface PolicyOverrideRequestRepository extends JpaRepository<PolicyOverrideRequest, UUID> {
     List<PolicyOverrideRequest> findByTypeAndStatusAndClazz_Id(String type, PolicyOverrideStatus status, UUID classId);
-
-    List<PolicyOverrideRequest> findByTypeAndStatusOrderByCreatedAtDesc(String type, PolicyOverrideStatus status);
-
-    List<PolicyOverrideRequest> findByTypeOrderByCreatedAtDesc(String type);
-
-    List<PolicyOverrideRequest> findByTypeAndTargetConfigIdOrderByCreatedAtDesc(String type, UUID targetConfigId);
-
-    List<PolicyOverrideRequest> findByTypeAndLecturer_IdOrderByCreatedAtDesc(String type, UUID lecturerId);
 }

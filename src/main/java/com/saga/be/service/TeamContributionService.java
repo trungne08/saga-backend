@@ -6,40 +6,41 @@ import com.saga.be.dto.response.ContributionWarning;
 import com.saga.be.dto.response.TeamContributionEvaluationResponse;
 import com.saga.be.dto.response.TeamContributionMemberResponse;
 import com.saga.be.entity.CommitData;
-import com.saga.be.entity.Document;
 import com.saga.be.entity.Lecturer;
 import com.saga.be.entity.PeerReview;
 import com.saga.be.entity.PolicyOverrideRequest;
 import com.saga.be.entity.Sprint;
 import com.saga.be.entity.Student;
 import com.saga.be.entity.Task;
+import com.saga.be.entity.TaskAttachment;
+import com.saga.be.entity.TaskWebLink;
 import com.saga.be.entity.Team;
 import com.saga.be.entity.TeamMember;
 import com.saga.be.entity.enums.PolicyOverrideStatus;
 import com.saga.be.entity.enums.RoleInTeam;
 import com.saga.be.entity.enums.TaskStatus;
 import com.saga.be.repository.CommitDataRepository;
-import com.saga.be.repository.DocumentRepository;
 import com.saga.be.repository.LecturerRepository;
 import com.saga.be.repository.PeerReviewRepository;
 import com.saga.be.repository.PolicyOverrideRequestRepository;
 import com.saga.be.repository.SprintRepository;
+import com.saga.be.repository.TaskAttachmentRepository;
 import com.saga.be.repository.TaskRepository;
+import com.saga.be.repository.TaskWebLinkRepository;
 import com.saga.be.repository.TeamMemberRepository;
 import com.saga.be.repository.TeamRepository;
 import com.saga.be.security.ApplicationRole;
 import com.saga.be.security.SagaPrincipal;
 import com.saga.be.service.contribution.ContributionCriterion;
-import com.saga.be.service.contribution.ContributionMarkerClassification;
 import com.saga.be.service.contribution.ContributionSliceWeightResolver;
 import com.saga.be.service.contribution.ContributionSliceWeights;
-import com.saga.be.service.contribution.ReservedContributionMarkerClassifier;
+import com.saga.be.service.contribution.SprintFirstContributionMixer;
+import com.saga.be.service.contribution.TaskContributionClassifier;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -58,25 +59,17 @@ public class TeamContributionService {
 
     private static final String TEAM_CONTRIBUTION_OVERRIDE_TYPE = "TEAM_CONTRIBUTION_OVERRIDE";
 
-    /**
-     * DESIGN is retired as an active Contribution criterion; design-classified evidence
-     * (keyword match, or {@code DocumentType.DESIGN}) is folded directly into DOCUMENT.
-     */
-    private enum ContributionSlice {
-        CODE,
-        DOCUMENT
-    }
- 
     private final TeamRepository teamRepository;
     private final TeamMemberRepository teamMemberRepository;
     private final TaskRepository taskRepository;
     private final CommitDataRepository commitDataRepository;
-    private final DocumentRepository documentRepository;
     private final PeerReviewRepository peerReviewRepository;
     private final SprintRepository sprintRepository;
     private final PolicyOverrideRequestRepository policyOverrideRequestRepository;
     private final LecturerRepository lecturerRepository;
     private final ContributionSliceWeightResolver sliceWeightResolver;
+    private final TaskAttachmentRepository taskAttachmentRepository;
+    private final TaskWebLinkRepository taskWebLinkRepository;
 
     @Transactional(readOnly = true)
     public TeamContributionEvaluationResponse evaluate(SagaPrincipal principal, UUID teamId) {
@@ -103,7 +96,7 @@ public class TeamContributionService {
         }
 
         List<Task> tasks = taskRepository.findByProjectId(projectId);
-        List<Document> documents = documentRepository.findByProjectId(projectId);
+        Map<UUID, Integer> attachmentCountByTaskId = evidenceCounts(projectId);
         List<UUID> studentIds = members.stream()
                 .map(TeamMember::getStudent)
                 .filter(student -> student != null && student.getId() != null)
@@ -137,12 +130,15 @@ public class TeamContributionService {
         Map<UUID, Double> adjustedSprintScoreByStudent = new HashMap<>();
         Map<UUID, List<TeamContributionMemberResponse.SprintContributionBreakdown>>
                 sprintBreakdownsByStudent = new HashMap<>();
+        Map<UUID, Map<UUID, double[]>> recognizedByStudentThenSprint = new HashMap<>();
+        Map<UUID, Map<UUID, Double>> taskScoreByStudentSprint = new HashMap<>();
 
         Map<UUID, Integer> taskCountByStudent = new HashMap<>();
         Map<UUID, Integer> commitCountByStudent = new HashMap<>();
         Map<UUID, Integer> peerReviewCountByStudent = new HashMap<>();
         Map<UUID, Map<UUID, List<PeerReview>>> peerReviewsByStudentAndSprint =
                 groupPeerReviews(peerReviews);
+        List<UUID> memberStudentIds = new ArrayList<>();
 
         for (TeamMember member : members) {
             Student student = member.getStudent();
@@ -150,6 +146,7 @@ public class TeamContributionService {
                 continue;
             }
             UUID studentId = student.getId();
+            memberStudentIds.add(studentId);
 
             // Product decision: when a commit is linked to a Task, the Task is the sole numeric
             // Contribution authority — the commit is supporting/provenance evidence only and
@@ -163,13 +160,6 @@ public class TeamContributionService {
             documentScoreByStudent.put(studentId, 0.0);
             researchScoreByStudent.put(studentId, 0.0);
 
-            // DESIGN is retired as an active criterion; DocumentType.DESIGN evidence is folded
-            // into DOCUMENT (deterministic remap of an existing structured field, not invented).
-            long documentAndDesignCount = documents.stream()
-                    .filter(document -> studentId.equals(document.getAuthor() != null ? document.getAuthor().getId() : null))
-                    .count();
-            documentScoreByStudent.merge(studentId, (double) documentAndDesignCount, Double::sum);
-
             List<Task> completedTasks = tasks.stream()
                     .filter(task -> studentId.equals(task.getAssignee() != null ? task.getAssignee().getId() : null))
                     .filter(task -> TaskStatus.DONE.equals(task.getStatus()))
@@ -179,38 +169,37 @@ public class TeamContributionService {
             Map<UUID, Double> taskScoreBySprint = new HashMap<>();
             for (Task task : completedTasks) {
                 double taskWeight = task.getStoryPoint() != null ? task.getStoryPoint().doubleValue() : 1.0;
-                // taskWeight/taskScoreBySprint below stay unconditional regardless of criterion
-                // classification (the numeric task/sprint formula is unchanged); only the
-                // CODE/TEST/DOCUMENT/RESEARCH bucket routing is skipped when AMBIGUOUS.
-                Optional<ContributionCriterion> criterion = classifyTaskContribution(task);
-                if (criterion.isPresent()) {
-                    switch (criterion.get()) {
-                        case CODE -> codeScoreByStudent.merge(studentId, taskWeight, Double::sum);
-                        case TEST -> testScoreByStudent.merge(studentId, taskWeight, Double::sum);
-                        case DOCUMENT -> documentScoreByStudent.merge(studentId, taskWeight, Double::sum);
-                        case RESEARCH -> researchScoreByStudent.merge(studentId, taskWeight, Double::sum);
-                    }
-                }
-                if (task.getSprint() == null || task.getSprint().getId() == null) {
+                UUID sprintId = task.getSprint() == null ? null : task.getSprint().getId();
+                if (sprintId == null) {
                     continue;
                 }
-                taskScoreBySprint.merge(
-                        task.getSprint().getId(),
-                        taskWeight,
-                        Double::sum
-                );
+                Optional<ContributionCriterion> criterion = TaskContributionClassifier.classify(task);
+                if (criterion.isPresent()) {
+                    int attachments = task.getId() == null
+                            ? 0
+                            : attachmentCountByTaskId.getOrDefault(task.getId(), 0);
+                    if (TaskContributionClassifier.storyPointsRecognized(criterion.get(), attachments)) {
+                        switch (criterion.get()) {
+                            case CODE -> codeScoreByStudent.merge(studentId, taskWeight, Double::sum);
+                            case TEST -> testScoreByStudent.merge(studentId, taskWeight, Double::sum);
+                            case DOCUMENT -> documentScoreByStudent.merge(studentId, taskWeight, Double::sum);
+                            case RESEARCH -> researchScoreByStudent.merge(studentId, taskWeight, Double::sum);
+                        }
+                        SprintFirstContributionMixer.addRecognized(
+                                recognizedByStudentThenSprint,
+                                studentId,
+                                sprintId,
+                                criterion.get(),
+                                taskWeight
+                        );
+                    }
+                }
+                taskScoreBySprint.merge(sprintId, taskWeight, Double::sum);
             }
+            taskScoreByStudentSprint.put(studentId, taskScoreBySprint);
 
             Map<UUID, List<PeerReview>> reviewsBySprint = peerReviewsByStudentAndSprint
                     .getOrDefault(studentId, Map.of());
-            List<TeamContributionMemberResponse.SprintContributionBreakdown> sprintBreakdowns =
-                    buildSprintBreakdowns(sprints, taskScoreBySprint, reviewsBySprint, peerScoreBySprint);
-            double adjustedSprintScore = sprintBreakdowns.stream()
-                    .mapToDouble(TeamContributionMemberResponse.SprintContributionBreakdown::adjustedTaskScore)
-                    .sum();
-            adjustedSprintScoreByStudent.put(studentId, adjustedSprintScore);
-            sprintBreakdownsByStudent.put(studentId, sprintBreakdowns);
-
             List<PeerReview> studentPeerReviews = reviewsBySprint.values().stream()
                     .flatMap(List::stream)
                     .toList();
@@ -221,16 +210,55 @@ public class TeamContributionService {
         double totalTest = testScoreByStudent.values().stream().mapToDouble(Double::doubleValue).sum();
         double totalDocument = documentScoreByStudent.values().stream().mapToDouble(Double::doubleValue).sum();
         double totalResearch = researchScoreByStudent.values().stream().mapToDouble(Double::doubleValue).sum();
+        // CODE/TEST/DOCUMENT/RESEARCH buckets are filled only by DONE Tasks whose labels contain
+        // exactly one reserved marker. DOCUMENT/RESEARCH story points count only when that Task
+        // has at least one Jira attachment. Unlabeled or conflicting-marker Tasks do not enter
+        // any criterion. Tasks with no sprint are ignored. Per sprint: slice = Σ SP_criterion ×
+        // weight (no share mix, no redistributing unused weights). Sprint % = (slice × P_s) /
+        // team adjust. Project final = (Σ slice × project P) / team adjust. Radar slice % is
+        // project-level share only.
+        ContributionSliceWeights configuredWeights = sliceWeightResolver.resolve(team);
+        List<UUID> scoringSprintIds = new ArrayList<>();
+        for (Sprint sprint : sprints) {
+            if (sprint != null && sprint.getId() != null) {
+                scoringSprintIds.add(sprint.getId());
+            }
+        }
+        SprintFirstContributionMixer.Result sprintMix = SprintFirstContributionMixer.mix(
+                memberStudentIds,
+                scoringSprintIds,
+                recognizedByStudentThenSprint,
+                peerScoreBySprint,
+                configuredWeights
+        );
+
+        for (TeamMember member : members) {
+            Student student = member.getStudent();
+            if (student == null || student.getId() == null) {
+                continue;
+            }
+            UUID studentId = student.getId();
+            Map<UUID, List<PeerReview>> reviewsBySprint = peerReviewsByStudentAndSprint
+                    .getOrDefault(studentId, Map.of());
+            List<TeamContributionMemberResponse.SprintContributionBreakdown> sprintBreakdowns =
+                    buildSprintBreakdowns(
+                            sprints,
+                            studentId,
+                            taskScoreByStudentSprint.getOrDefault(studentId, Map.of()),
+                            reviewsBySprint,
+                            peerScoreBySprint,
+                            sprintMix
+                    );
+            double adjustedSprintScore = sprintBreakdowns.stream()
+                    .mapToDouble(TeamContributionMemberResponse.SprintContributionBreakdown::adjustedTaskScore)
+                    .sum();
+            adjustedSprintScoreByStudent.put(studentId, adjustedSprintScore);
+            sprintBreakdownsByStudent.put(studentId, sprintBreakdowns);
+        }
+
         double totalAdjustedTaskScore = adjustedSprintScoreByStudent.values().stream()
                 .mapToDouble(Double::doubleValue)
                 .sum();
-        // TEST/RESEARCH now have a real evidence source: a DONE Task carrying the exact
-        // reserved marker saga:test / saga:research (see classifyTaskContribution). Tasks with
-        // no reserved marker still fall through to the unchanged legacy CODE/DOCUMENT keyword
-        // classifier. A Task with >1 conflicting reserved marker is excluded from all four
-        // buckets (AMBIGUOUS), not defaulted to CODE.
-        ContributionSliceWeights sliceWeights = sliceWeightResolver.resolve(team)
-                .normalizeForActiveSlices(totalCode > 0.0, totalTest > 0.0, totalDocument > 0.0, totalResearch > 0.0);
 
         Map<UUID, Double> codeContributionByStudent = new HashMap<>();
         Map<UUID, Double> testContributionByStudent = new HashMap<>();
@@ -238,15 +266,7 @@ public class TeamContributionService {
         Map<UUID, Double> researchContributionByStudent = new HashMap<>();
         Map<UUID, Double> taskContributionByStudent = new HashMap<>();
         Map<UUID, Double> baseAdjustedContributionByStudent = new HashMap<>();
-        List<UUID> memberStudentIds = new ArrayList<>();
-        for (TeamMember member : members) {
-            Student student = member.getStudent();
-            if (student == null || student.getId() == null) {
-                continue;
-            }
-            UUID studentId = student.getId();
-            memberStudentIds.add(studentId);
-
+        for (UUID studentId : memberStudentIds) {
             double codeContribution = totalCode > 0 ? (codeScoreByStudent.getOrDefault(studentId, 0.0) / totalCode) * 100.0 : 0.0;
             double testContribution = totalTest > 0 ? (testScoreByStudent.getOrDefault(studentId, 0.0) / totalTest) * 100.0 : 0.0;
             double documentContribution = totalDocument > 0
@@ -263,16 +283,10 @@ public class TeamContributionService {
             documentContributionByStudent.put(studentId, documentContribution);
             researchContributionByStudent.put(studentId, researchContribution);
             taskContributionByStudent.put(studentId, taskContribution);
-
-            double rawContribution = (codeContribution * sliceWeights.codeValue()
-                    + testContribution * sliceWeights.testValue()
-                    + documentContribution * sliceWeights.documentValue()
-                    + researchContribution * sliceWeights.researchValue()) / 100.0;
-            double peerCoefficient = totalPeerScore > 0.0
-                    ? peerScoreByStudent.getOrDefault(studentId, 0.0) / totalPeerScore
-                    : 1.0;
-            double adjustedContribution = rawContribution * peerCoefficient;
-            baseAdjustedContributionByStudent.put(studentId, adjustedContribution);
+            baseAdjustedContributionByStudent.put(
+                    studentId,
+                    sprintMix.finalPercentageByStudent().getOrDefault(studentId, 0.0)
+            );
         }
 
         Map<UUID, Double> finalContributionByStudent = normalizeContributionsWithOverrides(
@@ -327,6 +341,8 @@ public class TeamContributionService {
                     peerCoefficientByStudent.getOrDefault(studentId, 1.0),
                     taskContributionByStudent.getOrDefault(studentId, 0.0),
                     taskContributionByStudent.getOrDefault(studentId, 0.0),
+                    sprintMix.sliceScore(studentId),
+                    sprintMix.slicePercentage(studentId),
                     finalContributionByStudent.getOrDefault(studentId, 0.0),
                     evidenceCount,
                     sprintBreakdownsByStudent.getOrDefault(studentId, List.of()),
@@ -527,56 +543,21 @@ public class TeamContributionService {
         return equallySplit;
     }
 
-    /**
-     * Marker-first Contribution classification for a Task: an exact reserved marker
-     * (saga:code/saga:test/saga:document/saga:research) takes precedence over the legacy
-     * keyword classifier below. More than one conflicting reserved marker returns
-     * {@link Optional#empty()} (AMBIGUOUS) — the Task is not scored into any criterion until the
-     * conflict is fixed. No reserved marker falls through unchanged to {@link #classifyTaskSlice}.
-     */
-    private Optional<ContributionCriterion> classifyTaskContribution(Task task) {
-        ContributionMarkerClassification marker = ReservedContributionMarkerClassifier.classify(task.getLabels());
-        if (marker.ambiguous()) {
-            return Optional.empty();
+    private Map<UUID, Integer> evidenceCounts(UUID projectId) {
+        Map<UUID, Integer> counts = new HashMap<>();
+        for (TaskAttachment attachment : taskAttachmentRepository.findByTask_Project_Id(projectId)) {
+            if (attachment.getTask() == null || attachment.getTask().getId() == null) {
+                continue;
+            }
+            counts.merge(attachment.getTask().getId(), 1, Integer::sum);
         }
-        if (marker.isResolved()) {
-            return Optional.of(marker.criterion());
+        for (TaskWebLink webLink : taskWebLinkRepository.findByTask_Project_Id(projectId)) {
+            if (webLink.getTask() == null || webLink.getTask().getId() == null) {
+                continue;
+            }
+            counts.merge(webLink.getTask().getId(), 1, Integer::sum);
         }
-        return Optional.of(switch (classifyTaskSlice(task)) {
-            case CODE -> ContributionCriterion.CODE;
-            case DOCUMENT -> ContributionCriterion.DOCUMENT;
-        });
-    }
-
-    private ContributionSlice classifyTaskSlice(Task task) {
-        String combinedText = String.join(" ",
-                Objects.toString(task.getTitle(), ""),
-                Objects.toString(task.getDescription(), ""),
-                task.getLabels() == null ? "" : task.getLabels().stream().filter(Objects::nonNull).reduce((left, right) -> left + " " + right).orElse(""),
-                task.getComponents() == null ? "" : task.getComponents().stream()
-                        .filter(Objects::nonNull)
-                        .map(component -> component.name())
-                        .filter(Objects::nonNull)
-                        .reduce((left, right) -> left + " " + right)
-                        .orElse("")
-        ).trim();
-        String normalized = combinedText.toLowerCase(Locale.ROOT);
-        if (containsKeyword(normalized, List.of("figma", "mockup", "prototype", "wireframe", "design system", "visual design", "ui/ux", "design review", "design"))) {
-            return ContributionSlice.DOCUMENT;
-        }
-        if (containsKeyword(normalized, List.of("document", "documentation", "doc", "wiki", "readme", "guide", "spec", "manual", "requirement"))) {
-            return ContributionSlice.DOCUMENT;
-        }
-        if (task.getType() != null) {
-            return switch (task.getType()) {
-                case BUG, FEATURE, REQUEST, STORY, TASK, EPIC, SUBTASK -> ContributionSlice.CODE;
-            };
-        }
-        return ContributionSlice.CODE;
-    }
-
-    private boolean containsKeyword(String normalizedText, List<String> keywords) {
-        return keywords.stream().anyMatch(normalizedText::contains);
+        return counts;
     }
 
     private List<ContributionWarning> buildWarnings(
@@ -672,9 +653,11 @@ public class TeamContributionService {
     private List<TeamContributionMemberResponse.SprintContributionBreakdown>
             buildSprintBreakdowns(
                     List<Sprint> sprints,
+                    UUID studentId,
                     Map<UUID, Double> taskScoreBySprint,
                     Map<UUID, List<PeerReview>> reviewsBySprint,
-                    Map<UUID, Map<UUID, Double>> peerScoreBySprint
+                    Map<UUID, Map<UUID, Double>> peerScoreBySprint,
+                    SprintFirstContributionMixer.Result sprintMix
             ) {
         List<TeamContributionMemberResponse.SprintContributionBreakdown> breakdowns =
                 new ArrayList<>();
@@ -701,7 +684,10 @@ public class TeamContributionService {
                     taskScore,
                     retrospectiveMultiplier,
                     taskScore * retrospectiveMultiplier,
-                    sprintReviews.size()
+                    sprintReviews.size(),
+                    sprintMix.sliceScoreInSprint(sprint.getId(), studentId),
+                    sprintMix.slicePercentageInSprint(sprint.getId(), studentId),
+                    sprintMix.percentageInSprint(sprint.getId(), studentId)
             ));
         }
         return breakdowns;
@@ -713,7 +699,7 @@ public class TeamContributionService {
             Map<UUID, Map<UUID, Double>> peerScoreBySprint
     ) {
         if (sprintId == null) {
-            return 1.0;
+            return 0.0;
         }
         Map<UUID, Double> sprintScores = peerScoreBySprint.getOrDefault(sprintId, Map.of());
         double totalScore = sprintScores.values().stream().mapToDouble(Double::doubleValue).sum();

@@ -38,6 +38,7 @@ public class VietnameseOpenApiDocumentationConfiguration {
             entry("ProjectSprintController#start", "Bắt đầu Sprint trên Jira", "Mutation Jira yêu cầu Idempotency-Key. Backend đồng bộ canonical state về local sau khi nhà cung cấp xác nhận."),
             entry("ProjectSprintController#close", "Đóng Sprint trên Jira", "Mutation Jira yêu cầu Idempotency-Key. Backend đồng bộ canonical state về local sau khi nhà cung cấp xác nhận."),
             entry("ProjectSprintController#delete", "Xóa Sprint trên Jira", "Mutation Jira yêu cầu Idempotency-Key. Backend không blind retry khi kết quả remote chưa rõ."),
+            entry("ProjectTaskReadController#attach", "Gắn file, hình ảnh hoặc liên kết bằng chứng vào Task Jira", "Chỉ STUDENT thành viên Team sở hữu Project. Multipart field `files` (tối đa 5 file, mỗi file 10MB) và/hoặc field `link` (http/https, tối đa 2048 ký tự). Ảnh và tài liệu thông dụng. Jira là source of truth cho file; backend canonical fetch rồi lưu metadata local. Link được POST Jira remote link và lưu `task_web_link`. DOCUMENT/RESEARCH cần ít nhất một file hoặc một link mới được tính điểm. Request bắt buộc Idempotency-Key và CSRF."),
             entry("WebhookController#github", "Nhận webhook từ GitHub", "Endpoint dành cho GitHub, không dành cho frontend. Xác thực bằng cơ chế chữ ký riêng và được miễn CSRF."),
             entry("WebhookController#jira", "Nhận webhook từ Jira", "Endpoint dành cho Jira, không dành cho frontend. Xác thực bằng cơ chế riêng và được miễn CSRF."),
             entry("PrivacyPolicyController#getPrivacyPolicy", "Xem chính sách riêng tư", "Endpoint công khai, chỉ trả nội dung chính sách và thông tin liên hệ công khai."),
@@ -96,9 +97,8 @@ public class VietnameseOpenApiDocumentationConfiguration {
             summary("ClassController#getClasses", "Xem danh sách lớp học"),
             summary("CourseContributionWeightController#getCurrentWeights", "Xem cấu hình trọng số đóng góp"),
             summary("CourseContributionWeightController#updateCurrentWeights", "Cập nhật trực tiếp trọng số đóng góp của khóa học"),
-            summary("CourseContributionWeightController#requestWeightChange", "Đề nghị thay đổi trọng số đóng góp"),
-            summary("CourseContributionWeightController#listWeightChangeRequests", "Xem các đề nghị thay đổi trọng số"),
-            summary("CourseContributionWeightController#decideWeightChangeRequest", "Duyệt đề nghị thay đổi trọng số"),
+            summary("CourseContributionWeightController#switchConfigMode", "Chuyển chế độ cấu hình trọng số đóng góp"),
+            summary("CourseContributionWeightController#getTeamWeights", "Xem trọng số đóng góp hiệu lực của từng nhóm"),
             summary("CourseController#getCourseById", "Xem chi tiết khóa học"),
             summary("CourseController#createCourse", "Tạo khóa học"),
             summary("CourseController#updateCourse", "Cập nhật khóa học"),
@@ -194,6 +194,7 @@ public class VietnameseOpenApiDocumentationConfiguration {
             summary("ProjectTaskReadController#assignee", "Thay đổi người được giao Task"),
             summary("ProjectTaskReadController#sprint", "Chuyển Task vào Sprint hoặc backlog"),
             summary("ProjectTaskReadController#estimate", "Cập nhật Story Point của Task"),
+            summary("ProjectTaskReadController#attach", "Gắn file, hình ảnh hoặc liên kết bằng chứng vào Task Jira"),
             summary("ProjectTaskReadController#delete", "Xóa Task trên Jira"),
             summary("ProjectTaskReadController#getTasks", "Xem danh sách Task của dự án"),
             summary("ProjectTaskReadController#getTask", "Xem chi tiết Task"),
@@ -372,6 +373,7 @@ public class VietnameseOpenApiDocumentationConfiguration {
             case "NotificationBroadcastRequest" -> "Nội dung phát thông báo thủ công của ADMIN.";
             case "CourseNotificationBroadcastRequest" -> "Nội dung phát thông báo của LECTURER đến các Course được phép.";
             case "NotificationBroadcastResponse" -> "Kết quả fanout Notification Bell và số delivery FCM đã xếp hàng.";
+            case "JiraTaskAttachmentsResponse" -> "Danh sách file và liên kết bằng chứng hiện có trên Task.";
             default -> "Schema dữ liệu " + vietnameseSchemaName(name) + " của SAGA.";
         };
     }
@@ -401,6 +403,15 @@ public class VietnameseOpenApiDocumentationConfiguration {
             case "NotificationBroadcastResponse.recipientCount" -> "Số người nhận khác nhau sau khi loại trùng.";
             case "NotificationBroadcastResponse.notificationCount" -> "Số Notification Bell đã được lưu.";
             case "NotificationBroadcastResponse.deliveryQueuedCount" -> "Số delivery FCM được xếp hàng cho các installation active.";
+            case "JiraTaskAttachmentsResponse.taskId" -> "UUID Task local trong SAGA.";
+            case "JiraTaskAttachmentsResponse.attachments" -> "Metadata attachment đã đồng bộ từ Jira; không gồm URL tải file.";
+            case "JiraTaskAttachmentsResponse.links" -> "Liên kết web sinh viên đã nộp; SAGA lưu URL, không lưu nội dung trang.";
+            case "TeamContributionMemberResponse.sliceScore" -> "Hệ số slice tuyệt đối (Σ SP × trọng số tiêu chí) trước khi nhân peer. Override giảng viên không đổi field này.";
+            case "TeamContributionMemberResponse.sliceContributionPercentage" -> "% đóng góp chỉ từ slice, chuẩn hóa team = 100, chưa nhân peer review. Khác finalContributionPercentage.";
+            case "TeamContributionMemberResponse.finalContributionPercentage" -> "% đóng góp cuối sau khi nhân peer rồi chuẩn hóa team = 100. Đã gồm P; client không nhân thêm.";
+            case "SprintContributionBreakdown.sliceScore" -> "Hệ số slice của đúng sprint này, trước khi nhân P_s.";
+            case "SprintContributionBreakdown.sliceContributionPercentage" -> "% slice trong sprint, chuẩn hóa team = 100, chưa nhân peer của sprint.";
+            case "SprintContributionBreakdown.contributionPercentage" -> "% đóng góp trong sprint sau khi nhân P_s rồi chuẩn hóa team = 100.";
             default -> "Trường " + vietnameseSchemaName(propertyName) + ".";
         };
     }

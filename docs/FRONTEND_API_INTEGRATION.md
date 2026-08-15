@@ -1,6 +1,31 @@
+## Jira task attachments from SAGA (DEC-093) — 2026-08-15
+
+OpenAPI **149**. Migration head **V39**.
+
+- `POST /api/v1/projects/{projectId}/tasks/{taskId}/attachments` multipart `files` and/or `link`. **STUDENT team member only.** CSRF + `Idempotency-Key`. Response `{taskId, attachments[], links[]}`. File metadata only; links stored in `task_web_link`.
+
+## Absolute weighted slice × peer (DEC-092) — 2026-08-15
+
+OpenAPI **148** (unchanged). No migration.
+
+- `GET /api/v1/teams/{teamId}/contribution-evaluation`: `sliceScore` / `sliceContributionPercentage` = slice **trước** peer (`slice / Σ slice × 100`). `finalContributionPercentage` = `(Σ slice × project P) / team adjust`. Per-sprint `%` after peer stays `sprintBreakdowns[].contributionPercentage`; pre-peer is `sliceContributionPercentage` on the same row. `P = 1` if none yet. Tasks with no sprint do not score. `peerReviewScore` is still project-level peer (0..1); the final % already applied it — do not multiply again on FE.
+
+## Sprint-first contribution % (DEC-091) — 2026-08-15
+
+**SUPERSEDED by DEC-092.**
+
+## Labels-only Task scoring + Jira attachment metadata (DEC-090) — 2026-08-15
+
+OpenAPI **148** (unchanged). Migration head **V37 → V38**.
+
+- Task criterion = **labels only**. Exact reserved markers: `saga:code`, `saga:test`, `saga:document`, `saga:research`. No keyword/title/type fallback — unlabeled or conflicting markers score into **no** criterion (sprint/task numeric score still counts those DONE tasks).
+- **DOCUMENT / RESEARCH:** story points count **only if** that task has at least one Jira file attachment **or** one submitted web link. Evidence count does not add extra points. **CODE / TEST:** story points only.
+- Jira attachment **metadata** is ingested on issue upsert and after `POST .../tasks/{taskId}/attachments`. No file download, no content URL. GitHub attachments remain unimplemented.
+- FE can keep using the existing Jira label editing flow. Do not build an attachment gallery against SAGA.
+
 ## Contribution weight: Course-default + optional exclusive Team override (DEC-088, supersedes DEC-087) — 2026-08-15
 
-OpenAPI **148 (DEC-087) → 151** (revived `PUT .../group-weights`, new `PUT .../contribution-config-mode`, new `GET .../contribution-team-weights`). Migration head **V35 → V36**.
+OpenAPI **148 (DEC-087) → 151** (revived `PUT .../group-weights`, new `PUT .../contribution-config-mode`, new `GET .../contribution-team-weights`). Migration head **V35 → V36**. Current generated count is **148** after removing the 3 legacy Course slice-weight request/list/decision APIs.
 
 - Each Course has exactly one active Contribution config mode — `Course.contributionConfigMode` = `COURSE` or `TEAM`. **There is no "Team override if present, else Course" hybrid** — a Course is entirely in one mode. Do not build a per-Team "override toggle" UI that silently falls back; if a Course is in TEAM mode and a Team has no override, that Team's Contribution is **not computable** (Backend returns `TEAM_WEIGHT_CONFIG_INCOMPLETE`), not "using Course weights."
 - Criteria universe is now **`CODE/TEST/DOCUMENT/RESEARCH`** — `DESIGN` is retired as a Contribution criterion (it still exists as a ProjectType catalog value, `DESIGN_ARCHITECTURE`, but the two concepts are unrelated — ProjectType does not decide Contribution weight).
@@ -9,7 +34,7 @@ OpenAPI **148 (DEC-087) → 151** (revived `PUT .../group-weights`, new `PUT ...
 - **Mode switch:** `PUT /api/v1/courses/{courseId}/contribution-config-mode` with `{"mode": "COURSE"|"TEAM"}` — LECTURER exact instructor, CSRF required. Switching to `TEAM` validates that **every current Team** in the Course already has a valid `group-weights` override; if any is missing, the switch is rejected with 409 `TEAM_MODE_CONFIGURATION_INCOMPLETE` and the mode stays `COURSE` (atomic — no partial activation). FE flow: let the Lecturer configure each Team's weights first (as "drafts"), then call this endpoint to activate; show the 409's missing-Team detail if rejected. Switching back to `COURSE` always succeeds and does not delete the Teams' saved overrides (they become inactive/historical, reusable if TEAM mode is activated again later). A Team created after TEAM mode is already active is **not** automatically covered by Course weights — it needs its own override before Contribution can be computed for it.
 - **Team menu read:** `GET /api/v1/courses/{courseId}/contribution-team-weights` (ADMIN/LECTURER) — new endpoint returning the Course's current mode plus each Team's effective weights and source. Use this to populate a "current effective weights per Team" screen instead of re-deriving it client-side.
 - FE UI: one "Course Contribution Criteria" form (Code/Test/Document/Research, sum 100%) for COURSE mode, plus a per-Team weight screen (Code/Test/Document/Research, sum 1.0) for TEAM mode, gated by the Course's current mode and an explicit "activate Team mode" action that can fail with a clear "N Teams still need weights" message.
-- **`testWeight`/`researchWeight` (DEC-089 update): scoring now works for a specific evidence path only.** If at least one DONE Task in a Team/Project carries the exact Jira label `saga:test` or `saga:research` (case-sensitive exact match, no substring), its story points route into that criterion and `testContributionScore`/`researchContributionScore` (and their `*Percentage` counterparts) become genuinely non-zero. If no Task carries that marker, they stay `0` and the weight budget redistributes to the active criteria, same as before. This is still only a foundation piece — evidence sourced from Jira/GitHub attachments or from commits (via traceability) is **not implemented yet**, so do not present 4-criteria scoring as fully complete in FE copy; only the Task-marker path is real.
+- **`testWeight`/`researchWeight` (DEC-090/093 update):** a DONE Task scores TEST via `saga:test` (story points always). RESEARCH via `saga:research` **only when the Task has at least one Jira file or submitted link**; DOCUMENT is the same gate on `saga:document`. Extra evidence does not add points. CODE/TEST attachments/links are ignored. If no recognized evidence, that slice stays `0` and the weight budget redistributes. GitHub attachments are still not ingested — do not present an attachment-import UI.
 - **Existing Course and Team weight rows keep their prior Code/Document values** after these migrations (not reset). Only the new columns are backfilled to `0`/`COURSE` for them.
 
 ## Task-is-sole-numeric-authority + reserved Contribution markers (DEC-089, foundation only) — 2026-08-15
@@ -19,7 +44,7 @@ Migration head **V36 → V37**. No OpenAPI change (no new route).
 - New reserved Jira labels FE can let Lecturers/Students see/set on a Task (via the existing Jira label editing flow — no new SAGA endpoint): `saga:code`, `saga:test`, `saga:document`, `saga:research`. Exact string match only; a typo like `saga:test-extra` or wrong case does nothing.
 - If a Task carries more than one of these markers at once (e.g. `saga:test` + `saga:research`), Backend treats it as ambiguous and excludes it from all four criteria until the conflict is resolved — it does not silently pick one. There is no dedicated error surfaced to FE for this today (it's silent in the score, not a rejected write) — a Lecturer would only notice via an unexpectedly low/zero criterion score.
 - A commit linked to a Task never adds extra score on top of that Task's own DONE contribution — the Task's story points are the only number that counts. This is an internal scoring-engine change with no new FE-visible field.
-- Attachment/document ingestion from Jira or GitHub is **not implemented** — do not build UI expecting SAGA to auto-import Jira attachments or GitHub issue/comment attachments yet.
+- Attachment/document ingestion from Jira stores **metadata only** (DEC-090). GitHub Issue/comment attachments are **not** ingested — do not build UI expecting SAGA to auto-import GitHub attachments.
 
 ## ProjectType fixed canonical catalog (DEC-086) — 2026-08-15
 
@@ -1382,13 +1407,13 @@ Contribution API dùng session. Tất cả mutation phải gửi CSRF; GET khôn
 | PUT | `/api/v1/courses/{courseId}/contribution-slice-weights` | LECTURER | Official new FE mutation. Exact Course instructor; no `lecturerId`. Other Course / STUDENT / ADMIN 403. CSRF required. Scale 0–100, sum 100 ± 0.01. `{codeWeight,testWeight,documentWeight,researchWeight}`. Only authoritative while Course is in `COURSE` mode | `200 CourseContributionSliceWeightResponse` |
 | PUT | `/api/v1/courses/{courseId}/contribution-config-mode` | LECTURER | Exact Course instructor, CSRF required. `{"mode":"COURSE"\|"TEAM"}`. Activating `TEAM` requires every current Team to already have a valid `group-weights` override (atomic; 409 `TEAM_MODE_CONFIGURATION_INCOMPLETE` if any is missing) | `200 ContributionConfigModeResponse` |
 | GET | `/api/v1/courses/{courseId}/contribution-team-weights` | ADMIN, LECTURER | Team-menu read: current mode + effective weights + source per Team | `200 CourseTeamContributionWeightsResponse` |
-| POST | `/api/v1/courses/{courseId}/contribution-slice-weight-requests` | LECTURER | **Legacy / deprecated for new FE.** Body `lecturerId` phải là instructor; chưa bind actor hoàn toàn với principal | `200 CourseContributionSliceWeightRequestResponse` |
-| GET | `/api/v1/courses/contribution-slice-weight-requests` | ADMIN, LECTURER | Legacy list. ADMIN xem theo filter; LECTURER được scope theo principal/Course của mình | `200` danh sách request |
-| PUT | `/api/v1/courses/contribution-slice-weight-requests/{requestId}/decision` | ADMIN | **Legacy.** Decision dùng `adminId` nullable từ body | `200 CourseContributionSliceWeightRequestResponse` |
+
+Luồng gửi đơn / Admin duyệt trọng số đã gỡ: không còn
+`POST .../contribution-slice-weight-requests`, `GET .../contribution-slice-weight-requests`,
+hay `PUT .../contribution-slice-weight-requests/{requestId}/decision`. Lecturer sửa trọng số trực tiếp.
 
 Contribution evaluation và Lecturer direct Course-weight PUT đã bind actor từ `SagaPrincipal.localProfileId`; FE không gửi actor ID
-và backend 403 là authority. Các actor-binding risk còn lại trong bảng thuộc **legacy** slice-weight request/decision,
-không áp dụng cho GET evaluation hay PUT current weights. Evaluation chỉ là current aggregate; không hiển thị nó như
+và backend 403 là authority. Evaluation chỉ là current aggregate; không hiển thị nó như
 historical committed snapshot.
 
 Leader gọi:

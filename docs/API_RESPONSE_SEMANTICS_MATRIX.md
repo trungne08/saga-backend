@@ -1,3 +1,19 @@
+## Absolute weighted slice × peer (DEC-092, 2026-08-15)
+
+No route added/removed. `sliceScore` / `sliceContributionPercentage` are the pre-peer slice (raw and team-normalized %). `finalContributionPercentage` is `(Σ slice × project P) / team adjust`. `sprintBreakdowns[]` now has the same pre-peer pair plus after-peer `contributionPercentage`.
+
+## Sprint-first contribution % (DEC-091, 2026-08-15)
+
+**SUPERSEDED by DEC-092.**
+
+## Labels-only Task scoring + Jira attachment metadata (DEC-090, 2026-08-15)
+
+No route added/removed. Migration head **V37 → V38**.
+
+- Task→criterion is **labels only** (`saga:code`/`saga:test`/`saga:document`/`saga:research`). Unlabeled or conflicting markers enter no criterion; sprint/task numeric score is unchanged.
+- DOCUMENT/RESEARCH story points count **only if** the Task has at least one Jira file attachment **or** one submitted web link. Extra files/links do not add points. CODE/TEST attachments ignored. No file download API.
+- GitHub attachments remain unimplemented.
+
 ## Task-is-sole-numeric-authority + reserved Contribution markers (DEC-089, foundation only, 2026-08-15)
 
 No route added/removed — internal scoring-engine change only. Migration head **V36 → V37**.
@@ -183,7 +199,6 @@ Quy ước: `OAS` là response được khai báo trực tiếp trong OpenAPI; `
 | GET | `/api/v1/projects/{projectId}/sprints/{sprintId}` | Generated: detail | OAS: 200 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | detail; OAS: 200 | OK | Bổ sung response metadata chi tiết theo task riêng. |
 | PUT | `/api/v1/projects/{projectId}/sprints/{sprintId}` | Generated: update | OAS: 200 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | update; OAS: 200 | OK | Bổ sung response metadata chi tiết theo task riêng. |
 | DELETE | `/api/v1/projects/{projectId}/sprints/{sprintId}` | Generated: delete_1 | OAS: 200 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | delete_1; OAS: 200 | OK | Bổ sung response metadata chi tiết theo task riêng. |
-| PUT | `/api/v1/courses/contribution-slice-weight-requests/{requestId}/decision` | CourseContributionWeightController | OAS: 200 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | decideWeightChangeRequest; OAS: 200 | OK | Bổ sung response metadata chi tiết theo task riêng. |
 | GET | `/api/v1/classes/{id}` | ClassController | OAS: 200 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | getClassById; OAS: 200 | OK | Bổ sung response metadata chi tiết theo task riêng. |
 | PUT | `/api/v1/classes/{id}` | ClassController | OAS: 200 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | updateClass; OAS: 200 | OK | Bổ sung response metadata chi tiết theo task riêng. |
 | DELETE | `/api/v1/classes/{id}` | ClassController | OAS: 200 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | deleteClass; OAS: 200 | OK | Bổ sung response metadata chi tiết theo task riêng. |
@@ -209,7 +224,6 @@ Quy ước: `OAS` là response được khai báo trực tiếp trong OpenAPI; `
 | GET | `/api/v1/courses` | CourseController | OAS: 200 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | getCourses; OAS: 200 | OK | Bổ sung response metadata chi tiết theo task riêng. |
 | POST | `/api/v1/courses` | CourseController | OAS: 200 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | createCourse; OAS: 200 | OK | Bổ sung response metadata chi tiết theo task riêng. |
 | POST | `/api/v1/courses/{courseId}/import-students` | CourseController | OAS: 200 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | importStudents; OAS: 200 | OK | Bổ sung response metadata chi tiết theo task riêng. |
-| POST | `/api/v1/courses/{courseId}/contribution-slice-weight-requests` | CourseContributionWeightController | OAS: 200 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | requestWeightChange; OAS: 200 | OK | Bổ sung response metadata chi tiết theo task riêng. |
 | GET | `/api/v1/classes` | ClassController | OAS: 200 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | getClasses; OAS: 200 | OK | Bổ sung response metadata chi tiết theo task riêng. |
 | POST | `/api/v1/classes` | ClassController | OAS: 200 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | createClass; OAS: 200 | OK | Bổ sung response metadata chi tiết theo task riêng. |
 | POST | `/api/teams/{teamId}/projects` | Generated: create_1 | OAS: 201 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | create_1; OAS: 201 | OK | Bổ sung response metadata chi tiết theo task riêng. |
@@ -240,7 +254,6 @@ Quy ước: `OAS` là response được khai báo trực tiếp trong OpenAPI; `
 | GET | `/api/v1/courses/{courseId}/early-warnings` | LecturerAnalyticsController | OAS: 200 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | earlyWarnings; OAS: 200 | OK | Bổ sung response metadata chi tiết theo task riêng. |
 | GET | `/api/v1/courses/{courseId}/contribution-slice-weights` | CourseContributionWeightController | OAS: 200 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | getCurrentWeights; OAS: 200 | OK | Bổ sung response metadata chi tiết theo task riêng. |
 | GET | `/api/v1/courses/instructors` | CourseController | OAS: 200 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | getLecturersForCourseAssignment; OAS: 200 | OK | Bổ sung response metadata chi tiết theo task riêng. |
-| GET | `/api/v1/courses/contribution-slice-weight-requests` | CourseContributionWeightController | OAS: 200 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | listWeightChangeRequests; OAS: 200 | OK | Bổ sung response metadata chi tiết theo task riêng. |
 | GET | `/api/projects/{projectId}/sync-status` | ProjectIntegrationController | OAS: 200 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | syncStatus; OAS: 200 | OK | Bổ sung response metadata chi tiết theo task riêng. |
 | GET | `/api/projects/{projectId}/sync-history` | ProjectIntegrationController | OAS: 200 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | syncHistory; OAS: 200 | OK | Bổ sung response metadata chi tiết theo task riêng. |
 | GET | `/api/projects/{projectId}/jira/connect` | ProjectIntegrationController | OAS: 200 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD (provider) | jiraConnect; OAS: 200 | OK | Bổ sung response metadata chi tiết theo task riêng. |

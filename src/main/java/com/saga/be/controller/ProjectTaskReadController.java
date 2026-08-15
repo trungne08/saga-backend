@@ -32,6 +32,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 @RestController
 @io.swagger.v3.oas.annotations.tags.Tag(name = "Jira Task", description = "Đọc và thay đổi task đồng bộ với Jira.")
@@ -91,6 +92,21 @@ public class ProjectTaskReadController {
     public ResponseEntity<TaskReadResponse> estimate(@AuthenticationPrincipal SagaPrincipal principal, @PathVariable UUID projectId,
             @PathVariable UUID taskId, @RequestHeader("Idempotency-Key") String key, @jakarta.validation.Valid @RequestBody JiraTaskEstimationRequest request) {
         return ResponseEntity.ok(taskWriteService.estimate(principal, projectId, taskId, key, request));
+    }
+
+    @PreAuthorize("hasRole('STUDENT')")
+    @PostMapping(path = "/{taskId}/attachments", consumes = org.springframework.http.MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<com.saga.be.dto.response.JiraTaskAttachmentsResponse> attach(
+            @AuthenticationPrincipal SagaPrincipal principal,
+            @PathVariable UUID projectId,
+            @PathVariable UUID taskId,
+            @RequestHeader("Idempotency-Key") String key,
+            @RequestParam(value = "files", required = false) java.util.List<MultipartFile> files,
+            @RequestParam(value = "link", required = false) String link
+    ) {
+        return ResponseEntity.status(org.springframework.http.HttpStatus.CREATED).body(
+                taskWriteService.attach(principal, projectId, taskId, key, files, link)
+        );
     }
 
     @DeleteMapping("/{taskId}")

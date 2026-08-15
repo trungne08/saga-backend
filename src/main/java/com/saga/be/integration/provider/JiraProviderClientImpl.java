@@ -747,6 +747,86 @@ public class JiraProviderClientImpl implements JiraProviderClient {
     }
 
     @Override
+    public List<JiraAttachmentSnapshot> addIssueAttachments(
+            String accessToken,
+            String cloudId,
+            String issueIdOrKey,
+            List<JiraAttachmentUpload> files
+    ) {
+        if (files == null || files.isEmpty()) {
+            throw IntegrationException.invalid(
+                    "JIRA_ATTACHMENT_REQUIRED",
+                    "At least one file is required"
+            );
+        }
+        org.springframework.util.MultiValueMap<String, Object> body =
+                new org.springframework.util.LinkedMultiValueMap<>();
+        for (JiraAttachmentUpload file : files) {
+            if (file == null || file.filename() == null || file.filename().isBlank()) {
+                throw IntegrationException.invalid(
+                        "JIRA_ATTACHMENT_FILENAME_INVALID",
+                        "Each attachment must have a file name"
+                );
+            }
+            byte[] content = file.content();
+            body.add("file", new org.springframework.core.io.ByteArrayResource(content) {
+                @Override
+                public String getFilename() {
+                    return file.filename();
+                }
+            });
+        }
+        try {
+            JsonNode response = restClient.post()
+                    .uri(jiraUri(
+                            cloudId,
+                            "/rest/api/3/issue/" + requiredPathSegment(issueIdOrKey) + "/attachments"
+                    ))
+                    .headers(headers -> {
+                        bearer(headers, accessToken);
+                        headers.set("X-Atlassian-Token", "no-check");
+                    })
+                    .contentType(MediaType.MULTIPART_FORM_DATA)
+                    .body(body)
+                    .retrieve()
+                    .body(JsonNode.class);
+            List<JiraAttachmentSnapshot> uploaded = attachments(response);
+            if (uploaded.isEmpty()) {
+                throw providerResponseInvalid();
+            }
+            return uploaded;
+        } catch (RestClientResponseException exception) {
+            throw translate(exception);
+        } catch (RestClientException exception) {
+            throw providerUnavailable();
+        }
+    }
+
+    @Override
+    public String addIssueRemoteLink(
+            String accessToken,
+            String cloudId,
+            String issueIdOrKey,
+            String url,
+            String title
+    ) {
+        Map<String, Object> object = new LinkedHashMap<>();
+        object.put("url", requiredNonBlank(url));
+        object.put("title", title == null || title.isBlank() ? "Evidence link" : title.trim());
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("object", object);
+        JsonNode response = postJson(jiraUri(
+                cloudId,
+                "/rest/api/3/issue/" + requiredPathSegment(issueIdOrKey) + "/remotelink"
+        ), accessToken, body);
+        JsonNode id = response.path("id");
+        if (id.isMissingNode() || id.isNull() || id.asText().isBlank()) {
+            throw providerResponseInvalid();
+        }
+        return id.asText();
+    }
+
+    @Override
     public JiraSprintSnapshot getSprint(String accessToken, String cloudId, String sprintId) {
         try {
             return toSprint(get(jiraUri(
@@ -1815,7 +1895,7 @@ public class JiraProviderClientImpl implements JiraProviderClient {
     private String issueFields(String estimationFieldId, String sprintFieldId) {
         return "summary,issuetype,status,priority,assignee,reporter,"
                 + "duedate,created,updated,resolutiondate,resolution,"
-                + "labels,components,description"
+                + "labels,components,description,attachment"
                 + (estimationFieldId == null ? "" : "," + requiredStableId(estimationFieldId))
                 + (sprintFieldId == null ? "" : "," + requiredStableId(sprintFieldId));
     }
@@ -1868,6 +1948,7 @@ public class JiraProviderClientImpl implements JiraProviderClient {
                 labels(fields.path("labels")),
                 description(fields.path("description")),
                 components(fields.path("components")),
+                attachments(fields.path("attachment")),
                 storyPointsAuthoritative
         );
     }
@@ -1907,6 +1988,43 @@ public class JiraProviderClientImpl implements JiraProviderClient {
             labels.add(label.asText());
         }
         return List.copyOf(labels);
+    }
+
+    private List<JiraAttachmentSnapshot> attachments(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return List.of();
+        }
+        if (!node.isArray()) {
+            throw providerResponseInvalid();
+        }
+        List<JiraAttachmentSnapshot> attachments = new ArrayList<>();
+        for (JsonNode attachment : node) {
+            if (attachment == null || !attachment.isObject()) {
+                throw providerResponseInvalid();
+            }
+            String id = scalarText(attachment.get("id"));
+            if (id == null || id.isBlank()) {
+                throw providerResponseInvalid();
+            }
+            attachments.add(new JiraAttachmentSnapshot(
+                    id,
+                    scalarText(attachment.get("filename")),
+                    scalarText(attachment.get("mimeType")),
+                    attachmentSize(attachment.get("size")),
+                    nestedText(attachment, "author", "accountId")
+            ));
+        }
+        return List.copyOf(attachments);
+    }
+
+    private Long attachmentSize(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return null;
+        }
+        if (!node.isNumber()) {
+            throw providerResponseInvalid();
+        }
+        return node.longValue();
     }
 
     private List<TaskComponentSnapshot> components(JsonNode node) {

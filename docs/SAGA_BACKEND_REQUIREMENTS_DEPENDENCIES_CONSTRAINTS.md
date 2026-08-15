@@ -1,3 +1,25 @@
+## Jira task evidence from SAGA (DEC-093) — 2026-08-15
+
+- Attach endpoint is **STUDENT team member only**. Files and/or an `http`/`https` link. DOCUMENT/RESEARCH count when ≥1 `TaskAttachment` or ≥1 `TaskWebLink`.
+- Persist Jira file metadata (`V38`) and submitted links (`V39__add_task_web_link.sql`). Do not store links in `task_attachment`. No file download. GitHub attachments not ingested.
+- OpenAPI **149**. Migration head **V39**.
+
+## Absolute weighted slice × peer (DEC-092) — 2026-08-15
+
+- Final contribution = `(Σ sprint slices × project P) / team adjust × 100`. Per-sprint display `% = (slice × P_s) / team adjust`. `slice = Σ SP_criterion × configured weight` (no share mix, no unused-weight redistribution). `P_s = 1` if that sprint has no peer. Tasks with no sprint do not score.
+- OpenAPI **148**. No migration. Spec: `docs/CONTRIBUTION_CALCULATION_SPEC.md`.
+
+## Sprint-first contribution % (DEC-091) — 2026-08-15
+
+- **SUPERSEDED by DEC-092.**
+
+## Labels-only Task scoring + Jira attachment metadata (DEC-090) — 2026-08-15
+
+- Task criterion = reserved labels only. No keyword/title/`TaskType` fallback.
+- DOCUMENT/RESEARCH: story points count only when the Task has ≥1 Jira `TaskAttachment` or ≥1 submitted `TaskWebLink`. Extra files/links do not add points. CODE/TEST ignore attachments.
+- Persist Jira attachment metadata only (`V38__add_task_attachment.sql`). No file download. GitHub attachments not ingested.
+- OpenAPI **148**. Migration head **V37 → V38**.
+
 ## Task-is-sole-numeric-authority + reserved Contribution markers constraints (DEC-089, foundation only) — 2026-08-15
 
 - Foundation-only: Jira attachment ingestion and GitHub Issue/comment attachment extraction (the rest of the originally-requested milestone) are **not implemented**, blocked on unconfirmed provider runtime facts (Jira attachment endpoint, GitHub App permission grant, private-repo attachment CDN auth). Do not claim external-evidence ingestion exists.
@@ -8,7 +30,7 @@
 - Task is the sole numeric Contribution authority when evidence is Task-linked — NUMERIC_TASK_FORMULA_CHANGED = NO (per-Task formula untouched) but COMMIT_NUMERIC_CONTRIBUTION_CHANGED = YES and OVERALL_CONTRIBUTION_SOURCE_SEMANTIC_CHANGED = YES: a commit linked to a DONE+assigned Task contributes exactly zero additional numeric score now (previously contributed its full weight) — the per-commit slice-scoring loop, which previously double-counted via the dead `commit.task` FK, was removed from both services. This is a deliberate double-count-prevention decision, not a no-op; do not describe it as "formula unchanged." Standalone (non-task-linked) commits and Documents are unaffected — no Task dependency existed for them before or after.
 - TEST/RESEARCH have a real evidence source for the Task-marker path only (a DONE Task with `saga:test`/`saga:research`); provider-sourced TEST/RESEARCH evidence remains `TBD_PRODUCT_RULE`.
 - `V37__fold_legacy_design_weight_into_document.sql` (new, does not touch V34/V35/V36 since their applied status could not be confirmed by runtime evidence): `document = document + design; design = 0`, for both `course` and `project_group_weight_config`. `code`/`test`/`research` are never written by this migration. Guard: only folds a row where `code+test+document+research+design` still equals exactly 100/1.0 (i.e. design is genuinely the missing piece of an untouched legacy total) — never a row already validly configured with the active four fields alone summing to 100/1.0, since that would corrupt an already-correct sum. Proven by an executed test against real H2, not string matching alone.
-- OpenAPI operation count baseline **unchanged (151)**. Migration head **V36 → V37**. Peer Review / Rubric / individual override / Student progress authorization / AI Agent / COURSE-TEAM mode (DEC-088) not changed.
+- OpenAPI operation count baseline **148** (3 legacy Course slice-weight request/list/decision routes removed). Migration head **V36 → V37**. Peer Review / Rubric / individual override / Student progress authorization / AI Agent / COURSE-TEAM mode (DEC-088) not changed.
 
 ## Contribution weight: Course-default + optional exclusive Team override constraints (DEC-088, supersedes DEC-087) — 2026-08-15
 

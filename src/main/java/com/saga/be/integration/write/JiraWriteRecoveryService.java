@@ -111,6 +111,7 @@ public class JiraWriteRecoveryService {
                 case SPRINT_CLOSE -> notificationProducer.sprintCompleted(operation.getId(), NotificationType.SPRINT_CLOSED, null, sprintName);
                 case SPRINT_DELETE -> notificationProducer.sprintCompleted(operation.getId(), NotificationType.SPRINT_DELETED, null, sprintName);
                 case TASK_UPDATE, TASK_SPRINT, TASK_ESTIMATION -> throw new IllegalStateException("Target-aware recovery must not complete in background");
+                case TASK_ATTACHMENT -> { }
             }
         } catch (RuntimeException exception) {
             log.warn("Jira recovery notification failed after durable completion: operationType={}",

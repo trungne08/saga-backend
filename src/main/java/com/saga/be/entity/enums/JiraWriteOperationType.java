@@ -8,6 +8,7 @@ public enum JiraWriteOperationType {
     TASK_ASSIGN,
     TASK_SPRINT,
     TASK_ESTIMATION,
+    TASK_ATTACHMENT,
     SPRINT_CREATE,
     SPRINT_UPDATE,
     SPRINT_DELETE,

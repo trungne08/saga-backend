@@ -34,7 +34,6 @@ Tài liệu này mô tả đúng các API hiện có trong code để FE tích h
 - Lecturer sửa trọng số slice theo Team/Project (`PUT /api/projects/{projectId}/group-weights`, `TEAM` mode)
 - Chuyển mode Course-wide Contribution config (`PUT .../contribution-config-mode`)
 - Team-menu read (`GET .../contribution-team-weights`)
-- Legacy đề nghị/duyệt trọng số slice (backward-compatible, deprecated for new FE)
 - Individual contribution override (`POST .../contribution-override`) — unchanged
 
 ---
@@ -309,7 +308,8 @@ quyết định quyền bằng UI.
           "taskScore": 8.5,
           "retrospectiveMultiplier": 1.0,
           "adjustedTaskScore": 8.5,
-          "peerReviewCount": 3
+          "peerReviewCount": 3,
+          "contributionPercentage": 56.14
         }
       ],
       "warnings": []
@@ -321,8 +321,8 @@ quyết định quyền bằng UI.
 **Ghi chú**
 - Đây là **current aggregate** tính từ dữ liệu hiện tại, không phải historical
   committed snapshot theo thời điểm bắt đầu Sprint.
-- `finalContributionPercentage` là % cuối cùng để hiển thị cho ADMIN, Lecturer đúng Course hoặc
-  Student LEADER đúng Team theo authorization ở trên.
+- `finalContributionPercentage` = `(Σ slice × P cả dự án) / Σ adjust team × 100` (DEC-092), rồi override/normalize về tổng 100. Slice = Σ SP cùng tiêu chí × trọng số. Client không nhân lại `peerReviewScore`.
+- `sprintBreakdowns[].contributionPercentage` là % đã chốt của sprint đó.
 - `code/document` là breakdown theo slice thực tế có evidence (evidence từng gán DESIGN nay gộp vào `document`).
 - **(Cập nhật DEC-089)** `testContributionScore`/`testContributionPercentage` và
   `researchContributionScore`/`researchContributionPercentage` **không còn hardcode `0`** — nếu một
@@ -483,103 +483,13 @@ logic ở client.
 
 ---
 
-### 3.7 Legacy / backward compatibility / deprecated for new FE
+Giảng viên sửa trọng số trực tiếp qua `PUT .../contribution-slice-weights` (COURSE mode) hoặc
+`PUT /api/projects/{projectId}/group-weights` (TEAM mode). Không còn luồng gửi đơn / Admin duyệt /
+lấy danh sách đơn. Các route sau **đã gỡ**, FE không được gọi:
 
-Các endpoint dưới **vẫn tồn tại** trong source. Không ghi REMOVED. New FE **không** dùng Lecturer request → Admin decision cho normal Course-weight editing.
-
-**Không mở rộng với `testWeight`/`researchWeight`** (không còn consumer FE mới): request/response
-giữ nguyên ba field `{codeWeight, documentWeight, designWeight}` tổng 100 — DTO legacy này không đổi
-tên field theo DEC-088. Khi Admin duyệt (`APPROVED`), backend ghi `code`/`document` trực tiếp vào
-Course, ghi giá trị `design` đề xuất verbatim vào cột đã inactive `design_contribution_weight` (giữ
-lại cho lịch sử, không discard, không tự suy diễn map sang `research`), và đặt `testWeight = 0`.
-Việc này an toàn dù tổng bốn cột active có thể không đúng 100 theo nghĩa thô, vì
-`ContributionSliceWeights.fromCourse` luôn renormalize theo tổng các slice đang active khi tính
-Contribution thật.
-
-#### Gửi yêu cầu đổi trọng số (legacy)
-
-`POST /api/v1/courses/{courseId}/contribution-slice-weight-requests`
-
-**Controller role annotation:** LECTURER.
-
-**Effective service authorization:** service kiểm `lecturerId` trong body là
-instructor của Course nhưng chưa bind ID đó với principal của phiên.
-
-**Request body**
-```json
-{
-  "lecturerId": "uuid",
-  "reason": "Course nay nhieu design hon code",
-  "codeWeight": 30,
-  "documentWeight": 20,
-  "designWeight": 50
-}
-```
-
-**Response**
-```json
-{
-  "requestId": "uuid",
-  "courseId": "uuid",
-  "courseCode": "SAGA101",
-  "courseName": "Software Engineering",
-  "lecturerId": "uuid",
-  "lecturerName": "Dr. A",
-  "proposedCodeWeight": 30,
-  "proposedDocumentWeight": 20,
-  "proposedDesignWeight": 50,
-  "reason": "Course nay nhieu design hon code",
-  "status": "PENDING",
-  "createdAt": "2026-08-04T12:00:00",
-  "resolvedAt": null
-}
-```
-
-#### Danh sách yêu cầu đổi trọng số (legacy)
-
-`GET /api/v1/courses/contribution-slice-weight-requests?status=PENDING&courseId={courseId}`
-
-**Controller role annotation:** ADMIN, LECTURER.
-
-**Effective service authorization:** ADMIN xem theo filter; LECTURER được scope
-theo `SagaPrincipal.localProfileId` và chỉ xem Course của mình.
-
-#### Duyệt / từ chối yêu cầu (legacy)
-
-`PUT /api/v1/courses/contribution-slice-weight-requests/{requestId}/decision`
-
-**Controller role annotation:** ADMIN.
-
-**Effective service behavior:** method dùng `adminId` nullable từ request body để
-resolve người duyệt thay vì bind hoàn toàn với principal. Đây là known backend risk.
-
-**Request body**
-```json
-{
-  "decision": "APPROVED",
-  "note": "Dong y",
-  "adminId": "uuid"
-}
-```
-
-**Response**
-```json
-{
-  "requestId": "uuid",
-  "courseId": "uuid",
-  "courseCode": "SAGA101",
-  "courseName": "Software Engineering",
-  "lecturerId": "uuid",
-  "lecturerName": "Dr. A",
-  "proposedCodeWeight": 30,
-  "proposedDocumentWeight": 20,
-  "proposedDesignWeight": 50,
-  "reason": "Course nay nhieu design hon code",
-  "status": "APPROVED",
-  "createdAt": "2026-08-04T12:00:00",
-  "resolvedAt": "2026-08-04T12:30:00"
-}
-```
+- `POST /api/v1/courses/{courseId}/contribution-slice-weight-requests`
+- `GET /api/v1/courses/contribution-slice-weight-requests`
+- `PUT /api/v1/courses/contribution-slice-weight-requests/{requestId}/decision`
 
 ---
 
@@ -627,9 +537,8 @@ của Course chứa Team. Với LECTURER, actor lấy từ principal; với ADMI
 5. Lecturer đúng Course gọi `PUT .../contribution-slice-weights` (CSRF) khi Course đang ở `COURSE` mode
 6. Nếu muốn dùng `TEAM` mode: Lecturer gọi `PUT /api/projects/{projectId}/group-weights` (CSRF) cho **từng** Team hiện tại trước, rồi gọi `PUT .../contribution-config-mode` `{"mode":"TEAM"}` để activate — bị từ chối `409` nếu còn Team thiếu override
 7. FE dùng `GET .../contribution-team-weights` để hiển thị mode hiện tại + effective weight từng Team, không tự suy diễn ở client
-8. Legacy `POST .../contribution-slice-weight-requests` rồi Admin `PUT .../decision` vẫn tồn tại nhưng **deprecated for new FE**
-9. Lecturer/admin có thể dùng `POST .../contribution-override` khi cần chỉnh tay có lý do (individual override, không đổi)
-10. FE lấy `GET /api/v1/projects/{projectId}/sprints` hoặc `GET /api/v1/teams/{teamId}/sprints` để chọn `sprintId` trước khi vào luồng contribution/peer review
+8. Lecturer/admin có thể dùng `POST .../contribution-override` khi cần chỉnh tay có lý do (individual override, không đổi)
+9. FE lấy `GET /api/v1/projects/{projectId}/sprints` hoặc `GET /api/v1/teams/{teamId}/sprints` để chọn `sprintId` trước khi vào luồng contribution/peer review
 
 ### Quan trọng về `sprintId`
 

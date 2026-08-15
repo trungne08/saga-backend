@@ -4,22 +4,25 @@ import com.saga.be.entity.PeerReview;
 import com.saga.be.entity.Sprint;
 import com.saga.be.entity.Student;
 import com.saga.be.entity.Task;
+import com.saga.be.entity.TaskAttachment;
+import com.saga.be.entity.TaskWebLink;
 import com.saga.be.entity.Team;
 import com.saga.be.entity.enums.TaskStatus;
-import com.saga.be.entity.value.TaskComponentSnapshot;
-import com.saga.be.repository.DocumentRepository;
 import com.saga.be.repository.PeerReviewRepository;
 import com.saga.be.repository.SprintRepository;
+import com.saga.be.repository.TaskAttachmentRepository;
 import com.saga.be.repository.TaskRepository;
+import com.saga.be.repository.TaskWebLinkRepository;
 import com.saga.be.repository.TeamMemberRepository;
 import com.saga.be.repository.TeamRepository;
 import java.math.BigDecimal;
 import java.math.MathContext;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -33,28 +36,31 @@ public class ContributionCalculationService {
     private static final BigDecimal ONE_HUNDRED = BigDecimal.valueOf(100);
     private final TeamRepository teamRepository;
     private final TeamMemberRepository teamMemberRepository;
-    private final DocumentRepository documentRepository;
     private final SprintRepository sprintRepository;
     private final TaskRepository taskRepository;
     private final PeerReviewRepository peerReviewRepository;
     private final ContributionSliceWeightResolver sliceWeightResolver;
+    private final TaskAttachmentRepository taskAttachmentRepository;
+    private final TaskWebLinkRepository taskWebLinkRepository;
 
     public ContributionCalculationService(
             TeamRepository teamRepository,
             TeamMemberRepository teamMemberRepository,
-            DocumentRepository documentRepository,
             SprintRepository sprintRepository,
             TaskRepository taskRepository,
             PeerReviewRepository peerReviewRepository,
-            ContributionSliceWeightResolver sliceWeightResolver
+            ContributionSliceWeightResolver sliceWeightResolver,
+            TaskAttachmentRepository taskAttachmentRepository,
+            TaskWebLinkRepository taskWebLinkRepository
     ) {
         this.teamRepository = teamRepository;
         this.teamMemberRepository = teamMemberRepository;
-        this.documentRepository = documentRepository;
         this.sprintRepository = sprintRepository;
         this.taskRepository = taskRepository;
         this.peerReviewRepository = peerReviewRepository;
         this.sliceWeightResolver = sliceWeightResolver;
+        this.taskAttachmentRepository = taskAttachmentRepository;
+        this.taskWebLinkRepository = taskWebLinkRepository;
     }
 
     @Transactional(readOnly = true)
@@ -82,7 +88,15 @@ public class ContributionCalculationService {
         Map<UUID, BigDecimal> peerScoreByStudent = totalPeerScoreByStudent(peerReviews);
         Map<UUID, Map<UUID, BigDecimal>> peerScoreBySprint = totalPeerScoreBySprint(peerReviews);
         BigDecimal totalPeerScore = peerScoreByStudent.values().stream().reduce(BigDecimal.ZERO, BigDecimal::add);
+        Map<UUID, Integer> attachmentCountByTaskId = evidenceCounts(projectId);
         Map<UUID, Scores> scores = new LinkedHashMap<>();
+        Map<UUID, Map<UUID, double[]>> recognizedByStudentThenSprint = new HashMap<>();
+        LinkedHashSet<UUID> scoringSprintIds = new LinkedHashSet<>();
+        for (Sprint sprint : sprints) {
+            if (sprint != null && sprint.getId() != null) {
+                scoringSprintIds.add(sprint.getId());
+            }
+        }
         for (Student student : students) {
             scores.put(student.getId(), scores(
                     projectId,
@@ -90,8 +104,40 @@ public class ContributionCalculationService {
                     sprints,
                     peerScoreByStudent,
                     peerScoreBySprint,
-                    totalPeerScore
+                    totalPeerScore,
+                    attachmentCountByTaskId
             ));
+            List<Task> studentTasks = taskRepository.findByProjectIdAndAssigneeId(projectId, student.getId());
+            if (studentTasks == null || studentTasks.isEmpty()) {
+                continue;
+            }
+            for (Task task : studentTasks) {
+                if (task.getStatus() != TaskStatus.DONE) {
+                    continue;
+                }
+                Optional<ContributionCriterion> criterion = TaskContributionClassifier.classify(task);
+                if (criterion.isEmpty()) {
+                    continue;
+                }
+                int attachments = task.getId() == null
+                        ? 0
+                        : attachmentCountByTaskId.getOrDefault(task.getId(), 0);
+                if (!TaskContributionClassifier.storyPointsRecognized(criterion.get(), attachments)) {
+                    continue;
+                }
+                UUID sprintId = task.getSprint() == null ? null : task.getSprint().getId();
+                if (sprintId == null) {
+                    continue;
+                }
+                SprintFirstContributionMixer.addRecognized(
+                        recognizedByStudentThenSprint,
+                        student.getId(),
+                        sprintId,
+                        criterion.get(),
+                        taskPoints(task).doubleValue()
+                );
+                scoringSprintIds.add(sprintId);
+            }
         }
 
         BigDecimal totalCode = total(scores.values(), Scores::code);
@@ -99,28 +145,21 @@ public class ContributionCalculationService {
         BigDecimal totalDocument = total(scores.values(), Scores::document);
         BigDecimal totalResearch = total(scores.values(), Scores::research);
         BigDecimal totalTask = total(scores.values(), Scores::adjustedSprint);
-        // TEST_SLICE_CLASSIFICATION = TBD_PRODUCT_RULE and RESEARCH_SLICE_CLASSIFICATION =
-        // TBD_PRODUCT_RULE: totalTest/totalResearch are always zero (see scores()), so both
-        // slices are always normalized out and their budget redistributes to Code/Document.
-        ContributionSliceWeights sliceWeights = sliceWeightResolver.resolve(team)
-                .normalizeForActiveSlices(
-                        totalCode.signum() > 0,
-                        totalTest.signum() > 0,
-                        totalDocument.signum() > 0,
-                        totalResearch.signum() > 0
-                );
+        List<UUID> studentIds = students.stream().map(Student::getId).toList();
+        List<UUID> mixSprintIds = new ArrayList<>(scoringSprintIds);
+        SprintFirstContributionMixer.Result sprintMix = SprintFirstContributionMixer.mix(
+                studentIds,
+                mixSprintIds,
+                recognizedByStudentThenSprint,
+                peerStarsAsDoubles(peerScoreBySprint),
+                sliceWeightResolver.resolve(team)
+        );
         Map<UUID, BigDecimal> adjusted = new LinkedHashMap<>();
-        for (Map.Entry<UUID, Scores> entry : scores.entrySet()) {
-            Scores value = entry.getValue();
-            BigDecimal raw = weightedRawContribution(
-                    value,
-                    totalCode,
-                    totalTest,
-                    totalDocument,
-                    totalResearch,
-                    sliceWeights
+        for (UUID studentId : studentIds) {
+            adjusted.put(
+                    studentId,
+                    BigDecimal.valueOf(sprintMix.finalPercentageByStudent().getOrDefault(studentId, 0.0))
             );
-            adjusted.put(entry.getKey(), raw.multiply(value.peerCoefficient()));
         }
         Map<UUID, BigDecimal> finalContributions = finalContributions(
                 students,
@@ -130,21 +169,14 @@ public class ContributionCalculationService {
         List<ContributionBreakdown> breakdowns = new ArrayList<>();
         for (Student student : students) {
             Scores value = scores.get(student.getId());
-            BigDecimal raw = weightedRawContribution(
-                    value,
-                    totalCode,
-                    totalTest,
-                    totalDocument,
-                    totalResearch,
-                    sliceWeights
-            );
+            BigDecimal sprintFirst = adjusted.get(student.getId());
             breakdowns.add(new ContributionBreakdown(
                     student.getId(), value.code(), value.test(), value.document(), value.research(),
                     value.adjustedSprint(), value.peerCoefficient(),
                     percent(value.code(), totalCode), percent(value.test(), totalTest),
                     percent(value.document(), totalDocument),
                     percent(value.research(), totalResearch), percent(value.adjustedSprint(), totalTask),
-                    raw, adjusted.get(student.getId()), finalContributions.get(student.getId())
+                    sprintFirst, sprintFirst, finalContributions.get(student.getId())
             ));
         }
         return new ProjectContributionCalculation(projectId, breakdowns);
@@ -156,14 +188,13 @@ public class ContributionCalculationService {
             List<Sprint> sprints,
             Map<UUID, BigDecimal> peerScoreByStudent,
             Map<UUID, Map<UUID, BigDecimal>> peerScoreBySprint,
-            BigDecimal totalPeerScore
+            BigDecimal totalPeerScore,
+            Map<UUID, Integer> attachmentCountByTaskId
     ) {
         BigDecimal code = BigDecimal.ZERO;
         BigDecimal test = BigDecimal.ZERO;
         BigDecimal research = BigDecimal.ZERO;
-        // DESIGN is retired as an active criterion; every Document (regardless of DocumentType,
-        // including the historical DESIGN type) counts as DOCUMENT evidence.
-        BigDecimal document = BigDecimal.valueOf(documentRepository.countByProjectIdAndAuthorId(projectId, student.getId()));
+        BigDecimal document = BigDecimal.ZERO;
         BigDecimal adjustedSprint = BigDecimal.ZERO;
         // Product decision: when a commit is linked to a Task, the Task is the sole numeric
         // Contribution authority — the commit is supporting/provenance evidence only and never
@@ -172,6 +203,9 @@ public class ContributionCalculationService {
         if (tasks != null && !tasks.isEmpty()) {
             for (Task task : tasks) {
                 if (task.getStatus() != TaskStatus.DONE) {
+                    continue;
+                }
+                if (task.getSprint() == null || task.getSprint().getId() == null) {
                     continue;
                 }
                 BigDecimal taskPoints = taskPoints(task);
@@ -183,16 +217,18 @@ public class ContributionCalculationService {
                 );
                 BigDecimal weightedTaskPoints = taskPoints.multiply(multiplier);
                 adjustedSprint = adjustedSprint.add(weightedTaskPoints);
-                // adjustedSprint above stays unconditional regardless of criterion
-                // classification (the numeric task/sprint formula is unchanged); only the
-                // CODE/TEST/DOCUMENT/RESEARCH bucket routing is skipped when AMBIGUOUS.
-                Optional<ContributionCriterion> criterion = classifyTaskContribution(task);
+                Optional<ContributionCriterion> criterion = TaskContributionClassifier.classify(task);
                 if (criterion.isPresent()) {
-                    switch (criterion.get()) {
-                        case CODE -> code = code.add(weightedTaskPoints);
-                        case TEST -> test = test.add(weightedTaskPoints);
-                        case DOCUMENT -> document = document.add(weightedTaskPoints);
-                        case RESEARCH -> research = research.add(weightedTaskPoints);
+                    int attachments = task.getId() == null
+                            ? 0
+                            : attachmentCountByTaskId.getOrDefault(task.getId(), 0);
+                    if (TaskContributionClassifier.storyPointsRecognized(criterion.get(), attachments)) {
+                        switch (criterion.get()) {
+                            case CODE -> code = code.add(taskPoints);
+                            case TEST -> test = test.add(taskPoints);
+                            case DOCUMENT -> document = document.add(taskPoints);
+                            case RESEARCH -> research = research.add(taskPoints);
+                        }
                     }
                 }
             }
@@ -221,12 +257,15 @@ public class ContributionCalculationService {
             Map<UUID, Map<UUID, BigDecimal>> peerScoreBySprint
     ) {
         if (sprintId == null) {
-            return BigDecimal.ONE;
+            return BigDecimal.ZERO;
         }
         Map<UUID, BigDecimal> sprintScores = peerScoreBySprint.getOrDefault(sprintId, Map.of());
         BigDecimal studentScore = sprintScores.getOrDefault(studentId, BigDecimal.ZERO);
         BigDecimal totalScore = sprintScores.values().stream().reduce(BigDecimal.ZERO, BigDecimal::add);
-        return ratio(studentScore, totalScore);
+        if (totalScore.signum() == 0) {
+            return BigDecimal.ONE;
+        }
+        return studentScore.divide(totalScore, MathContext.DECIMAL64);
     }
 
     private BigDecimal peerCoefficient(
@@ -332,66 +371,33 @@ public class ContributionCalculationService {
         return BigDecimal.valueOf(task.getStoryPoint() == null ? 1 : task.getStoryPoint());
     }
 
-    /**
-     * Marker-first Contribution classification for a Task: an exact reserved marker
-     * (saga:code/saga:test/saga:document/saga:research) takes precedence over the legacy
-     * keyword classifier below. More than one conflicting reserved marker returns
-     * {@link Optional#empty()} (AMBIGUOUS) — the Task is not scored into any criterion until the
-     * conflict is fixed. No reserved marker falls through unchanged to {@link #classifyTaskSlice}.
-     */
-    private Optional<ContributionCriterion> classifyTaskContribution(Task task) {
-        ContributionMarkerClassification marker = ReservedContributionMarkerClassifier.classify(task.getLabels());
-        if (marker.ambiguous()) {
-            return Optional.empty();
+    private Map<UUID, Integer> evidenceCounts(UUID projectId) {
+        Map<UUID, Integer> counts = new HashMap<>();
+        for (TaskAttachment attachment : taskAttachmentRepository.findByTask_Project_Id(projectId)) {
+            if (attachment.getTask() == null || attachment.getTask().getId() == null) {
+                continue;
+            }
+            counts.merge(attachment.getTask().getId(), 1, Integer::sum);
         }
-        if (marker.isResolved()) {
-            return Optional.of(marker.criterion());
+        for (TaskWebLink webLink : taskWebLinkRepository.findByTask_Project_Id(projectId)) {
+            if (webLink.getTask() == null || webLink.getTask().getId() == null) {
+                continue;
+            }
+            counts.merge(webLink.getTask().getId(), 1, Integer::sum);
         }
-        return Optional.of(switch (classifyTaskSlice(task)) {
-            case CODE -> ContributionCriterion.CODE;
-            case DOCUMENT -> ContributionCriterion.DOCUMENT;
-        });
+        return counts;
     }
 
-    /**
-     * DESIGN is retired as an active Contribution criterion; design-classified evidence (the
-     * existing keyword markers) is folded directly into DOCUMENT.
-     */
-    private ContributionSlice classifyTaskSlice(Task task) {
-        String labelText = task.getLabels() == null
-                ? ""
-                : String.join(" ", task.getLabels());
-        String componentText = task.getComponents() == null
-                ? ""
-                : task.getComponents().stream()
-                        .map(TaskComponentSnapshot::name)
-                        .filter(name -> name != null && !name.isBlank())
-                        .reduce((left, right) -> left + " " + right)
-                        .orElse("");
-        String labelAndComponentText = String.join(" ", labelText, componentText).toLowerCase(Locale.ROOT);
-        if (containsAny(labelAndComponentText, List.of("figma", "mockup", "prototype", "wireframe", "design system", "visual design", "ui/ux", "design review", "design"))) {
-            return ContributionSlice.DOCUMENT;
+    private Map<UUID, Map<UUID, Double>> peerStarsAsDoubles(Map<UUID, Map<UUID, BigDecimal>> peerScoreBySprint) {
+        Map<UUID, Map<UUID, Double>> converted = new HashMap<>();
+        for (Map.Entry<UUID, Map<UUID, BigDecimal>> sprintEntry : peerScoreBySprint.entrySet()) {
+            Map<UUID, Double> byStudent = new HashMap<>();
+            for (Map.Entry<UUID, BigDecimal> studentEntry : sprintEntry.getValue().entrySet()) {
+                byStudent.put(studentEntry.getKey(), studentEntry.getValue().doubleValue());
+            }
+            converted.put(sprintEntry.getKey(), byStudent);
         }
-        if (containsAny(labelAndComponentText, List.of("doc", "document", "documentation", "wiki", "readme", "spec", "manual", "guide", "requirement"))) {
-            return ContributionSlice.DOCUMENT;
-        }
-        if (task.getType() != null) {
-            return switch (task.getType()) {
-                case BUG, FEATURE, REQUEST, STORY, TASK, EPIC, SUBTASK -> ContributionSlice.CODE;
-            };
-        }
-        String fallbackText = String.join(" ", task.getTitle() == null ? "" : task.getTitle(), task.getDescription() == null ? "" : task.getDescription()).toLowerCase(Locale.ROOT);
-        if (containsAny(fallbackText, List.of("figma", "mockup", "prototype", "wireframe", "design system", "visual design", "ui/ux", "design review", "design"))) {
-            return ContributionSlice.DOCUMENT;
-        }
-        if (containsAny(fallbackText, List.of("doc", "document", "documentation", "wiki", "readme", "spec", "manual", "guide", "requirement"))) {
-            return ContributionSlice.DOCUMENT;
-        }
-        return ContributionSlice.CODE;
-    }
-
-    private boolean containsAny(String haystack, List<String> needles) {
-        return needles.stream().anyMatch(haystack::contains);
+        return converted;
     }
 
     private BigDecimal percent(BigDecimal score, BigDecimal total) {
@@ -400,20 +406,6 @@ public class ContributionCalculationService {
 
     private BigDecimal total(Collection<Scores> scores, java.util.function.Function<Scores, BigDecimal> selector) {
         return scores.stream().map(selector).reduce(BigDecimal.ZERO, BigDecimal::add);
-    }
-
-    private BigDecimal weightedRawContribution(
-            Scores value,
-            BigDecimal totalCode,
-            BigDecimal totalTest,
-            BigDecimal totalDocument,
-            BigDecimal totalResearch,
-            ContributionSliceWeights sliceWeights
-    ) {
-        return percent(value.code(), totalCode).multiply(sliceWeights.codeRatio())
-                .add(percent(value.test(), totalTest).multiply(sliceWeights.testRatio()))
-                .add(percent(value.document(), totalDocument).multiply(sliceWeights.documentRatio()))
-                .add(percent(value.research(), totalResearch).multiply(sliceWeights.researchRatio()));
     }
 
     private Map<UUID, BigDecimal> splitBudgetEqually(List<Student> students, BigDecimal budget) {
@@ -430,11 +422,6 @@ public class ContributionCalculationService {
 
     private long zero(Long value) {
         return value == null ? 0L : value;
-    }
-
-    private enum ContributionSlice {
-        CODE,
-        DOCUMENT
     }
 
     private record Scores(

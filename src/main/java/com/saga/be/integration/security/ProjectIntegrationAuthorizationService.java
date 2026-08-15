@@ -37,6 +37,26 @@ public class ProjectIntegrationAuthorizationService {
 
     @Transactional(readOnly = true)
     public Project requireProjectManager(SagaPrincipal principal, UUID projectId) {
+        return requireProjectAccess(principal, projectId, true);
+    }
+
+    @Transactional(readOnly = true)
+    public Project requireProjectContributor(SagaPrincipal principal, UUID projectId) {
+        return requireProjectAccess(principal, projectId, false);
+    }
+
+    @Transactional(readOnly = true)
+    public Team requireTeamManager(SagaPrincipal principal, UUID teamId) {
+        Team team = teamRepository.findById(teamId)
+                .orElseThrow(() -> IntegrationException.invalid(
+                        "TEAM_NOT_FOUND",
+                        "The team does not exist"
+                ));
+        requireTeamAccess(principal, team, true);
+        return team;
+    }
+
+    private Project requireProjectAccess(SagaPrincipal principal, UUID projectId, boolean managerOnly) {
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new IntegrationException(
                         HttpStatus.NOT_FOUND,
@@ -48,22 +68,26 @@ public class ProjectIntegrationAuthorizationService {
                         "PROJECT_TEAM_MISSING",
                         "The project is not assigned to a team"
                 ));
-        requireTeamManager(principal, team);
+        requireTeamAccess(principal, team, managerOnly);
         return project;
     }
 
-    @Transactional(readOnly = true)
-    public Team requireTeamManager(SagaPrincipal principal, UUID teamId) {
-        Team team = teamRepository.findById(teamId)
-                .orElseThrow(() -> IntegrationException.invalid(
-                        "TEAM_NOT_FOUND",
-                        "The team does not exist"
-                ));
-        requireTeamManager(principal, team);
-        return team;
-    }
-
-    private void requireTeamManager(SagaPrincipal principal, Team team) {
+    private void requireTeamAccess(SagaPrincipal principal, Team team, boolean managerOnly) {
+        if (!managerOnly) {
+            if (
+                principal.applicationRole() == ApplicationRole.STUDENT
+                && principal.localProfileId() != null
+                && teamMemberRepository.existsByTeamIdAndStudentId(
+                        team.getId(),
+                        principal.localProfileId()
+                )
+            ) {
+                return;
+            }
+            throw IntegrationException.forbidden(
+                    "Only a student member of the owning team may attach evidence to this task"
+            );
+        }
         if (principal.applicationRole() == ApplicationRole.ADMIN) {
             auditService.recordRequiredIntegrationEvent(
                     principal,
@@ -87,6 +111,7 @@ public class ProjectIntegrationAuthorizationService {
         }
         if (
             principal.applicationRole() == ApplicationRole.STUDENT
+            && principal.localProfileId() != null
             && teamMemberRepository.existsByTeamIdAndStudentIdAndRoleInTeam(
                     team.getId(),
                     principal.localProfileId(),
