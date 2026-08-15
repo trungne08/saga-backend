@@ -116,6 +116,14 @@ class GeneratedOpenApiDocumentationIntegrationTest {
         assertTrue(root.at("/paths/~1api~1teams~1{teamId}~1projects/post").isObject());
         assertTrue(root.at("/paths/~1api~1v1~1courses~1{courseId}~1contribution-slice-weights/put").isObject());
         assertTrue(root.at("/paths/~1api~1v1~1courses~1{courseId}~1dashboard~1teams-progress/get").isObject());
+        JsonNode teamProgressProperties = root.at("/components/schemas/TeamProgress/properties");
+        assertTrue(teamProgressProperties.has("currentSprint"));
+        assertTrue(teamProgressProperties.has("activeSprints"));
+        assertEquals("array", teamProgressProperties.path("activeSprints").path("type").asText());
+        JsonNode activeSprintProperties = root.at("/components/schemas/ActiveSprint/properties");
+        assertTrue(activeSprintProperties.has("sprintId"));
+        assertTrue(activeSprintProperties.has("taskCount"));
+        assertTrue(activeSprintProperties.has("plannedStoryPoints"));
         assertTrue(root.at("/paths/~1api~1v1~1courses~1{courseId}~1dashboard~1contribution-summary/get").isObject());
         assertTrue(root.at("/paths/~1api~1v1~1courses~1{courseId}~1dashboard~1trends/get").isObject());
         assertTrue(root.at("/paths/~1api~1v1~1courses~1{courseId}~1dashboard~1at-risk-summary/get").isObject());

@@ -99,6 +99,45 @@ class LecturerCourseDashboardSecurityIntegrationTest {
     }
 
     @Test
+    void teamsProgressAllowsMultipleActiveSprintsOnTheSameProject() throws Exception {
+        Project project = projectRepository.saveAndFlush(Project.builder()
+                .course(course)
+                .name("Parallel Sprint Project")
+                .build());
+        teamRepository.saveAndFlush(Team.builder()
+                .course(course)
+                .project(project)
+                .name("Parallel Sprint Team")
+                .build());
+        JiraBoard board = jiraBoardRepository.saveAndFlush(JiraBoard.builder()
+                .project(project)
+                .name("Parallel Board")
+                .connectionStatus(IntegrationStatus.DISCONNECTED)
+                .build());
+        sprintRepository.saveAndFlush(Sprint.builder()
+                .board(board)
+                .name("Sprint 3333")
+                .state("active")
+                .startDate(LocalDateTime.of(2026, 9, 1, 14, 30))
+                .build());
+        sprintRepository.saveAndFlush(Sprint.builder()
+                .board(board)
+                .name("Sprint 4")
+                .state("ACTIVE")
+                .startDate(LocalDateTime.of(2026, 9, 20, 8, 11))
+                .build());
+
+        mockMvc.perform(get("/api/v1/courses/{courseId}/dashboard/teams-progress", course.getId())
+                        .with(authentication(auth(ApplicationRole.LECTURER, owner.getId()))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.teams[0].currentSprint").value(nullValue()))
+                .andExpect(jsonPath("$.teams[0].activeSprints.length()").value(2))
+                .andExpect(jsonPath("$.teams[0].activeSprints[0].sprintName").value("Sprint 3333"))
+                .andExpect(jsonPath("$.teams[0].activeSprints[1].sprintName").value("Sprint 4"))
+                .andExpect(jsonPath("$.teams[0].currentSprintTaskCount").value(0));
+    }
+
+    @Test
     void missingCourseIsNotFoundForEveryDashboardRoute() throws Exception {
         for (String path : paths(UUID.randomUUID())) {
             mockMvc.perform(get(path).with(authentication(auth(ApplicationRole.ADMIN, UUID.randomUUID()))))

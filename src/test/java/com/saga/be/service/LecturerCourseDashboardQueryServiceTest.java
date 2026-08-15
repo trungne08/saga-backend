@@ -2,8 +2,7 @@ package com.saga.be.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.Mockito.mock;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -33,7 +32,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
-import org.springframework.web.server.ResponseStatusException;
 
 @ExtendWith(MockitoExtension.class)
 class LecturerCourseDashboardQueryServiceTest {
@@ -92,22 +90,31 @@ class LecturerCourseDashboardQueryServiceTest {
 
         LecturerCourseDashboardResponses.TeamProgress active = team(response, activeTeamId);
         assertEquals(activeSprint.getId(), active.currentSprint().sprintId());
+        assertEquals(1, active.activeSprints().size());
+        assertEquals(activeSprint.getId(), active.activeSprints().get(0).sprintId());
         assertEquals(3, active.currentSprintTaskCount());
+        assertEquals(3, active.activeSprints().get(0).taskCount());
         assertEquals(2, active.currentSprintDoneTaskCount());
+        assertEquals(2, active.activeSprints().get(0).doneTaskCount());
         assertEquals(8, active.currentSprintPlannedStoryPoints());
+        assertEquals(8, active.activeSprints().get(0).plannedStoryPoints());
         assertEquals(5, active.currentSprintCompletedStoryPoints());
+        assertEquals(5, active.activeSprints().get(0).completedStoryPoints());
         assertEquals(1, active.currentSprintTasksWithoutStoryPoints());
+        assertEquals(1, active.activeSprints().get(0).tasksWithoutStoryPoints());
         assertEquals(7, active.projectCommitCount());
         assertNull(active.healthStatus());
 
         LecturerCourseDashboardResponses.TeamProgress noSprint = team(response, noSprintTeamId);
         assertNull(noSprint.currentSprint());
+        assertEquals(List.of(), noSprint.activeSprints());
         assertEquals(0, noSprint.currentSprintTaskCount());
         assertEquals(0, noSprint.projectCommitCount());
 
         LecturerCourseDashboardResponses.TeamProgress noProject = team(response, noProjectTeamId);
         assertNull(noProject.projectId());
         assertNull(noProject.currentSprint());
+        assertEquals(List.of(), noProject.activeSprints());
         assertEquals(0, noProject.currentSprintTaskCount());
         assertNull(noProject.healthStatus());
 
@@ -119,25 +126,68 @@ class LecturerCourseDashboardQueryServiceTest {
     }
 
     @Test
-    void teamsProgressRejectsMultipleActiveSprintsInsteadOfPickingOne() {
+    void teamsProgressReturnsActiveSprintListWithoutPickingAPrimary() {
         UUID courseId = UUID.randomUUID();
-        Project project = id(new Project(), UUID.randomUUID());
-        Team team = id(Team.builder().name("Team").project(project).build(), UUID.randomUUID());
-        Sprint first = sprint(project, "active", LocalDateTime.of(2026, 8, 1, 0, 0));
-        Sprint second = sprint(project, "ACTIVE", LocalDateTime.of(2026, 8, 2, 0, 0));
-        when(teamRepository.findByCourseIdOrderByNameAscIdAsc(courseId)).thenReturn(List.of(team));
+        Project oneActiveProject = id(new Project(), UUID.randomUUID());
+        Project twoActiveProject = id(new Project(), UUID.randomUUID());
+        Team oneActiveTeam = id(Team.builder().name("One Active").project(oneActiveProject).build(), UUID.randomUUID());
+        Team twoActiveTeam = id(Team.builder().name("Two Active").project(twoActiveProject).build(), UUID.randomUUID());
+        Sprint onlyActive = sprint(oneActiveProject, "active", LocalDateTime.of(2026, 8, 1, 0, 0), "Only");
+        Sprint laterActive = sprint(twoActiveProject, "ACTIVE", LocalDateTime.of(2026, 8, 2, 0, 0), "Later");
+        Sprint earlierActive = sprint(twoActiveProject, "active", LocalDateTime.of(2026, 8, 1, 0, 0), "Earlier");
+        Sprint deletedActive = sprint(twoActiveProject, "active", LocalDateTime.of(2026, 7, 1, 0, 0), "Deleted");
+        deletedActive.setDeletedAt(LocalDateTime.of(2026, 8, 10, 0, 0));
+        Task onlyDone = task(oneActiveProject, onlyActive, TaskStatus.DONE, 5);
+        Task earlierDone = task(twoActiveProject, earlierActive, TaskStatus.DONE, 8);
+        Task laterOpen = task(twoActiveProject, laterActive, TaskStatus.IN_PROGRESS, 3);
+        Task laterDone = task(twoActiveProject, laterActive, TaskStatus.DONE, null);
+        when(teamRepository.findByCourseIdOrderByNameAscIdAsc(courseId))
+                .thenReturn(List.of(oneActiveTeam, twoActiveTeam));
         when(sprintRepository.findByBoardProjectCourseIdAndDeletedAtIsNullOrderByStartDateAscIdAsc(courseId))
-                .thenReturn(List.of(first, second));
+                .thenReturn(List.of(laterActive, deletedActive, earlierActive, onlyActive));
         when(taskRepository.findByProjectCourseIdAndDeletedAtIsNullOrderByCreatedAtAscIdAsc(courseId))
-                .thenReturn(List.of());
+                .thenReturn(List.of(onlyDone, earlierDone, laterOpen, laterDone));
         when(commitDataRepository.countByProjectForCourse(courseId)).thenReturn(List.of());
 
-        ResponseStatusException exception = assertThrows(
-                ResponseStatusException.class,
-                () -> service.teamsProgress(null, courseId)
-        );
+        LecturerCourseDashboardResponses.TeamsProgress response = service.teamsProgress(null, courseId);
 
-        assertEquals(409, exception.getStatusCode().value());
+        LecturerCourseDashboardResponses.TeamProgress one = team(response, oneActiveTeam.getId());
+        assertEquals(onlyActive.getId(), one.currentSprint().sprintId());
+        assertEquals(1, one.activeSprints().size());
+        assertEquals(onlyActive.getId(), one.activeSprints().get(0).sprintId());
+        assertEquals(1, one.currentSprintTaskCount());
+        assertEquals(1, one.currentSprintDoneTaskCount());
+        assertEquals(5, one.currentSprintPlannedStoryPoints());
+        assertEquals(5, one.currentSprintCompletedStoryPoints());
+        assertEquals(0, one.currentSprintTasksWithoutStoryPoints());
+
+        LecturerCourseDashboardResponses.TeamProgress two = team(response, twoActiveTeam.getId());
+        assertNull(two.currentSprint());
+        assertEquals(0, two.currentSprintTaskCount());
+        assertEquals(0, two.currentSprintDoneTaskCount());
+        assertEquals(0, two.currentSprintPlannedStoryPoints());
+        assertEquals(0, two.currentSprintCompletedStoryPoints());
+        assertEquals(0, two.currentSprintTasksWithoutStoryPoints());
+        assertEquals(2, two.activeSprints().size());
+        assertEquals(List.of(earlierActive.getId(), laterActive.getId()),
+                two.activeSprints().stream().map(LecturerCourseDashboardResponses.ActiveSprint::sprintId).toList());
+        assertTrue(two.activeSprints().stream().noneMatch(sprint -> deletedActive.getId().equals(sprint.sprintId())));
+        LecturerCourseDashboardResponses.ActiveSprint earlier = two.activeSprints().get(0);
+        assertEquals("Earlier", earlier.sprintName());
+        assertEquals("active", earlier.state());
+        assertEquals(1, earlier.taskCount());
+        assertEquals(1, earlier.doneTaskCount());
+        assertEquals(8, earlier.plannedStoryPoints());
+        assertEquals(8, earlier.completedStoryPoints());
+        assertEquals(0, earlier.tasksWithoutStoryPoints());
+        LecturerCourseDashboardResponses.ActiveSprint later = two.activeSprints().get(1);
+        assertEquals("Later", later.sprintName());
+        assertEquals("ACTIVE", later.state());
+        assertEquals(2, later.taskCount());
+        assertEquals(1, later.doneTaskCount());
+        assertEquals(3, later.plannedStoryPoints());
+        assertEquals(0, later.completedStoryPoints());
+        assertEquals(1, later.tasksWithoutStoryPoints());
     }
 
     @Test
@@ -261,10 +311,14 @@ class LecturerCourseDashboardQueryServiceTest {
     }
 
     private Sprint sprint(Project project, String state, LocalDateTime startDate) {
+        return sprint(project, state, startDate, "Sprint " + state);
+    }
+
+    private Sprint sprint(Project project, String state, LocalDateTime startDate, String name) {
         JiraBoard board = JiraBoard.builder().project(project).build();
         return id(Sprint.builder()
                 .board(board)
-                .name("Sprint " + state)
+                .name(name)
                 .state(state)
                 .startDate(startDate)
                 .build(), UUID.randomUUID());

@@ -1782,6 +1782,13 @@ Dashboard:
 - `GET /api/v1/courses/{courseId}/dashboard/trends`
 - `GET /api/v1/courses/{courseId}/dashboard/at-risk-summary`
 
+`teams-progress` `TeamProgress.activeSprints[]` is the authority for active Sprint(s). Session GET, no CSRF, no Bearer. ADMIN / Course instructor LECTURER only.
+
+- `activeSprints.length === 0`: no active sprint; `currentSprint` is null; legacy `currentSprint*` counters are 0
+- `activeSprints.length === 1`: keep the current single-sprint UI; `currentSprint` matches that item
+- `activeSprints.length > 1`: show a list/picker; `currentSprint` is null; do **not** treat legacy `currentSprint*` as an aggregate
+- Burndown: `GET .../teams/{teamId}/sprints/{sprintId}/burndown` with `activeSprints[i].sprintId`
+
 Also present on `LecturerAnalyticsController` (existing): detail, overview, progress, activities, contribution-detail, early-warnings, student interactions, burndown, heatmap, velocity. Auth ADMIN/LECTURER (plus Student Team graph reads already documented separately). Early warning = deterministic `OVERDUE_TASK` only. Do **not** implement FE for GHOSTING / TOXIC_COMMUNICATION / TECHNICAL_DEBT unless Backend later adds them.
 
 ## Admin Dashboard V1

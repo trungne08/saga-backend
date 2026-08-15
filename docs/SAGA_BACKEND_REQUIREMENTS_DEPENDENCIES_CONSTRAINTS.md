@@ -1,3 +1,9 @@
+## Lecturer teams-progress parallel Sprint constraints — 2026-08-15
+
+- Không assume tối đa 1 Sprint `active` / Project trên `teams-progress`. Không pick primary. Không aggregate nhiều Sprint vào `currentSprint*`.
+- `activeSprints[]` là authority khi `size != 1`. Filter: `deletedAt == null` và `state` equalsIgnoreCase `active`.
+- Không đổi trends “Multiple Teams reference the same Project” 409, burndown `sprintId`, velocity, Jira lifecycle, auth.
+
 ## Avatar / progress / Course weight constraints — 2026-08-15
 
 - OpenAPI generated operation count baseline = **150**. Migration head = **V33**. DEC-082 snapshot 149 / V32 không được rewrite.

@@ -24,6 +24,7 @@ public final class LecturerCourseDashboardResponses {
             String teamName,
             UUID projectId,
             CurrentSprint currentSprint,
+            List<ActiveSprint> activeSprints,
             long currentSprintTaskCount,
             long currentSprintDoneTaskCount,
             long currentSprintPlannedStoryPoints,
@@ -35,7 +36,11 @@ public final class LecturerCourseDashboardResponses {
                     nullable = true
             )
             String healthStatus
-    ) { }
+    ) {
+        public TeamProgress {
+            activeSprints = activeSprints == null ? List.of() : List.copyOf(activeSprints);
+        }
+    }
 
     public record CurrentSprint(
             UUID sprintId,
@@ -43,6 +48,23 @@ public final class LecturerCourseDashboardResponses {
             String state,
             LocalDateTime startDate,
             LocalDateTime endDate
+    ) { }
+
+    /**
+     * One active Sprint and its current Task snapshot. Ordering is deterministic
+     * (startDate, then id) and does not imply a primary Sprint.
+     */
+    public record ActiveSprint(
+            UUID sprintId,
+            String sprintName,
+            String state,
+            LocalDateTime startDate,
+            LocalDateTime endDate,
+            long taskCount,
+            long doneTaskCount,
+            long plannedStoryPoints,
+            long completedStoryPoints,
+            long tasksWithoutStoryPoints
     ) { }
 
     public record ContributionSummary(

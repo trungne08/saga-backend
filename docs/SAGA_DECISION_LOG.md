@@ -1,3 +1,12 @@
+## DEC-084 — Lecturer teams-progress supports parallel active Sprints
+
+- Ngày: 2026-08-15; trạng thái: ACCEPTED / CONFIRMED_SOURCE_TEST.
+- Context: Jira/SAGA đã persist nhiều Sprint `active` trên một Project (Parallel Sprints). `teams-progress` fail-closed 409 khi `>1` active, làm đỏ Lecturer Dashboard dù trends/velocity/burndown/progress đã parallel-safe. Không invent primary Sprint; không aggregate metrics.
+- Quyết định MODEL B: `TeamProgress.activeSprints[]` là authority khi multiple active. Filter giữ `deletedAt == null` và `state equalsIgnoreCase "active"`. Order deterministic = existing `sprintOrder()` (`startDate` nullsLast, rồi `id`) — **không** là primary.
+- Semantic: 0 active → `activeSprints=[]`, `currentSprint=null`, legacy `currentSprint*` = 0. 1 active → `activeSprints` size 1 và `currentSprint` + legacy counters giữ behavior cũ. `>1` active → `activeSprints` per-sprint metrics, `currentSprint=null`, legacy counters = 0, **không 409**.
+- Không đổi trends 409 “Multiple Teams reference the same Project”, Student progress, burndown (`sprintId` explicit), velocity, Jira upsert/start/close, auth/session/CSRF, OpenAPI operation count, migration.
+- FE: `activeSprints.length > 1` thì list/picker; burndown dùng `activeSprints[i].sprintId`. Không dùng `currentSprint` làm authority khi list `>1`.
+
 ## DEC-083 — OIDC avatar, Student progress Team access, Lecturer direct Course slice weights
 
 - Ngày: 2026-08-15; trạng thái: ACCEPTED / CONFIRMED_SOURCE_TEST; Cognito Google login avatar runtime **TBD_DEPLOYMENT_SMOKE**.

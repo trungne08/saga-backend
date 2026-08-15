@@ -171,30 +171,40 @@ public class LecturerCourseDashboardQueryService {
     ) {
         Project project = team.getProject();
         if (project == null || project.getId() == null) {
-            return new LecturerCourseDashboardResponses.TeamProgress(
-                    team.getId(), team.getName(), null, null,
-                    0, 0, 0, 0, 0, 0, null
-            );
+            return emptyTeamProgress(team, null);
         }
         UUID projectId = project.getId();
-        Sprint current = currentSprint(sprintsByProject.getOrDefault(projectId, List.of()));
-        List<Task> currentTasks = current == null
-                ? List.of()
-                : tasksByProject.getOrDefault(projectId, List.of()).stream()
-                        .filter(task -> task.getSprint() != null && current.getId().equals(task.getSprint().getId()))
-                        .toList();
+        List<Task> projectTasks = tasksByProject.getOrDefault(projectId, List.of());
+        List<LecturerCourseDashboardResponses.ActiveSprint> activeSprints = sprintsByProject
+                .getOrDefault(projectId, List.of())
+                .stream()
+                .filter(this::isActiveSprint)
+                .sorted(sprintOrder())
+                .map(sprint -> toActiveSprint(sprint, projectTasks))
+                .toList();
+        LecturerCourseDashboardResponses.ActiveSprint unique = activeSprints.size() == 1
+                ? activeSprints.get(0)
+                : null;
         return new LecturerCourseDashboardResponses.TeamProgress(
                 team.getId(),
                 team.getName(),
                 projectId,
-                current == null ? null : currentSprint(current),
-                currentTasks.size(),
-                currentTasks.stream().filter(this::done).count(),
-                storyPoints(currentTasks),
-                storyPoints(currentTasks.stream().filter(this::done).toList()),
-                currentTasks.stream().filter(task -> task.getStoryPoint() == null).count(),
+                unique == null ? null : toCurrentSprint(unique),
+                activeSprints,
+                unique == null ? 0 : unique.taskCount(),
+                unique == null ? 0 : unique.doneTaskCount(),
+                unique == null ? 0 : unique.plannedStoryPoints(),
+                unique == null ? 0 : unique.completedStoryPoints(),
+                unique == null ? 0 : unique.tasksWithoutStoryPoints(),
                 commitsByProject.getOrDefault(projectId, 0L),
                 null
+        );
+    }
+
+    private LecturerCourseDashboardResponses.TeamProgress emptyTeamProgress(Team team, UUID projectId) {
+        return new LecturerCourseDashboardResponses.TeamProgress(
+                team.getId(), team.getName(), projectId, null, List.of(),
+                0, 0, 0, 0, 0, 0, null
         );
     }
 
@@ -262,22 +272,40 @@ public class LecturerCourseDashboardQueryService {
         return counts;
     }
 
-    private Sprint currentSprint(List<Sprint> sprints) {
-        List<Sprint> active = sprints.stream()
-                .filter(sprint -> sprint.getState() != null && "active".equalsIgnoreCase(sprint.getState()))
-                .toList();
-        if (active.size() > 1) {
-            throw new ResponseStatusException(
-                    HttpStatus.CONFLICT,
-                    "Project has multiple active Sprints"
-            );
-        }
-        return active.isEmpty() ? null : active.get(0);
+    private boolean isActiveSprint(Sprint sprint) {
+        return sprint != null
+                && sprint.getDeletedAt() == null
+                && sprint.getState() != null
+                && "active".equalsIgnoreCase(sprint.getState());
     }
 
-    private LecturerCourseDashboardResponses.CurrentSprint currentSprint(Sprint sprint) {
+    private LecturerCourseDashboardResponses.ActiveSprint toActiveSprint(Sprint sprint, List<Task> projectTasks) {
+        List<Task> sprintTasks = projectTasks.stream()
+                .filter(task -> task.getSprint() != null && sprint.getId().equals(task.getSprint().getId()))
+                .toList();
+        return new LecturerCourseDashboardResponses.ActiveSprint(
+                sprint.getId(),
+                sprint.getName(),
+                sprint.getState(),
+                sprint.getStartDate(),
+                sprint.getEndDate(),
+                sprintTasks.size(),
+                sprintTasks.stream().filter(this::done).count(),
+                storyPoints(sprintTasks),
+                storyPoints(sprintTasks.stream().filter(this::done).toList()),
+                sprintTasks.stream().filter(task -> task.getStoryPoint() == null).count()
+        );
+    }
+
+    private LecturerCourseDashboardResponses.CurrentSprint toCurrentSprint(
+            LecturerCourseDashboardResponses.ActiveSprint sprint
+    ) {
         return new LecturerCourseDashboardResponses.CurrentSprint(
-                sprint.getId(), sprint.getName(), sprint.getState(), sprint.getStartDate(), sprint.getEndDate()
+                sprint.sprintId(),
+                sprint.sprintName(),
+                sprint.state(),
+                sprint.startDate(),
+                sprint.endDate()
         );
     }
 

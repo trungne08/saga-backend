@@ -1,3 +1,7 @@
+## Lecturer teams-progress parallel active Sprints — 2026-08-15
+
+- **CONFIRMED_SOURCE_TEST:** `GET .../dashboard/teams-progress` không còn 409 khi Project có nhiều Sprint `active`. Additive `activeSprints[]`; `currentSprint` chỉ khi đúng 1 active. Order `startDate` rồi `id` (không phải primary). Trends / progress / burndown / velocity / Jira write **không đổi**. OpenAPI count vẫn **150**. Migration **V33**.
+
 ## Avatar / Student progress / Lecturer direct Course weights — 2026-08-15
 
 - **CONFIRMED_SOURCE_TEST:** HEAD `495fe44`. OpenAPI generated count = **150** (contract PASS). Migration head = **V33** (`V33__add_profile_avatar_url.sql`); không collision (migration contract PASS). DEC-082 (OpenAPI 149 / V32) là snapshot lịch sử, không rewrite.

@@ -1,3 +1,7 @@
+## Lecturer teams-progress parallel active Sprints — 2026-08-15
+
+- **Đã hoàn thành:** Model B trên `teams-progress`. Nhiều active Sprint → 200 + `activeSprints[]`, `currentSprint=null`, không aggregate. Một active giữ backward-compatible `currentSprint`. Không sửa Jira data/sync/write.
+
 ## Avatar / Student progress / Lecturer direct Course weights — 2026-08-15
 
 - **Đã hoàn thành / CONFIRMED_SOURCE_TEST:** OIDC avatar sync, STUDENT MEMBER/LEADER progress access, Lecturer direct Course slice-weight PUT. OpenAPI **150** (PASS). Migration head **V33** (PASS). DEC-082 (149 / V32) là lịch sử.
