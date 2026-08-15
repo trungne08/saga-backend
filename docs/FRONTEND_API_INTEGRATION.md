@@ -1,3 +1,12 @@
+## Contribution flowchart graph (DEC-096) — 2026-08-16
+
+OpenAPI **150**. No migration.
+
+- `GET /api/v1/teams/{teamId}/contribution-graph` — flowchart nodes/edges. Same auth as evaluation (LECTURER exact Course / STUDENT exact Team LEADER). ADMIN 403. Session cookie, no CSRF, no Bearer.
+- Formula stays SAGA (DEC-092). Do not apply mockup CODE×2.0 / DESIGN / DOCS. `peerCoefficient` is team-star share. `tasks[]` on each edge is drill-down only.
+- Radar / member comparison / sprint line still use `GET .../contribution-evaluation` (DEC-094). Do not call `/api/analytics/*`.
+- Chi tiết chọn API: `docs/CONTRIBUTION_EVALUATION_VS_GRAPH_API.md`.
+
 ## Jira task attachments from SAGA (DEC-093) — 2026-08-15
 
 OpenAPI **149**. Migration head **V39**.
@@ -9,6 +18,7 @@ OpenAPI **149**. Migration head **V39**.
 OpenAPI **148** (unchanged). No migration.
 
 - `GET /api/v1/teams/{teamId}/contribution-evaluation`: `sliceScore` / `sliceContributionPercentage` = slice **trước** peer (`slice / Σ slice × 100`). `finalContributionPercentage` = `(Σ slice × project P) / team adjust`. Per-sprint `%` after peer stays `sprintBreakdowns[].contributionPercentage`; pre-peer is `sliceContributionPercentage` on the same row. `P = 1` if none yet. Tasks with no sprint do not score. `peerReviewScore` is still project-level peer (0..1); the final % already applied it — do not multiply again on FE.
+- **DEC-094 graph fields:** `sprintBreakdowns[]` also has `codeStoryPoints`, `testStoryPoints`, `documentStoryPoints`, `researchStoryPoints` (recognized SP in that sprint). Use evaluation for radar / member comparison / sprint line / stacked criterion bars. Do not call `/api/analytics/*`.
 
 ## Sprint-first contribution % (DEC-091) — 2026-08-15
 
@@ -1401,7 +1411,8 @@ Contribution API dùng session. Tất cả mutation phải gửi CSRF; GET khôn
 
 | Method | Exact path | Role annotation | Effective behavior | Success |
 | --- | --- | --- | --- | --- |
-| GET | `/api/v1/teams/{teamId}/contribution-evaluation` | ADMIN, LECTURER, STUDENT | ADMIN mọi Team; LECTURER chỉ Course mình phụ trách; STUDENT chỉ exact `RoleInTeam.LEADER` của chính Team. MEMBER/MENTOR/cross-Team Leader 403 | `200 TeamContributionEvaluationResponse` |
+| GET | `/api/v1/teams/{teamId}/contribution-evaluation` | LECTURER, STUDENT | LECTURER chỉ Course mình phụ trách; STUDENT chỉ exact `RoleInTeam.LEADER` của chính Team. ADMIN/MEMBER/MENTOR/cross-Team Leader 403 | `200 TeamContributionEvaluationResponse` |
+| GET | `/api/v1/teams/{teamId}/contribution-graph` | LECTURER, STUDENT | Cùng quyền evaluation. Flowchart SAGA (không hệ số mockup). ADMIN/MEMBER/MENTOR 403 | `200 TeamContributionGraphResponse` |
 | POST | `/api/v1/teams/{teamId}/contribution-override` | ADMIN, LECTURER | ADMIN mọi Team; LECTURER phải là Course instructor | `200 ContributionOverrideResponse` |
 | GET | `/api/v1/courses/{courseId}/contribution-slice-weights` | ADMIN, LECTURER | ADMIN mọi Course; LECTURER chỉ exact Course instructor. Actor từ `SagaPrincipal` | `200 CourseContributionSliceWeightResponse` |
 | PUT | `/api/v1/courses/{courseId}/contribution-slice-weights` | LECTURER | Official new FE mutation. Exact Course instructor; no `lecturerId`. Other Course / STUDENT / ADMIN 403. CSRF required. Scale 0–100, sum 100 ± 0.01. `{codeWeight,testWeight,documentWeight,researchWeight}`. Only authoritative while Course is in `COURSE` mode | `200 CourseContributionSliceWeightResponse` |

@@ -50,6 +50,8 @@ class SprintFirstContributionMixerTest {
         assertEquals(20.0, result.percentageInSprint(sprintId, bob), 0.0001);
         assertEquals(80.0, result.finalPercentageByStudent().get(alice), 0.0001);
         assertEquals(20.0, result.finalPercentageByStudent().get(bob), 0.0001);
+        assertEquals(5.0, SprintFirstContributionMixer.copyRecognizedBucket(recognized, alice, sprintId)[0], 0.0001);
+        assertEquals(5.0, SprintFirstContributionMixer.copyRecognizedBucket(recognized, bob, sprintId)[1], 0.0001);
     }
 
     @Test

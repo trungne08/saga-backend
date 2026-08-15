@@ -1,3 +1,20 @@
+## Contribution flowchart graph (DEC-096) — 2026-08-16
+
+- `GET /api/v1/teams/{teamId}/contribution-graph` is LECTURER exact instructor or STUDENT exact Team LEADER only. ADMIN 403. Do not copy mockup CODE×2.0 / DESIGN multipliers; keep SAGA CODE/TEST/DOCUMENT/RESEARCH + team-star P.
+- Do not add GHOSTING, publish/snapshot, or `/api/analytics/*`. Radar/bar/line stay on evaluation.
+- OpenAPI **150**. Không migration.
+
+## Contribution evaluation read is not ADMIN (DEC-095) — 2026-08-15
+
+- `GET /api/v1/teams/{teamId}/contribution-evaluation` is LECTURER exact instructor or STUDENT exact Team LEADER only. ADMIN 403. Do not treat ADMIN as a contribution-graph reader.
+- Override POST remains ADMIN/LECTURER. OpenAPI **149**. No migration.
+
+## Contribution graphs reuse evaluation (DEC-094) — 2026-08-15
+
+- Không thêm `/api/analytics/*`. Graph đóng góp chỉ đọc `GET /api/v1/teams/{teamId}/contribution-evaluation`. Không mở MEMBER đọc Contribution.
+- `sprintBreakdowns[]` additive: `codeStoryPoints` / `testStoryPoints` / `documentStoryPoints` / `researchStoryPoints`. Không đổi mixer arithmetic. Heatmap/overview không phải % đóng góp.
+- OpenAPI **149**. Không migration.
+
 ## Jira task evidence from SAGA (DEC-093) — 2026-08-15
 
 - Attach endpoint is **STUDENT team member only**. Files and/or an `http`/`https` link. DOCUMENT/RESEARCH count when ≥1 `TaskAttachment` or ≥1 `TaskWebLink`.

@@ -267,11 +267,11 @@ Team/Sprint, không chỉ review của chính mình.
 
 `GET /api/v1/teams/{teamId}/contribution-evaluation`
 
-**Controller role annotation:** ADMIN, LECTURER, STUDENT.
+**Controller role annotation:** LECTURER, STUDENT.
 
-**Effective service authorization:** ADMIN xem mọi Team; LECTURER chỉ Team thuộc Course
+**Effective service authorization:** LECTURER chỉ Team thuộc Course
 mình phụ trách; STUDENT chỉ khi `SagaPrincipal.localProfileId` có exact `TeamMember` role
-`LEADER` của chính `teamId` đang yêu cầu. MEMBER, MENTOR, Student không membership và
+`LEADER` của chính `teamId` đang yêu cầu. ADMIN, MEMBER, MENTOR, Student không membership và
 Leader Team khác nhận `403`; anonymous `401`; Team không tồn tại `404`.
 
 `LEADER` là `RoleInTeam`, không phải application role. FE không gửi actor ID và không tự
@@ -336,6 +336,14 @@ quyết định quyền bằng UI.
 - Response DTO thực tế chỉ gồm các field trong `TeamContributionMemberResponse`.
 - Privacy audit: response không có email, Cognito subject, provider credential, raw Peer Review
   comment/reviewer identity, token, internal secret hoặc raw Jira/GitHub payload.
+
+---
+
+## 2b) Contribution flowchart (DEC-096)
+
+`GET /api/v1/teams/{teamId}/contribution-graph`
+
+Cùng quyền với evaluation. Payload node/edge dùng công thức SAGA (không hệ số mockup). `tasks[]` trên cạnh để drill-down. Không GHOSTING, không publish.
 
 ---
 
@@ -534,6 +542,7 @@ của Course chứa Team. Với LECTURER, actor lấy từ principal; với ADMI
 2. Student submit `POST .../peer-reviews`
 3. Lecturer xem `GET .../peer-reviews`
 4. Lecturer đúng Course hoặc Student LEADER đúng Team xem `GET .../contribution-evaluation`
+4b. Cùng caller vẽ flowchart từ `GET .../contribution-graph` (công thức SAGA, không hệ số mockup)
 5. Lecturer đúng Course gọi `PUT .../contribution-slice-weights` (CSRF) khi Course đang ở `COURSE` mode
 6. Nếu muốn dùng `TEAM` mode: Lecturer gọi `PUT /api/projects/{projectId}/group-weights` (CSRF) cho **từng** Team hiện tại trước, rồi gọi `PUT .../contribution-config-mode` `{"mode":"TEAM"}` để activate — bị từ chối `409` nếu còn Team thiếu override
 7. FE dùng `GET .../contribution-team-weights` để hiển thị mode hiện tại + effective weight từng Team, không tự suy diễn ở client

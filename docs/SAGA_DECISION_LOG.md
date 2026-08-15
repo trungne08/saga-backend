@@ -1,3 +1,26 @@
+## DEC-096 — Contribution flowchart graph is a separate GET; SAGA mixer unchanged
+
+- Ngày: 2026-08-16; trạng thái: ACCEPTED / CONFIRMED_SOURCE_TEST.
+- Context: mockup flowchart (tiêu chí → SP → student → peer → %) cần API node/edge. Không copy hệ số mockup (CODE×2.0 / DESIGN / DOCS). Công thức giữ DEC-092.
+- Quyết định: `GET /api/v1/teams/{teamId}/contribution-graph`. Cùng auth DEC-095 (LECTURER exact Course instructor, STUDENT exact Team LEADER). ADMIN/MEMBER/MENTOR 403. Node `CRITERION` (CODE/TEST/DOCUMENT/RESEARCH) + `STUDENT`; cạnh tiêu chí→sinh viên kèm `storyPoints`, `weightedSlice = SP × weightRatio`, `tasks[]` (title/externalKey/sprint) để drill-down. `P` = `stars_i / teamStars`. Không GHOSTING, không publish/snapshot, không `/api/analytics/*`.
+- Radar/bar/line vẫn đọc evaluation (DEC-094). Mixer, Peer Review, override, activity graphs không đổi.
+- OpenAPI **149 → 150**. Không migration.
+
+## DEC-095 — Contribution evaluation / graph is Lecturer and Student Leader only; ADMIN cannot read
+
+- Ngày: 2026-08-15; trạng thái: ACCEPTED / CONFIRMED_SOURCE_TEST.
+- **Supersede DEC-074 (read access only):** `GET /api/v1/teams/{teamId}/contribution-evaluation` không còn cho ADMIN. LECTURER exact Course instructor và STUDENT exact Team LEADER giữ nguyên. MEMBER/MENTOR/cross-Team vẫn 403. Anonymous 401. Team thiếu: LECTURER/STUDENT 404.
+- `POST .../contribution-override` không đổi (ADMIN/LECTURER). Activity graphs (heatmap/overview/interactions/burndown) không đổi.
+- OpenAPI **149**. Không migration.
+
+## DEC-094 — Contribution evaluation exposes per-sprint recognized story points for graph charts
+
+- Ngày: 2026-08-15; trạng thái: ACCEPTED / CONFIRMED_SOURCE_TEST.
+- Context: scoring (DEC-092) đã chốt. Graph đóng góp (radar / stacked bar / line % sprint) không cần route `/api/analytics/*` mới. Heatmap, overview, interactions, burndown đã có dưới `/api/v1/courses/{courseId}/teams/{teamId}/...` và là **activity graphs**, không đổi công thức Contribution.
+- Quyết định: reuse `GET /api/v1/teams/{teamId}/contribution-evaluation`. Read access: LECTURER exact Course instructor và STUDENT exact Team LEADER (**ADMIN không đọc** — DEC-095). Additive fields trên `sprintBreakdowns[]`: `codeStoryPoints`, `testStoryPoints`, `documentStoryPoints`, `researchStoryPoints` = Σ SP được công nhận trong sprint đó (sau label + DOCUMENT/RESEARCH file/link gate). Không phải %. Không nhân trọng số — `sliceScore` vẫn là Σ SP × weight. FE không nhân peer lần hai.
+- Mapping FE: radar = `code/test/document/researchContributionPercentage` (project-level share); so sánh thành viên = `finalContributionPercentage`; line theo sprint = `sprintBreakdowns[].contributionPercentage`; stacked bar tiêu chí = bốn `*StoryPoints`.
+- Không mở MEMBER đọc Contribution. Không đổi mixer arithmetic, Peer Review, override, heatmap scoring. OpenAPI **149** (không thêm operation). Không migration.
+
 ## DEC-093 — Students attach files/images/links to a Jira Task through SAGA
 
 - Ngày: 2026-08-15; trạng thái: ACCEPTED / CONFIRMED_SOURCE_TEST.

@@ -4,6 +4,7 @@ import com.saga.be.dto.request.ContributionOverrideRequest;
 import com.saga.be.dto.response.ContributionOverrideResponse;
 import com.saga.be.dto.response.ContributionWarning;
 import com.saga.be.dto.response.TeamContributionEvaluationResponse;
+import com.saga.be.dto.response.TeamContributionGraphResponse;
 import com.saga.be.dto.response.TeamContributionMemberResponse;
 import com.saga.be.entity.CommitData;
 import com.saga.be.entity.Lecturer;
@@ -38,6 +39,7 @@ import com.saga.be.service.contribution.SprintFirstContributionMixer;
 import com.saga.be.service.contribution.TaskContributionClassifier;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -81,9 +83,201 @@ public class TeamContributionService {
 
     @Transactional(readOnly = true)
     TeamContributionEvaluationResponse evaluate(UUID teamId) {
-        Team team = teamRepository.findById(teamId)
+        Team team = teamRepository.findWithCourseAndInstructorById(teamId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Team not found"));
         return evaluate(teamId, team);
+    }
+
+    @Transactional(readOnly = true)
+    public TeamContributionGraphResponse graph(SagaPrincipal principal, UUID teamId) {
+        Team team = teamRepository.findWithCourseAndInstructorById(teamId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Team not found"));
+        requireContributionReadAccess(principal, team);
+        return graph(teamId, team);
+    }
+
+    @Transactional(readOnly = true)
+    TeamContributionGraphResponse graph(UUID teamId) {
+        Team team = teamRepository.findWithCourseAndInstructorById(teamId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Team not found"));
+        return graph(teamId, team);
+    }
+
+    private TeamContributionGraphResponse graph(UUID teamId, Team team) {
+        TeamContributionEvaluationResponse evaluation = evaluate(teamId, team);
+        UUID projectId = evaluation.projectId();
+        ContributionSliceWeights weights = team.getCourse() == null
+                ? ContributionSliceWeights.fromCourse(null)
+                : sliceWeightResolver.resolve(team);
+        List<TeamMember> members = teamMemberRepository.findByTeamId(teamId);
+        Map<UUID, String> roleByStudent = new HashMap<>();
+        for (TeamMember member : members) {
+            if (member.getStudent() == null || member.getStudent().getId() == null) {
+                continue;
+            }
+            RoleInTeam role = member.getRoleInTeam();
+            roleByStudent.put(member.getStudent().getId(), role == null ? null : role.name());
+        }
+
+        List<TeamContributionGraphResponse.ContributionGraphNode> nodes = new ArrayList<>();
+        for (ContributionCriterion criterion : ContributionCriterion.values()) {
+            double percent = weightPercent(weights, criterion);
+            double ratio = percent / 100.0;
+            nodes.add(new TeamContributionGraphResponse.ContributionGraphNode(
+                    criterionNodeId(criterion),
+                    "CRITERION",
+                    criterion.name(),
+                    ratio,
+                    percent,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    List.of()
+            ));
+        }
+        for (TeamContributionMemberResponse member : evaluation.members()) {
+            double slice = member.sliceScore();
+            double peer = member.peerReviewScore();
+            nodes.add(new TeamContributionGraphResponse.ContributionGraphNode(
+                    studentNodeId(member.studentId()),
+                    "STUDENT",
+                    null,
+                    null,
+                    null,
+                    member.studentId(),
+                    member.fullName(),
+                    member.studentCode(),
+                    roleByStudent.get(member.studentId()),
+                    slice,
+                    peer,
+                    slice * peer,
+                    member.finalContributionPercentage(),
+                    member.warnings()
+            ));
+        }
+
+        List<TeamContributionGraphResponse.ContributionGraphEdge> edges = List.of();
+        if (projectId != null) {
+            edges = buildCriterionEdges(projectId, weights);
+        }
+        return new TeamContributionGraphResponse(
+                teamId,
+                projectId,
+                evaluation.evaluatedAt(),
+                TeamContributionGraphResponse.FORMULA,
+                new TeamContributionGraphResponse.ContributionGraphWeights(
+                        weights.codeRatio().doubleValue(),
+                        weights.testRatio().doubleValue(),
+                        weights.documentRatio().doubleValue(),
+                        weights.researchRatio().doubleValue(),
+                        weights.codeValue(),
+                        weights.testValue(),
+                        weights.documentValue(),
+                        weights.researchValue()
+                ),
+                nodes,
+                edges
+        );
+    }
+
+    private List<TeamContributionGraphResponse.ContributionGraphEdge> buildCriterionEdges(
+            UUID projectId,
+            ContributionSliceWeights weights
+    ) {
+        List<Task> tasks = taskRepository.findByProjectId(projectId);
+        Map<UUID, Integer> evidenceByTask = evidenceCounts(projectId);
+        Map<String, List<TeamContributionGraphResponse.ContributionGraphTask>> tasksByEdge = new LinkedHashMap<>();
+        Map<String, Double> storyPointsByEdge = new HashMap<>();
+        Map<String, ContributionCriterion> criterionByEdge = new HashMap<>();
+        Map<String, UUID> studentByEdge = new HashMap<>();
+        for (Task task : tasks) {
+            if (task == null
+                    || task.getId() == null
+                    || !TaskStatus.DONE.equals(task.getStatus())
+                    || task.getAssignee() == null
+                    || task.getAssignee().getId() == null
+                    || task.getSprint() == null
+                    || task.getSprint().getId() == null) {
+                continue;
+            }
+            Optional<ContributionCriterion> classified = TaskContributionClassifier.classify(task);
+            if (classified.isEmpty()) {
+                continue;
+            }
+            ContributionCriterion criterion = classified.get();
+            int evidence = evidenceByTask.getOrDefault(task.getId(), 0);
+            if (!TaskContributionClassifier.storyPointsRecognized(criterion, evidence)) {
+                continue;
+            }
+            UUID studentId = task.getAssignee().getId();
+            double storyPoints = task.getStoryPoint() != null ? task.getStoryPoint().doubleValue() : 1.0;
+            if (storyPoints <= 0.0) {
+                continue;
+            }
+            String edgeId = edgeId(criterion, studentId);
+            storyPointsByEdge.merge(edgeId, storyPoints, Double::sum);
+            criterionByEdge.put(edgeId, criterion);
+            studentByEdge.put(edgeId, studentId);
+            Sprint sprint = task.getSprint();
+            tasksByEdge.computeIfAbsent(edgeId, ignored -> new ArrayList<>()).add(
+                    new TeamContributionGraphResponse.ContributionGraphTask(
+                            task.getId(),
+                            task.getTitle(),
+                            task.getExternalKey(),
+                            sprint.getId(),
+                            sprint.getName(),
+                            storyPoints
+                    )
+            );
+        }
+        List<TeamContributionGraphResponse.ContributionGraphEdge> edges = new ArrayList<>();
+        List<String> edgeIds = new ArrayList<>(tasksByEdge.keySet());
+        edgeIds.sort(Comparator.naturalOrder());
+        for (String edgeId : edgeIds) {
+            ContributionCriterion criterion = criterionByEdge.get(edgeId);
+            double storyPoints = storyPointsByEdge.getOrDefault(edgeId, 0.0);
+            List<TeamContributionGraphResponse.ContributionGraphTask> edgeTasks = tasksByEdge.get(edgeId);
+            edgeTasks.sort(Comparator
+                    .comparing((TeamContributionGraphResponse.ContributionGraphTask item) ->
+                            item.externalKey() == null ? "" : item.externalKey())
+                    .thenComparing(item -> item.taskId().toString()));
+            edges.add(new TeamContributionGraphResponse.ContributionGraphEdge(
+                    edgeId,
+                    criterionNodeId(criterion),
+                    studentNodeId(studentByEdge.get(edgeId)),
+                    criterion.name(),
+                    storyPoints,
+                    storyPoints * weightPercent(weights, criterion) / 100.0,
+                    edgeTasks
+            ));
+        }
+        return edges;
+    }
+
+    private static String criterionNodeId(ContributionCriterion criterion) {
+        return "criterion:" + criterion.name();
+    }
+
+    private static String studentNodeId(UUID studentId) {
+        return "student:" + studentId;
+    }
+
+    private static String edgeId(ContributionCriterion criterion, UUID studentId) {
+        return "edge:" + criterion.name() + ":" + studentId;
+    }
+
+    private static double weightPercent(ContributionSliceWeights weights, ContributionCriterion criterion) {
+        return switch (criterion) {
+            case CODE -> weights.codeValue();
+            case TEST -> weights.testValue();
+            case DOCUMENT -> weights.documentValue();
+            case RESEARCH -> weights.researchValue();
+        };
     }
 
     private TeamContributionEvaluationResponse evaluate(UUID teamId, Team team) {
@@ -247,6 +441,7 @@ public class TeamContributionService {
                             taskScoreByStudentSprint.getOrDefault(studentId, Map.of()),
                             reviewsBySprint,
                             peerScoreBySprint,
+                            recognizedByStudentThenSprint,
                             sprintMix
                     );
             double adjustedSprintScore = sprintBreakdowns.stream()
@@ -356,9 +551,6 @@ public class TeamContributionService {
     private void requireContributionReadAccess(SagaPrincipal principal, Team team) {
         if (principal == null || principal.localProfileId() == null) {
             throw new AccessDeniedException("Authentication is required");
-        }
-        if (principal.applicationRole() == ApplicationRole.ADMIN) {
-            return;
         }
         if (principal.applicationRole() == ApplicationRole.LECTURER
                 && team.getCourse() != null
@@ -657,6 +849,7 @@ public class TeamContributionService {
                     Map<UUID, Double> taskScoreBySprint,
                     Map<UUID, List<PeerReview>> reviewsBySprint,
                     Map<UUID, Map<UUID, Double>> peerScoreBySprint,
+                    Map<UUID, Map<UUID, double[]>> recognizedByStudentThenSprint,
                     SprintFirstContributionMixer.Result sprintMix
             ) {
         List<TeamContributionMemberResponse.SprintContributionBreakdown> breakdowns =
@@ -678,6 +871,11 @@ public class TeamContributionService {
             if (taskScore == 0.0 && sprintReviews.isEmpty()) {
                 continue;
             }
+            double[] recognized = SprintFirstContributionMixer.copyRecognizedBucket(
+                    recognizedByStudentThenSprint,
+                    studentId,
+                    sprint.getId()
+            );
             breakdowns.add(new TeamContributionMemberResponse.SprintContributionBreakdown(
                     sprint.getId(),
                     sprint.getName(),
@@ -687,7 +885,11 @@ public class TeamContributionService {
                     sprintReviews.size(),
                     sprintMix.sliceScoreInSprint(sprint.getId(), studentId),
                     sprintMix.slicePercentageInSprint(sprint.getId(), studentId),
-                    sprintMix.percentageInSprint(sprint.getId(), studentId)
+                    sprintMix.percentageInSprint(sprint.getId(), studentId),
+                    recognized[0],
+                    recognized[1],
+                    recognized[2],
+                    recognized[3]
             ));
         }
         return breakdowns;

@@ -34,6 +34,10 @@ public record TeamContributionMemberResponse(
             int peerReviewCount,
             double sliceScore,
             double sliceContributionPercentage,
-            double contributionPercentage
+            double contributionPercentage,
+            double codeStoryPoints,
+            double testStoryPoints,
+            double documentStoryPoints,
+            double researchStoryPoints
     ) {}
 }

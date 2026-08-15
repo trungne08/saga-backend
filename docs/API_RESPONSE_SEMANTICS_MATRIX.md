@@ -1,3 +1,7 @@
+## Contribution flowchart graph (DEC-096, 2026-08-16)
+
+OpenAPI **149 → 150**. One public GET added: `/api/v1/teams/{teamId}/contribution-graph`. Same 401/403/404 as evaluation. No email/cognito on payload.
+
 ## Absolute weighted slice × peer (DEC-092, 2026-08-15)
 
 No route added/removed. `sliceScore` / `sliceContributionPercentage` are the pre-peer slice (raw and team-normalized %). `finalContributionPercentage` is `(Σ slice × project P) / team adjust`. `sprintBreakdowns[]` now has the same pre-peer pair plus after-peer `contributionPercentage`.
@@ -238,6 +242,7 @@ Quy ước: `OAS` là response được khai báo trực tiếp trong OpenAPI; `
 | GET | `/api/v1/teams/{teamId}/sprints/{sprintId}/peer-reviews/candidates` | PeerReviewController | OAS: 200 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | getCandidates; OAS: 200 | OK | Bổ sung response metadata chi tiết theo task riêng. |
 | GET | `/api/v1/teams/{teamId}/peer-review-rubric` | PeerReviewRubricController | OAS: 200 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | getRubric; OAS: 200 | OK | Bổ sung response metadata chi tiết theo task riêng. |
 | GET | `/api/v1/teams/{teamId}/contribution-evaluation` | TeamContributionController | OAS: 200 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | getContributionEvaluation; OAS: 200 | OK | Bổ sung response metadata chi tiết theo task riêng. |
+| GET | `/api/v1/teams/{teamId}/contribution-graph` | TeamContributionController | OAS: 200, 401, 403, 404 | TBD | TBD | TBD | OAS | OAS | OAS | OAS | TBD | TBD | getContributionGraph; cùng auth evaluation | OK | Flowchart SAGA, không hệ số mockup. |
 | GET | `/api/v1/semesters/{id}` | SemesterController | OAS: 200 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | getSemesterById; OAS: 200 | OK | Bổ sung response metadata chi tiết theo task riêng. |
 | GET | `/api/v1/peer-review-rubrics/default` | PeerReviewDefaultRubricController | OAS: 200 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | getDefaultRubric; OAS: 200 | OK | Bổ sung response metadata chi tiết theo task riêng. |
 | GET | `/api/v1/courses/{id}` | CourseController | OAS: 200 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | getCourseById; OAS: 200 | OK | Bổ sung response metadata chi tiết theo task riêng. |
