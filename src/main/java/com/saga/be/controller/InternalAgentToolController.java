@@ -154,6 +154,17 @@ public class InternalAgentToolController {
         return projections.srsContext(actor(context, request.conversationId(), false), request.projectId());
     }
 
+    @PostMapping("/resolve-assignee")
+    public InternalAgentToolResponses.AssigneeResolution resolveAssignee(
+            @RequestHeader(DELEGATED_CONTEXT_HEADER) String context,
+            @Valid @RequestBody InternalAgentToolRequests.AssigneeResolve request
+    ) {
+        return projections.resolveAssignee(
+                actor(context, request.conversationId(), false),
+                request.projectId(), request.fullName(), request.studentCode()
+        );
+    }
+
     @PostMapping("/validate-task-create")
     public InternalAgentToolResponses.ActionValidation validateTaskCreate(
             @RequestHeader(DELEGATED_CONTEXT_HEADER) String context,

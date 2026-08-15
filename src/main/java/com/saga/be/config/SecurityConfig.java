@@ -101,6 +101,7 @@ public class SecurityConfig {
                                 PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/project-traceability"),
                                 PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/validate-commit-review"),
                                 PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/srs-context"),
+                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/resolve-assignee"),
                                 PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/validate-task-create"),
                                 PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/validate-task-update")
                         )

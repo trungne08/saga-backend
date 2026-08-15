@@ -155,6 +155,21 @@ public final class InternalAgentToolResponses {
     ) {
     }
 
+    public record AssigneeResolution(
+            UUID projectId,
+            UUID teamId,
+            String matchState,
+            List<AssigneeCandidate> candidates
+    ) {
+    }
+
+    public record AssigneeCandidate(
+            UUID studentId,
+            String fullName,
+            String studentCode
+    ) {
+    }
+
     public record ActionValidation(
             boolean valid,
             Map<String, Object> normalizedPayload,

@@ -14,10 +14,13 @@ import com.saga.be.dto.response.TaskReadResponse;
 import com.saga.be.dto.response.TeamContributionEvaluationResponse;
 import com.saga.be.dto.response.TeamContributionMemberResponse;
 import com.saga.be.entity.Course;
+import com.saga.be.entity.Student;
 import com.saga.be.entity.Team;
 import com.saga.be.entity.TeamMember;
 import com.saga.be.entity.enums.TaskStatus;
 import com.saga.be.exception.IntegrationException;
+import com.saga.be.helper.StudentIdentityNormalizer;
+import com.saga.be.integration.security.ProjectIntegrationAuthorizationService;
 import com.saga.be.repository.DocumentRepository;
 import com.saga.be.repository.GitRepoRepository;
 import com.saga.be.repository.CourseRepository;
@@ -46,6 +49,7 @@ public class AgentToolProjectionService {
     private static final int MAX_TRACEABILITY_EVENTS = 50;
     private static final int MAX_CONTEXT_COURSES = 50;
     private static final int MAX_CONTEXT_TEAMS = 100;
+    private static final int MAX_ASSIGNEE_CANDIDATES = 20;
 
     private final ProjectDetailService projects;
     private final ProjectTaskReadService tasks;
@@ -59,6 +63,8 @@ public class AgentToolProjectionService {
     private final CommitReviewContextReader commitReviewContexts;
     private final ProjectSprintService sprints;
     private final CourseEarlyWarningQueryService earlyWarnings;
+    private final ProjectIntegrationAuthorizationService authorization;
+    private final StudentIdentityNormalizer identity;
 
     public AgentToolProjectionService(
             ProjectDetailService projects,
@@ -72,7 +78,9 @@ public class AgentToolProjectionService {
             DocumentRepository documents,
             CommitReviewContextReader commitReviewContexts,
             ProjectSprintService sprints,
-            CourseEarlyWarningQueryService earlyWarnings
+            CourseEarlyWarningQueryService earlyWarnings,
+            ProjectIntegrationAuthorizationService authorization,
+            StudentIdentityNormalizer identity
     ) {
         this.projects = projects;
         this.tasks = tasks;
@@ -86,6 +94,8 @@ public class AgentToolProjectionService {
         this.commitReviewContexts = commitReviewContexts;
         this.sprints = sprints;
         this.earlyWarnings = earlyWarnings;
+        this.authorization = authorization;
+        this.identity = identity;
     }
 
     @Transactional(readOnly = true)
@@ -206,6 +216,71 @@ public class AgentToolProjectionService {
 
     public ProjectTraceabilityResponse projectTraceability(SagaPrincipal actor, UUID projectId) {
         return traceability.projectTimeline(actor, projectId, MAX_TRACEABILITY_EVENTS);
+    }
+
+    @Transactional(readOnly = true)
+    public InternalAgentToolResponses.AssigneeResolution resolveAssignee(
+            SagaPrincipal actor, UUID projectId, String fullName, String studentCode
+    ) {
+        authorization.requireProjectManager(actor, projectId);
+        Team team = teams.findByProjectId(projectId).orElseThrow(() -> IntegrationException.conflict(
+                "PROJECT_TEAM_MISSING", "The project is not assigned to a team"
+        ));
+        String normalizedCode = isBlank(studentCode) ? null : identity.normalizeStudentCode(studentCode);
+        String normalizedName = isBlank(fullName) ? null : identity.normalizeFullName(fullName);
+        if (normalizedCode == null && normalizedName == null) {
+            throw IntegrationException.invalid(
+                    "AGENT_ASSIGNEE_RESOLVE_EMPTY", "Either fullName or studentCode is required"
+            );
+        }
+        List<Student> members = teamMembers.findByTeamId(team.getId()).stream()
+                .map(TeamMember::getStudent)
+                .filter(java.util.Objects::nonNull)
+                .toList();
+        List<Student> matches;
+        if (normalizedCode != null && normalizedName != null) {
+            matches = members.stream()
+                    .filter(student -> normalizedCode.equals(identity.normalizeStudentCode(student.getStudentCode()))
+                            && normalizedName.equals(identity.normalizeFullName(student.getFullName())))
+                    .toList();
+        } else if (normalizedCode != null) {
+            matches = members.stream()
+                    .filter(student -> normalizedCode.equals(identity.normalizeStudentCode(student.getStudentCode())))
+                    .toList();
+        } else {
+            matches = members.stream()
+                    .filter(student -> normalizedName.equals(identity.normalizeFullName(student.getFullName())))
+                    .toList();
+        }
+        String matchState;
+        List<Student> bounded;
+        if (matches.isEmpty()) {
+            matchState = "NOT_FOUND";
+            bounded = List.of();
+        } else if (matches.size() == 1) {
+            matchState = "MATCHED";
+            bounded = matches;
+        } else {
+            matchState = "MULTIPLE_MATCH";
+            bounded = matches.stream()
+                    .sorted(Comparator.comparing(
+                            Student::getStudentCode, Comparator.nullsLast(String.CASE_INSENSITIVE_ORDER)
+                    ).thenComparing(Student::getId))
+                    .limit(MAX_ASSIGNEE_CANDIDATES)
+                    .toList();
+        }
+        List<InternalAgentToolResponses.AssigneeCandidate> candidates = bounded.stream()
+                .map(student -> new InternalAgentToolResponses.AssigneeCandidate(
+                        student.getId(), student.getFullName(), student.getStudentCode()
+                ))
+                .toList();
+        return new InternalAgentToolResponses.AssigneeResolution(
+                projectId, team.getId(), matchState, candidates
+        );
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 
     public InternalAgentToolResponses.CommitReviewTarget commitReviewTarget(

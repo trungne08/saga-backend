@@ -13,4 +13,8 @@ public class StudentIdentityNormalizer {
     public String normalizeStudentCode(String value) {
         return value == null ? "" : value.trim().toUpperCase(Locale.ROOT);
     }
+
+    public String normalizeFullName(String value) {
+        return value == null ? "" : value.trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
+    }
 }

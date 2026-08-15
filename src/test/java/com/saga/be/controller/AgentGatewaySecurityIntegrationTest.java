@@ -165,6 +165,39 @@ class AgentGatewaySecurityIntegrationTest {
                 .andExpect(content().string(containsString("ZERO_MATCH")));
     }
 
+    @Test
+    void resolveAssigneeUsesServiceCredentialDelegatedActorAndDoesNotLeakProviderIdentity() throws Exception {
+        SagaPrincipal actor = (SagaPrincipal) authFor(ApplicationRole.STUDENT).getPrincipal();
+        String opaqueContext = "opaque-delegated-context-value-1234567890";
+        UUID projectId = UUID.randomUUID();
+        UUID studentId = UUID.randomUUID();
+        when(delegations.resolve(
+                opaqueContext, CONVERSATION_ID, AgentDelegationCapability.READ
+        )).thenReturn(actor);
+        when(projections.resolveAssignee(actor, projectId, null, "SE123456")).thenReturn(
+                new com.saga.be.dto.response.InternalAgentToolResponses.AssigneeResolution(
+                        projectId, UUID.randomUUID(), "MATCHED",
+                        List.of(new com.saga.be.dto.response.InternalAgentToolResponses.AssigneeCandidate(
+                                studentId, "Le Hoang Hai", "SE123456"
+                        ))
+                )
+        );
+
+        mockMvc.perform(post("/internal/ai/v1/agent/tools/resolve-assignee")
+                        .header(InternalAiServiceAuthenticationFilter.HEADER_NAME, INTERNAL_TOKEN)
+                        .header(InternalAgentToolController.DELEGATED_CONTEXT_HEADER, opaqueContext)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"conversationId\":\"" + CONVERSATION_ID
+                                + "\",\"projectId\":\"" + projectId
+                                + "\",\"studentCode\":\"SE123456\"}"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("MATCHED")))
+                .andExpect(content().string(containsString(studentId.toString())))
+                .andExpect(content().string(not(containsString("email"))))
+                .andExpect(content().string(not(containsString("cognito"))))
+                .andExpect(content().string(not(containsString("accountId"))));
+    }
+
     private AgentApiResponses.Conversation conversation() {
         return new AgentApiResponses.Conversation(
                 CONVERSATION_ID, "Private", "ADMIN", false,

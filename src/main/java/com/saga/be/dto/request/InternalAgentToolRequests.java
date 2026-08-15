@@ -42,6 +42,14 @@ public final class InternalAgentToolRequests {
     public record Team(@NotNull UUID conversationId, @NotNull UUID teamId) {
     }
 
+    public record AssigneeResolve(
+            @NotNull UUID conversationId,
+            @NotNull UUID projectId,
+            @Size(max = 255) String fullName,
+            @Size(max = 32) String studentCode
+    ) {
+    }
+
     public record Course(@NotNull UUID conversationId, @NotNull UUID courseId) {
     }
 

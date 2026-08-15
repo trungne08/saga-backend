@@ -10,10 +10,14 @@ import static org.mockito.Mockito.when;
 import com.saga.be.dto.response.InternalAgentToolResponses;
 import com.saga.be.entity.Course;
 import com.saga.be.entity.Project;
+import com.saga.be.entity.Student;
 import com.saga.be.entity.Team;
 import com.saga.be.entity.TeamMember;
 import com.saga.be.entity.enums.AccountStatus;
 import com.saga.be.entity.enums.RoleInTeam;
+import com.saga.be.exception.IntegrationException;
+import com.saga.be.helper.StudentIdentityNormalizer;
+import com.saga.be.integration.security.ProjectIntegrationAuthorizationService;
 import com.saga.be.repository.DocumentRepository;
 import com.saga.be.repository.GitRepoRepository;
 import com.saga.be.repository.CourseRepository;
@@ -210,6 +214,206 @@ class AgentToolProjectionServiceTest {
         assertEquals(sha.toLowerCase(), result.commitSha());
     }
 
+    @Test
+    void resolveAssigneeMatchesExactUniqueStudentCode() {
+        SagaPrincipal actor = student();
+        UUID projectId = UUID.randomUUID();
+        Team team = team(course("SE-1", "Course 1"), "Team A", null);
+        ProjectIntegrationAuthorizationService authorization = mock(ProjectIntegrationAuthorizationService.class);
+        TeamRepository teams = mock(TeamRepository.class);
+        TeamMemberRepository memberships = mock(TeamMemberRepository.class);
+        Student target = student("Le Hoang Hai", "SE123456");
+        Student other = student("Nguyen Van A", "SE654321");
+        when(teams.findByProjectId(projectId)).thenReturn(Optional.of(team));
+        when(memberships.findByTeamId(team.getId())).thenReturn(
+                List.of(membership(team, target), membership(team, other))
+        );
+        AgentToolProjectionService service = assigneeService(teams, memberships, authorization);
+
+        InternalAgentToolResponses.AssigneeResolution result = service.resolveAssignee(
+                actor, projectId, null, "se123456"
+        );
+
+        verify(authorization).requireProjectManager(actor, projectId);
+        assertEquals("MATCHED", result.matchState());
+        assertEquals(1, result.candidates().size());
+        assertEquals(target.getId(), result.candidates().get(0).studentId());
+    }
+
+    @Test
+    void resolveAssigneeMatchesExactUniqueFullNameWithinOwningTeamOnly() {
+        SagaPrincipal actor = student();
+        UUID projectId = UUID.randomUUID();
+        Team team = team(course("SE-1", "Course 1"), "Team A", null);
+        ProjectIntegrationAuthorizationService authorization = mock(ProjectIntegrationAuthorizationService.class);
+        TeamRepository teams = mock(TeamRepository.class);
+        TeamMemberRepository memberships = mock(TeamMemberRepository.class);
+        Student target = student("Le Hoang Hai", "SE123456");
+        when(teams.findByProjectId(projectId)).thenReturn(Optional.of(team));
+        when(memberships.findByTeamId(team.getId())).thenReturn(List.of(membership(team, target)));
+        AgentToolProjectionService service = assigneeService(teams, memberships, authorization);
+
+        InternalAgentToolResponses.AssigneeResolution result = service.resolveAssignee(
+                actor, projectId, "  le   hoang hai ", null
+        );
+
+        assertEquals("MATCHED", result.matchState());
+        assertEquals(target.getId(), result.candidates().get(0).studentId());
+        assertEquals("SE123456", result.candidates().get(0).studentCode());
+    }
+
+    @Test
+    void resolveAssigneeReturnsControlledNotFoundWhenFullNameAndStudentCodeReferToDifferentStudents() {
+        SagaPrincipal actor = student();
+        UUID projectId = UUID.randomUUID();
+        Team team = team(course("SE-1", "Course 1"), "Team A", null);
+        ProjectIntegrationAuthorizationService authorization = mock(ProjectIntegrationAuthorizationService.class);
+        TeamRepository teams = mock(TeamRepository.class);
+        TeamMemberRepository memberships = mock(TeamMemberRepository.class);
+        Student codeOwner = student("Le Hoang Hai", "SE123456");
+        Student nameOwner = student("Nguyen Van A", "SE654321");
+        when(teams.findByProjectId(projectId)).thenReturn(Optional.of(team));
+        when(memberships.findByTeamId(team.getId())).thenReturn(
+                List.of(membership(team, codeOwner), membership(team, nameOwner))
+        );
+        AgentToolProjectionService service = assigneeService(teams, memberships, authorization);
+
+        InternalAgentToolResponses.AssigneeResolution result = service.resolveAssignee(
+                actor, projectId, "Nguyen Van A", "SE123456"
+        );
+
+        assertEquals("NOT_FOUND", result.matchState());
+        assertEquals(0, result.candidates().size());
+    }
+
+    @Test
+    void resolveAssigneeMatchesWhenFullNameAndStudentCodeReferToTheSameStudent() {
+        SagaPrincipal actor = student();
+        UUID projectId = UUID.randomUUID();
+        Team team = team(course("SE-1", "Course 1"), "Team A", null);
+        ProjectIntegrationAuthorizationService authorization = mock(ProjectIntegrationAuthorizationService.class);
+        TeamRepository teams = mock(TeamRepository.class);
+        TeamMemberRepository memberships = mock(TeamMemberRepository.class);
+        Student target = student("Le Hoang Hai", "SE123456");
+        Student other = student("Nguyen Van A", "SE654321");
+        when(teams.findByProjectId(projectId)).thenReturn(Optional.of(team));
+        when(memberships.findByTeamId(team.getId())).thenReturn(
+                List.of(membership(team, target), membership(team, other))
+        );
+        AgentToolProjectionService service = assigneeService(teams, memberships, authorization);
+
+        InternalAgentToolResponses.AssigneeResolution result = service.resolveAssignee(
+                actor, projectId, "Le Hoang Hai", "SE123456"
+        );
+
+        assertEquals("MATCHED", result.matchState());
+        assertEquals(target.getId(), result.candidates().get(0).studentId());
+    }
+
+    @Test
+    void resolveAssigneeReturnsMultipleMatchWithoutPickingFirstOnDuplicateFullName() {
+        SagaPrincipal actor = student();
+        UUID projectId = UUID.randomUUID();
+        Team team = team(course("SE-1", "Course 1"), "Team A", null);
+        ProjectIntegrationAuthorizationService authorization = mock(ProjectIntegrationAuthorizationService.class);
+        TeamRepository teams = mock(TeamRepository.class);
+        TeamMemberRepository memberships = mock(TeamMemberRepository.class);
+        Student first = student("Le Hoang Hai", "SE123456");
+        Student second = student("Le Hoang Hai", "SE654321");
+        when(teams.findByProjectId(projectId)).thenReturn(Optional.of(team));
+        when(memberships.findByTeamId(team.getId())).thenReturn(
+                List.of(membership(team, first), membership(team, second))
+        );
+        AgentToolProjectionService service = assigneeService(teams, memberships, authorization);
+
+        InternalAgentToolResponses.AssigneeResolution result = service.resolveAssignee(
+                actor, projectId, "Le Hoang Hai", null
+        );
+
+        assertEquals("MULTIPLE_MATCH", result.matchState());
+        assertEquals(2, result.candidates().size());
+    }
+
+    @Test
+    void resolveAssigneeReturnsNotFoundWithoutFuzzyFallback() {
+        SagaPrincipal actor = student();
+        UUID projectId = UUID.randomUUID();
+        Team team = team(course("SE-1", "Course 1"), "Team A", null);
+        ProjectIntegrationAuthorizationService authorization = mock(ProjectIntegrationAuthorizationService.class);
+        TeamRepository teams = mock(TeamRepository.class);
+        TeamMemberRepository memberships = mock(TeamMemberRepository.class);
+        when(teams.findByProjectId(projectId)).thenReturn(Optional.of(team));
+        when(memberships.findByTeamId(team.getId())).thenReturn(
+                List.of(membership(team, student("Nguyen Van A", "SE654321")))
+        );
+        AgentToolProjectionService service = assigneeService(teams, memberships, authorization);
+
+        InternalAgentToolResponses.AssigneeResolution result = service.resolveAssignee(
+                actor, projectId, "Le Hoang Hai", null
+        );
+
+        assertEquals("NOT_FOUND", result.matchState());
+        assertEquals(0, result.candidates().size());
+    }
+
+    @Test
+    void resolveAssigneeRejectsEmptyQueryAfterReauthorization() {
+        SagaPrincipal actor = student();
+        UUID projectId = UUID.randomUUID();
+        Team team = team(course("SE-1", "Course 1"), "Team A", null);
+        ProjectIntegrationAuthorizationService authorization = mock(ProjectIntegrationAuthorizationService.class);
+        TeamRepository teams = mock(TeamRepository.class);
+        TeamMemberRepository memberships = mock(TeamMemberRepository.class);
+        when(teams.findByProjectId(projectId)).thenReturn(Optional.of(team));
+        AgentToolProjectionService service = assigneeService(teams, memberships, authorization);
+
+        IntegrationException failure = assertThrows(
+                IntegrationException.class,
+                () -> service.resolveAssignee(actor, projectId, " ", null)
+        );
+
+        assertEquals("AGENT_ASSIGNEE_RESOLVE_EMPTY", failure.getCode());
+        verify(authorization).requireProjectManager(actor, projectId);
+        verifyNoInteractions(memberships);
+    }
+
+    @Test
+    void resolveAssigneeFailsClosedWhenActorIsNotAuthorizedForProject() {
+        SagaPrincipal actor = student();
+        UUID projectId = UUID.randomUUID();
+        ProjectIntegrationAuthorizationService authorization = mock(ProjectIntegrationAuthorizationService.class);
+        TeamRepository teams = mock(TeamRepository.class);
+        TeamMemberRepository memberships = mock(TeamMemberRepository.class);
+        org.mockito.Mockito.doThrow(new AccessDeniedException("denied"))
+                .when(authorization).requireProjectManager(actor, projectId);
+        AgentToolProjectionService service = assigneeService(teams, memberships, authorization);
+
+        assertThrows(
+                AccessDeniedException.class,
+                () -> service.resolveAssignee(actor, projectId, "Le Hoang Hai", null)
+        );
+        verifyNoInteractions(teams, memberships);
+    }
+
+    @Test
+    void resolveAssigneeReturnsControlledConflictWhenProjectHasNoTeam() {
+        SagaPrincipal actor = student();
+        UUID projectId = UUID.randomUUID();
+        ProjectIntegrationAuthorizationService authorization = mock(ProjectIntegrationAuthorizationService.class);
+        TeamRepository teams = mock(TeamRepository.class);
+        TeamMemberRepository memberships = mock(TeamMemberRepository.class);
+        when(teams.findByProjectId(projectId)).thenReturn(Optional.empty());
+        AgentToolProjectionService service = assigneeService(teams, memberships, authorization);
+
+        IntegrationException failure = assertThrows(
+                IntegrationException.class,
+                () -> service.resolveAssignee(actor, projectId, "Le Hoang Hai", null)
+        );
+
+        assertEquals("PROJECT_TEAM_MISSING", failure.getCode());
+        verifyNoInteractions(memberships);
+    }
+
     private AgentToolProjectionService service(
             ProjectDetailService projects,
             ProjectTaskReadService tasks,
@@ -227,7 +431,9 @@ class AgentToolProjectionServiceTest {
                 mock(DocumentRepository.class),
                 reviews,
                 mock(ProjectSprintService.class),
-                mock(CourseEarlyWarningQueryService.class)
+                mock(CourseEarlyWarningQueryService.class),
+                mock(ProjectIntegrationAuthorizationService.class),
+                new StudentIdentityNormalizer()
         );
     }
 
@@ -249,8 +455,45 @@ class AgentToolProjectionServiceTest {
                 mock(DocumentRepository.class),
                 mock(CommitReviewContextReader.class),
                 mock(ProjectSprintService.class),
-                mock(CourseEarlyWarningQueryService.class)
+                mock(CourseEarlyWarningQueryService.class),
+                mock(ProjectIntegrationAuthorizationService.class),
+                new StudentIdentityNormalizer()
         );
+    }
+
+    private AgentToolProjectionService assigneeService(
+            TeamRepository teams,
+            TeamMemberRepository memberships,
+            ProjectIntegrationAuthorizationService authorization
+    ) {
+        return new AgentToolProjectionService(
+                mock(ProjectDetailService.class),
+                mock(ProjectTaskReadService.class),
+                mock(TeamContributionService.class),
+                mock(GitHubTraceabilityService.class),
+                teams,
+                memberships,
+                mock(CourseRepository.class),
+                mock(GitRepoRepository.class),
+                mock(DocumentRepository.class),
+                mock(CommitReviewContextReader.class),
+                mock(ProjectSprintService.class),
+                mock(CourseEarlyWarningQueryService.class),
+                authorization,
+                new StudentIdentityNormalizer()
+        );
+    }
+
+    private Student student(String fullName, String studentCode) {
+        Student value = Student.builder().fullName(fullName).studentCode(studentCode).build();
+        value.setId(UUID.randomUUID());
+        return value;
+    }
+
+    private TeamMember membership(Team team, Student student) {
+        TeamMember value = TeamMember.builder().team(team).student(student).roleInTeam(RoleInTeam.MEMBER).build();
+        value.setId(UUID.randomUUID());
+        return value;
     }
 
     private SagaPrincipal student() {
