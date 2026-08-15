@@ -93,4 +93,35 @@ public interface CommitDataRepository extends JpaRepository<CommitData, UUID> {
             @Param("externalAccountId") String externalAccountId,
             Pageable pageable
     );
+
+    @org.springframework.data.jpa.repository.EntityGraph(attributePaths = {"repo", "repo.project"})
+    @Query("select commit from CommitData commit where commit.id = :id")
+    Optional<CommitData> findWithRepoProjectById(@Param("id") UUID id);
+
+    @org.springframework.data.jpa.repository.EntityGraph(attributePaths = {"repo", "repo.project"})
+    @Query("""
+            select commit from CommitData commit
+            where commit.repo.reviewCutoverAt is not null
+              and not exists (
+                  select 1 from CommitReviewIntent intent
+                  where intent.commit.id = commit.id
+              )
+            order by commit.id asc
+            """)
+    List<CommitData> findHistoricalBacklogWithoutIntent(Pageable pageable);
+
+    @Query("""
+            select max(commit.timestamp) from CommitData commit
+            where commit.timestamp is not null
+              and commit.repo.project.id = :projectId
+              and (
+                    commit.author.id = :studentId
+                    or commit.authorExternalId = :externalAccountId
+              )
+            """)
+    LocalDateTime findLatestMappedTimestamp(
+            @Param("projectId") UUID projectId,
+            @Param("studentId") UUID studentId,
+            @Param("externalAccountId") String externalAccountId
+    );
 }

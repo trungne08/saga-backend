@@ -1,4 +1,15 @@
+## Extra Master (DEC-097) — 2026-08-16
+
+- GitIssue↔Commit production writer is **manual explicit only**. Do not parse commit messages. Do not invent GitHub relation APIs.
+- Persist nested `commit-review-result-v2` fail-closed. FAILED/CANCELLED do not create NEEDS_CHANGES warnings.
+- Business warnings go canonical DB → Bell → FCM → warning-email outbox (not invitation outbox). Transport reuse only.
+- Early Warning V2: Backend decides. `INACTIVITY_GRACE_PERIOD=TBD_PRODUCT` fail-safe. Sprint thresholds are named `EarlyWarningPolicy` constants (start 0.40 / WARNING 0.25 / CRITICAL 0.40). Repeated reviews window=3 threshold=2. Never mix SP and task-count denominators.
+- AI copies `confirmedWarnings` / `reviewAdvisories` / `unsupportedSignals` verbatim. No “lười/yếu”.
+- Leader Team DOCX: STUDENT + exact `roleInTeam=LEADER` of exact Team. MULTIPLE_MATCH no artifact. No new public AI endpoint.
+- OpenAPI **152**. Migration head **V42**.
+
 ## Capability matrix + warning-in-report + fail-closed AI (DEC-096) — 2026-08-16
+
 
 - Không mở rộng permission chỉ vì AI. Mọi tool reauthorize Backend. MEMBER không được Lecturer/Admin report. Leader chỉ exact led Team. Lecturer chỉ instructed Course (`ZERO_MATCH` nếu không dạy). ADMIN Course report cần `courseId` + `requireCourseAccess`.
 - Public AI 401 ≠ internal service-token 401. 403 AI dùng copy an toàn, không enumeration.

@@ -111,4 +111,7 @@ public interface TaskRepository extends JpaRepository<Task, UUID>, JpaSpecificat
             @Param("startAt") LocalDateTime startAt,
             @Param("endExclusive") LocalDateTime endExclusive
     );
+
+    @EntityGraph(attributePaths = {"sprint", "assignee"})
+    List<Task> findBySprintIdAndDeletedAtIsNull(UUID sprintId);
 }

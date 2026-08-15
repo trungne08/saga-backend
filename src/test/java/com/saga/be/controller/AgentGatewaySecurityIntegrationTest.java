@@ -220,7 +220,7 @@ class AgentGatewaySecurityIntegrationTest {
         )).thenReturn(student);
         when(roleAware.selfProgress(student, null, null)).thenReturn(
                 new com.saga.be.dto.response.InternalAgentToolResponses.SelfProgress(
-                        "ZERO_MATCH", null, null, null, null, null, List.of(), List.of(), List.of(), List.of()
+                        "ZERO_MATCH", null, null, null, null, null, List.of(), List.of(), List.of(), List.of(), List.of()
                 )
         );
 

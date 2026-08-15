@@ -33,6 +33,7 @@ import com.saga.be.entity.enums.IdentityMappingStatus;
 import com.saga.be.entity.enums.IntegrationProvider;
 import com.saga.be.entity.enums.RoleInTeam;
 import com.saga.be.entity.enums.TaskStatus;
+import com.saga.be.repository.BusinessWarningRepository;
 import com.saga.be.repository.CommitDataRepository;
 import com.saga.be.repository.CommitReviewIntentRepository;
 import com.saga.be.repository.CourseRepository;
@@ -101,6 +102,52 @@ class AgentRoleAwareProjectionServiceTest {
         InternalAgentToolResponses.LeaderTeamContext result = service.leaderTeamContext(student, null);
         assertEquals("ZERO_MATCH", result.selectionState());
         verifyNoInteractions(projections);
+
+        InternalAgentToolResponses.LeaderTeamProgressReport report = service.leaderTeamProgressReport(student, null);
+        assertEquals("ZERO_MATCH", report.selectionState());
+        assertEquals("LEADER_TEAM_PROGRESS_REPORT", report.artifactType());
+        assertTrue(report.unsupportedSignals().contains("INACTIVITY_GRACE_PERIOD=TBD_PRODUCT"));
+    }
+
+    @Test
+    void leaderTeamProgressReportDoesNotPickFirstAndIncludesWarningTiers() {
+        SagaPrincipal student = student();
+        Team first = team(course(UUID.randomUUID(), "SE"), "Lead A", project());
+        Team second = team(course(UUID.randomUUID(), "SE"), "Lead B", project());
+        TeamMemberRepository memberships = mock(TeamMemberRepository.class);
+        when(memberships.findAgentContextsByStudentId(student.localProfileId())).thenReturn(List.of(
+                membership(first, RoleInTeam.LEADER),
+                membership(second, RoleInTeam.LEADER)
+        ));
+        AgentToolProjectionService projections = mock(AgentToolProjectionService.class);
+        AgentRoleAwareProjectionService service = service(
+                memberships, mock(LecturerStudentAnalyticsQueryService.class),
+                mock(IdentityMapRepository.class), projections
+        );
+
+        InternalAgentToolResponses.LeaderTeamProgressReport ambiguous =
+                service.leaderTeamProgressReport(student, null);
+        assertEquals("MULTIPLE_MATCH", ambiguous.selectionState());
+        verifyNoInteractions(projections);
+
+        when(projections.teamProgress(student, first.getId())).thenReturn(
+                new InternalAgentToolResponses.TeamProgress(
+                        first.getId(), first.getProject().getId(), 0, false, java.util.Map.of(),
+                        new InternalAgentToolResponses.ContributionSnapshot(
+                                first.getId(), first.getProject().getId(), null, List.of()
+                        ),
+                        List.of()
+                )
+        );
+        InternalAgentToolResponses.LeaderTeamProgressReport exact =
+                service.leaderTeamProgressReport(student, first.getId());
+        assertEquals("SINGLE_MATCH", exact.selectionState());
+        assertEquals(first.getId(), exact.teamId());
+        assertEquals("LEADER_TEAM_PROGRESS_REPORT", exact.artifactType());
+        assertTrue(exact.unsupportedFields().contains("finalGrade"));
+        assertTrue(exact.unsupportedFields().contains("aiRiskScore"));
+        assertTrue(exact.unsupportedSignals().contains("INACTIVITY_GRACE_PERIOD=TBD_PRODUCT"));
+        verify(projections).teamProgress(student, first.getId());
     }
 
     @Test
@@ -214,6 +261,7 @@ class AgentRoleAwareProjectionServiceTest {
                 mock(AdminDashboardReportService.class),
                 mock(LecturerAnalyticsAuthorizationService.class),
                 mock(CommitReviewIntentRepository.class),
+                mock(BusinessWarningRepository.class),
                 new com.saga.be.config.JiraTimeZoneProperties("UTC")
         );
 
@@ -256,6 +304,7 @@ class AgentRoleAwareProjectionServiceTest {
                 mock(AdminDashboardReportService.class),
                 mock(LecturerAnalyticsAuthorizationService.class),
                 mock(CommitReviewIntentRepository.class),
+                mock(BusinessWarningRepository.class),
                 new com.saga.be.config.JiraTimeZoneProperties("UTC")
         );
 
@@ -265,8 +314,9 @@ class AgentRoleAwareProjectionServiceTest {
         assertEquals("LECTURER_PROGRESS_REPORT", ambiguous.artifactType());
         assertTrue(ambiguous.unsupportedFields().contains("finalGrade"));
         assertTrue(ambiguous.unsupportedFields().contains("aiRiskScore"));
-        assertTrue(ambiguous.unsupportedSignals().contains("MEMBER_NO_RECENT_ACTIVITY_3D"));
-        assertTrue(ambiguous.unsupportedSignals().contains("REPEATED_COMMIT_ISSUES"));
+        assertTrue(ambiguous.unsupportedSignals().contains("INACTIVITY_GRACE_PERIOD=TBD_PRODUCT"));
+        assertFalse(ambiguous.unsupportedSignals().contains("MEMBER_NO_RECENT_ACTIVITY_3D"));
+        assertFalse(ambiguous.unsupportedSignals().contains("REPEATED_COMMIT_ISSUES"));
 
         LecturerCourseDashboardQueryService dashboard = mock(LecturerCourseDashboardQueryService.class);
         CourseEarlyWarningQueryService warnings = mock(CourseEarlyWarningQueryService.class);
@@ -302,6 +352,7 @@ class AgentRoleAwareProjectionServiceTest {
                 mock(AdminDashboardReportService.class),
                 mock(LecturerAnalyticsAuthorizationService.class),
                 mock(CommitReviewIntentRepository.class),
+                mock(BusinessWarningRepository.class),
                 new com.saga.be.config.JiraTimeZoneProperties("UTC")
         );
         InternalAgentToolResponses.LecturerProgressReport resolved = resolvedService.lecturerProgressReport(lecturer, first.getId());
@@ -311,9 +362,10 @@ class AgentRoleAwareProjectionServiceTest {
         assertEquals("PRN231", resolved.course().courseCode());
         assertEquals("LECTURER_PROGRESS_REPORT", resolved.artifactType());
         assertTrue(resolved.confirmedWarnings().isEmpty());
-        assertTrue(resolved.unsupportedSignals().contains("AUTO_COMMIT_REVIEW_RESULT_WARNING"));
+        assertTrue(resolved.unsupportedSignals().contains("INACTIVITY_GRACE_PERIOD=TBD_PRODUCT"));
+        assertFalse(resolved.unsupportedSignals().contains("AUTO_COMMIT_REVIEW_RESULT_WARNING"));
         assertTrue(resolved.reviewAdvisories().isEmpty());
-        assertEquals(false, resolved.commitReviewOperational().resultWarningIntegrationConfirmed());
+        assertEquals(true, resolved.commitReviewOperational().resultWarningIntegrationConfirmed());
     }
 
     @Test
@@ -346,6 +398,7 @@ class AgentRoleAwareProjectionServiceTest {
                 mock(AdminDashboardReportService.class),
                 mock(LecturerAnalyticsAuthorizationService.class),
                 mock(CommitReviewIntentRepository.class),
+                mock(BusinessWarningRepository.class),
                 new com.saga.be.config.JiraTimeZoneProperties("UTC")
         );
 
@@ -391,6 +444,7 @@ class AgentRoleAwareProjectionServiceTest {
                 reports,
                 mock(LecturerAnalyticsAuthorizationService.class),
                 mock(CommitReviewIntentRepository.class),
+                mock(BusinessWarningRepository.class),
                 new com.saga.be.config.JiraTimeZoneProperties("UTC")
         );
 
@@ -406,8 +460,9 @@ class AgentRoleAwareProjectionServiceTest {
         assertTrue(report.unsupportedSignals().contains("MSR"));
         assertTrue(report.unsupportedSignals().contains("DEADLINE_PROCESS"));
         assertTrue(report.unsupportedSignals().contains("SNA_ISOLATION"));
+        assertTrue(report.unsupportedSignals().contains("INACTIVITY_GRACE_PERIOD=TBD_PRODUCT"));
         assertTrue(report.confirmedWarnings().isEmpty());
-        assertEquals(false, report.commitReviewOperational().resultWarningIntegrationConfirmed());
+        assertEquals(true, report.commitReviewOperational().resultWarningIntegrationConfirmed());
     }
 
     @Test
@@ -456,6 +511,7 @@ class AgentRoleAwareProjectionServiceTest {
                 mock(AdminDashboardReportService.class),
                 mock(LecturerAnalyticsAuthorizationService.class),
                 mock(CommitReviewIntentRepository.class),
+                mock(BusinessWarningRepository.class),
                 new com.saga.be.config.JiraTimeZoneProperties("UTC")
         );
 
@@ -535,6 +591,7 @@ class AgentRoleAwareProjectionServiceTest {
                 mock(AdminDashboardReportService.class),
                 mock(LecturerAnalyticsAuthorizationService.class),
                 mock(CommitReviewIntentRepository.class),
+                mock(BusinessWarningRepository.class),
                 new com.saga.be.config.JiraTimeZoneProperties("UTC")
         );
 
@@ -591,6 +648,7 @@ class AgentRoleAwareProjectionServiceTest {
                 mock(AdminDashboardReportService.class),
                 authorization,
                 mock(CommitReviewIntentRepository.class),
+                mock(BusinessWarningRepository.class),
                 new com.saga.be.config.JiraTimeZoneProperties("UTC")
         );
 
@@ -680,6 +738,7 @@ class AgentRoleAwareProjectionServiceTest {
                 mock(AdminDashboardReportService.class),
                 mock(LecturerAnalyticsAuthorizationService.class),
                 mock(CommitReviewIntentRepository.class),
+                mock(BusinessWarningRepository.class),
                 new com.saga.be.config.JiraTimeZoneProperties("UTC")
         );
 
@@ -688,13 +747,10 @@ class AgentRoleAwareProjectionServiceTest {
         assertTrue(report.confirmedWarnings().stream().anyMatch(warning -> "OVERDUE_TASK".equals(warning.signal())));
         assertTrue(report.confirmedWarnings().stream().anyMatch(warning -> "TASK_DUE_TODAY".equals(warning.signal())));
         assertFalse(report.confirmedWarnings().stream().anyMatch(warning ->
-                "MEMBER_NO_RECENT_ACTIVITY_3D".equals(warning.signal())
-                        || "TEAM_NO_RECENT_ACTIVITY_3D".equals(warning.signal())
-                        || "SPRINT_PROGRESS_BEHIND".equals(warning.signal())
-                        || "REPEATED_COMMIT_ISSUES".equals(warning.signal())
-                        || "AUTO_COMMIT_REVIEW_RESULT_WARNING".equals(warning.signal())
+                "AUTO_COMMIT_REVIEW_RESULT_WARNING".equals(warning.signal())
         ));
-        assertTrue(report.unsupportedSignals().contains("MEMBER_NO_RECENT_ACTIVITY_3D"));
+        assertTrue(report.unsupportedSignals().contains("INACTIVITY_GRACE_PERIOD=TBD_PRODUCT"));
+        assertFalse(report.unsupportedSignals().contains("MEMBER_NO_RECENT_ACTIVITY_3D"));
         assertTrue(report.reviewAdvisories().isEmpty());
     }
 
@@ -737,18 +793,20 @@ class AgentRoleAwareProjectionServiceTest {
                 reports,
                 mock(LecturerAnalyticsAuthorizationService.class),
                 intents,
+                mock(BusinessWarningRepository.class),
                 new com.saga.be.config.JiraTimeZoneProperties("UTC")
         );
 
         InternalAgentToolResponses.AdminSystemReport report = service.adminSystemReport(admin);
         assertEquals(3L, report.commitReviewOperational().completed());
         assertEquals(1L, report.commitReviewOperational().failed());
-        assertEquals(false, report.commitReviewOperational().resultWarningIntegrationConfirmed());
+        assertEquals(true, report.commitReviewOperational().resultWarningIntegrationConfirmed());
         assertTrue(report.confirmedWarnings().stream().anyMatch(warning -> "OVERDUE_TASK".equals(warning.signal())));
         assertFalse(report.confirmedWarnings().stream().anyMatch(warning ->
                 "AUTO_COMMIT_REVIEW_RESULT_WARNING".equals(warning.signal())
         ));
-        assertTrue(report.unsupportedSignals().contains("AUTO_COMMIT_REVIEW_RESULT_WARNING"));
+        assertTrue(report.unsupportedSignals().contains("INACTIVITY_GRACE_PERIOD=TBD_PRODUCT"));
+        assertTrue(report.unsupportedSignals().contains("MSR"));
     }
 
     private AgentRoleAwareProjectionService service(
@@ -780,6 +838,7 @@ class AgentRoleAwareProjectionServiceTest {
                 mock(AdminDashboardReportService.class),
                 mock(LecturerAnalyticsAuthorizationService.class),
                 mock(CommitReviewIntentRepository.class),
+                mock(BusinessWarningRepository.class),
                 new com.saga.be.config.JiraTimeZoneProperties("UTC")
         );
     }

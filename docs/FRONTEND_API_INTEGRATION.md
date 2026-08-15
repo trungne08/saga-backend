@@ -1,4 +1,15 @@
+## Extra Master (DEC-097) — 2026-08-16
+
+OpenAPI **152**. Migration head **V42**. Public AI routes unchanged.
+
+- Manual GitIssue↔Commit (Project Integration Manager, CSRF):
+  - `POST /api/projects/{projectId}/github/issues/{issueId}/commits/{commitId}`
+  - `DELETE /api/projects/{projectId}/github/issues/{issueId}/commits/{commitId}` → 204
+- Artifact download still `GET /api/v1/ai/artifacts/{artifactId}/download`. Additional type `LEADER_TEAM_PROGRESS_REPORT` + scope `TEAM` reauthorizes current STUDENT who is exact `roleInTeam=LEADER` of that Team.
+- Do not display fabricated warnings. Confirmed vs advisory vs unsupported remain three Backend categories.
+
 ## Capability matrix + warning-in-report + fail-closed AI (DEC-096) — 2026-08-16
+
 
 OpenAPI **149** (unchanged). Migration head **V41**. Public AI routes unchanged.
 
@@ -1784,6 +1795,8 @@ GitHub/Jira realtime; dữ liệu mới nhất phụ thuộc backfill/reconcilia
 |---|---|---|
 | GET | `/api/projects/{projectId}/github/issues` | List Issue, filter, pagination, counters |
 | GET | `/api/projects/{projectId}/github/issues/{issueId}` | Issue detail + linked Task/PR/Commit + timeline |
+| POST | `/api/projects/{projectId}/github/issues/{issueId}/commits/{commitId}` | Manager explicit Issue–Commit link (`MANUAL`) |
+| DELETE | `/api/projects/{projectId}/github/issues/{issueId}/commits/{commitId}` | Manager unlink; repeated unlink 204 |
 | POST | `/api/v1/projects/{projectId}/tasks/{taskId}/github-issues/{issueId}` | Manager link local Task–Issue |
 | DELETE | `/api/v1/projects/{projectId}/tasks/{taskId}/github-issues/{issueId}` | Manager unlink local Task–Issue |
 | GET | `/api/v1/projects/{projectId}/tasks/{taskId}/traceability` | Task → Issues → PR/Commit |

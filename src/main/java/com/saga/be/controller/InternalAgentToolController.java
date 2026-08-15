@@ -184,6 +184,16 @@ public class InternalAgentToolController {
         return roleAware.leaderTeamContext(actor(context, request.conversationId(), false), request.teamId());
     }
 
+    @PostMapping("/leader-team-progress-report")
+    public InternalAgentToolResponses.LeaderTeamProgressReport leaderTeamProgressReport(
+            @RequestHeader(DELEGATED_CONTEXT_HEADER) String context,
+            @Valid @RequestBody InternalAgentToolRequests.OptionalTeam request
+    ) {
+        return roleAware.leaderTeamProgressReport(
+                actor(context, request.conversationId(), false), request.teamId()
+        );
+    }
+
     @PostMapping("/lecturer-course-context")
     public InternalAgentToolResponses.LecturerCourseContext lecturerCourseContext(
             @RequestHeader(DELEGATED_CONTEXT_HEADER) String context,

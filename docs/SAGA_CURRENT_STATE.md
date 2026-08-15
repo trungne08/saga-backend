@@ -1,4 +1,14 @@
+## Runtime hotfix Backend→AI message contract (2026-08-16)
+
+- **CONFIRMED_SOURCE:** `POST /internal/backend/v1/agent/conversations/{id}/messages` rejects extra fields. Backend no longer sends `currentActor` on conversation/message HTTP. `currentActor` remains on tool resource-context responses only.
+
+## Extra Master traceability + warning pipeline + Early Warning V2 + Leader Team DOCX (DEC-097) — 2026-08-16
+
+- **Đã hoàn thành / CONFIRMED_SOURCE:** Manual GitIssue↔Commit writer (không provider-explicit). Nested V2 review result persistence. Canonical warning → Bell/FCM/warning-email outbox. Early Warning V2 detectors với grace TBD fail-safe. Leader Team DOCX qua existing artifact download. Không đổi Contribution. Không expose `/internal/**`.
+- **Contracts:** OpenAPI **152**. Migration head **V42**.
+
 ## Capability matrix + warning-in-report + fail-closed AI permissions (DEC-096) — 2026-08-16
+
 
 - **Đã hoàn thành / CONFIRMED_SOURCE_TEST:** Role-aware capability matrix theo authorization source. Safe AI 401/403. Lecturer Course report context v1 + Admin system report context v1 với warning split. ADMIN Course report chỉ khi `courseId` + `requireCourseAccess`. SRS auth không phải LEADER-only. Không fabricate unsupported warning.
 - Targeted Agent/report/OpenAPI **PASS**. Full Backend **1158 tests / 1 failure / 0 errors**: DEC-023 Course roster baseline (`courseRosterHasTeamContractIsExplicitAndDoesNotTreatOutboxAsEnrollment`). Notification newest-first flake **không** tái hiện lần này. **Không ghi FULL_SUITE=PASS.** Không regression mới của DEC-096. `git diff --check` clean.

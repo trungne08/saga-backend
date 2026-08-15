@@ -8,9 +8,11 @@ import com.saga.be.dto.response.AgentApiResponses;
 import com.saga.be.dto.response.TaskReadResponse;
 import com.saga.be.entity.Student;
 import com.saga.be.entity.enums.Priority;
+import com.saga.be.entity.enums.RoleInTeam;
 import com.saga.be.entity.enums.TaskType;
 import com.saga.be.exception.IntegrationException;
 import com.saga.be.repository.StudentRepository;
+import com.saga.be.repository.TeamMemberRepository;
 import com.saga.be.security.ApplicationRole;
 import com.saga.be.security.SagaPrincipal;
 import java.time.LocalDate;
@@ -42,6 +44,7 @@ public class AgentGatewayService {
     private final ProjectDetailService projects;
     private final StudentRepository students;
     private final LecturerAnalyticsAuthorizationService courseAccess;
+    private final TeamMemberRepository teamMembers;
 
     public AgentGatewayService(
             AgentAiClient ai,
@@ -49,7 +52,8 @@ public class AgentGatewayService {
             JiraTaskWriteService taskWrites,
             ProjectDetailService projects,
             StudentRepository students,
-            LecturerAnalyticsAuthorizationService courseAccess
+            LecturerAnalyticsAuthorizationService courseAccess,
+            TeamMemberRepository teamMembers
     ) {
         this.ai = ai;
         this.delegations = delegations;
@@ -57,6 +61,7 @@ public class AgentGatewayService {
         this.projects = projects;
         this.students = students;
         this.courseAccess = courseAccess;
+        this.teamMembers = teamMembers;
     }
 
     public AgentApiResponses.Conversation create(
@@ -138,9 +143,24 @@ public class AgentGatewayService {
             }
             return;
         }
+        if ("LEADER_TEAM_PROGRESS_REPORT".equals(artifactType) && "TEAM".equals(scopeType)) {
+            requireLeaderTeamAccess(actor, uuid(metadata.scopeId(), "scopeId"));
+            return;
+        }
         throw IntegrationException.invalid(
                 "AI_ARTIFACT_SCOPE_INVALID", "The generated artifact scope is invalid"
         );
+    }
+
+    private void requireLeaderTeamAccess(SagaPrincipal actor, UUID teamId) {
+        if (actor == null
+                || actor.applicationRole() != ApplicationRole.STUDENT
+                || actor.localProfileId() == null
+                || !teamMembers.existsByTeamIdAndStudentIdAndRoleInTeam(
+                        teamId, actor.localProfileId(), RoleInTeam.LEADER
+                )) {
+            throw IntegrationException.forbidden("The generated artifact is not available to the current actor");
+        }
     }
 
     private void requireCourseReportAccess(SagaPrincipal actor, UUID courseId) {

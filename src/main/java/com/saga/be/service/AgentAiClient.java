@@ -42,7 +42,7 @@ public class AgentAiClient {
     ) {
         return post(
                 "/internal/backend/v1/agent/conversations",
-                conversationBody(actor, title == null ? "" : title, null, studentCode),
+                conversationBody(actor, title == null ? "" : title, null),
                 null,
                 AgentApiResponses.Conversation.class
         );
@@ -73,7 +73,7 @@ public class AgentAiClient {
     ) {
         return post(
                 "/internal/backend/v1/agent/conversations/" + conversationId + "/messages",
-                conversationBody(actor, null, content, studentCode),
+                conversationBody(actor, null, content),
                 delegatedContext,
                 AgentApiResponses.Chat.class
         );
@@ -134,12 +134,11 @@ public class AgentAiClient {
     }
 
     private Map<String, Object> conversationBody(
-            SagaPrincipal actor, String title, String content, String studentCode
+            SagaPrincipal actor, String title, String content
     ) {
         Map<String, Object> body = new java.util.LinkedHashMap<>();
         body.put("ownerId", ownerId(actor));
         body.put("applicationRole", actor.applicationRole().name());
-        body.put("currentActor", currentActor(actor, studentCode));
         if (title != null) {
             body.put("title", title);
         }
@@ -147,16 +146,6 @@ public class AgentAiClient {
             body.put("content", content);
         }
         return body;
-    }
-
-    private Map<String, Object> currentActor(SagaPrincipal actor, String studentCode) {
-        Map<String, Object> value = new java.util.LinkedHashMap<>();
-        value.put("applicationRole", actor.applicationRole().name());
-        value.put("localProfileId", actor.localProfileId().toString());
-        value.put("displayName", actor.fullName());
-        value.put("studentCode", studentCode);
-        value.put("identitySource", "SAGA_PRINCIPAL_SESSION");
-        return value;
     }
 
     private <T> T post(String path, Object body, String delegatedContext, Class<T> type) {

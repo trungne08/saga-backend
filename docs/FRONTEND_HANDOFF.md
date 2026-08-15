@@ -1,6 +1,17 @@
 # SAGA Frontend Handoff
 
+## Extra Master (DEC-097) — 2026-08-16
+
+- OpenAPI **152**. Migration **V42**. Public AI still `/api/v1/ai/**` only. **Do not call** `/internal/**`, Gmail send, FCM provider, or review worker routes.
+- New manager-only Issue↔Commit links (JSESSIONID + CSRF, no Bearer):
+  - `POST /api/projects/{projectId}/github/issues/{issueId}/commits/{commitId}`
+  - `DELETE` same path → 204
+- Duplicate link is idempotent. Cross-project is forbidden. This is **not** auto-traceability from commit messages.
+- Leader Team progress DOCX uses the existing `GET /api/v1/ai/artifacts/{id}/download` after chat generates `LEADER_TEAM_PROGRESS_REPORT`. If the Leader leads multiple Teams, chat will ask to choose; do not pick-first.
+- Warnings in chat/report: only Backend `confirmedWarnings`. Advisories stay advisories. Do not render “Student lười” copy.
+
 ## Capability matrix + warning-in-report + fail-closed AI (DEC-096) — 2026-08-16
+
 
 - Public AI 401/403 messages are fixed Vietnamese copy for `/api/v1/ai/**`. Do not treat internal `/internal/ai/**` 401 as user session expiry.
 - Do not send identity fields. Do not ask name/MSSV for the logged-in user. If chat asks to pick a Course/Team, that is resource disambiguation.

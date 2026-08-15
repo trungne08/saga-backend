@@ -27,7 +27,12 @@ class CommitReviewOrchestratorTest {
         CommitReviewIntentService intents = mock(CommitReviewIntentService.class);
         CommitReviewIntentRepository repository = mock(CommitReviewIntentRepository.class);
         CommitReviewAiClient client = mock(CommitReviewAiClient.class);
-        CommitReviewOrchestrator orchestrator = new CommitReviewOrchestrator(intents, repository, client);
+        CommitReviewOrchestrator orchestrator = new CommitReviewOrchestrator(
+                intents, repository, client,
+                mock(CommitReviewResultPersistenceService.class),
+                mock(CommitReviewWarningPublisher.class),
+                mock(CommitReviewHistoricalDiscoveryService.class)
+        );
         UUID intentId = UUID.randomUUID();
         UUID jobId = UUID.randomUUID();
         when(client.isConfigured()).thenReturn(true);
@@ -56,7 +61,10 @@ class CommitReviewOrchestratorTest {
         CommitReviewAiClient client = mock(CommitReviewAiClient.class);
         when(client.isConfigured()).thenReturn(false);
         CommitReviewOrchestrator orchestrator = new CommitReviewOrchestrator(
-                intents, mock(CommitReviewIntentRepository.class), client
+                intents, mock(CommitReviewIntentRepository.class), client,
+                mock(CommitReviewResultPersistenceService.class),
+                mock(CommitReviewWarningPublisher.class),
+                mock(CommitReviewHistoricalDiscoveryService.class)
         );
 
         orchestrator.startQueued(UUID.randomUUID());
@@ -72,7 +80,10 @@ class CommitReviewOrchestratorTest {
         when(client.isConfigured()).thenReturn(true);
         when(intents.claimPendingForStart(any())).thenReturn(Optional.empty());
         CommitReviewOrchestrator orchestrator = new CommitReviewOrchestrator(
-                intents, mock(CommitReviewIntentRepository.class), client
+                intents, mock(CommitReviewIntentRepository.class), client,
+                mock(CommitReviewResultPersistenceService.class),
+                mock(CommitReviewWarningPublisher.class),
+                mock(CommitReviewHistoricalDiscoveryService.class)
         );
 
         orchestrator.startQueued(UUID.randomUUID());

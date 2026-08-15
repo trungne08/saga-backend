@@ -1,4 +1,11 @@
+## Extra Master (DEC-097) — 2026-08-16
+
+- **CONFIRMED_SOURCE:** `GIT_ISSUE_COMMIT_WRITER=MANUAL_EXPLICIT_ONLY`. TEXT_INFERENCE_USED=NO. Persist `commit-review-result-v2`. Warning pipeline Bell+FCM+Email. Early Warning V2 Backend-owned. `INACTIVITY_GRACE_PERIOD=TBD_PRODUCT`. Leader Team report `LEADER_TEAM_PROGRESS_REPORT`+`TEAM`.
+- **NOT CLAIMED:** provider-explicit GitIssue↔Commit; product grace duration; HF/Gmail/FCM/MySQL runtime apply.
+- **Contracts:** OpenAPI **152**. Migration **V42**.
+
 ## Capability matrix, warning-in-report, fail-closed AI permissions (DEC-096) — 2026-08-16
+
 
 - **CONFIRMED_SOURCE_TEST:** Current actor remains `SagaPrincipal`/V30 delegation. Public `/api/v1/ai/**` 401 = `Phiên đăng nhập đã hết hạn.`; AI 403 = `Bạn không có quyền truy cập hoặc thực hiện thao tác này.` Internal service-token 401 stays `INTERNAL_SERVICE_AUTHENTICATION_REQUIRED` (not session-expired). Lecturer uninstructed Course and Leader/Member wrong Team stay `ZERO_MATCH` (anti-enumeration). MEMBER/non-Admin hitting Lecturer/Admin-only tools throw AccessDenied → safe 403. Artifact UUID of another actor reauthorizes current access and fail-closes.
 - **CONFIRMED — reports:** Lecturer projection `saga-lecturer-course-report-context-v1` / artifact `LECTURER_PROGRESS_REPORT`. Admin projection `saga-admin-system-report-context-v1` / artifact `ADMIN_SYSTEM_REPORT`. Per-Team sections; `confirmedWarnings[]` / `unsupportedSignals[]` / `reviewAdvisories[]`. ADMIN may read a Course report only with explicit `courseId` + existing `requireCourseAccess` (no pick-first). Course XLSX export unchanged.
@@ -1106,6 +1113,6 @@ và reliability regression 20 tests đều pass.
 
 ## SAGA AI Agent V2 identity + reports (DEC-095 additive) — 2026-08-16
 
-- **CONFIRMED_SOURCE_TEST:** Backend→AI chat payload includes `currentActor` from session (`applicationRole`, `localProfileId`, `displayName`, `studentCode` from Student row, `identitySource=SAGA_PRINCIPAL_SESSION`). Resource-context also carries `currentActor`. ADMIN resource-context is `SYSTEM_SCOPE`.
+- **CONFIRMED_SOURCE_TEST:** Backend→AI conversation/message HTTP body is camelCase `ownerId` + `applicationRole` (+ `title`/`content`). `currentActor` is **not** on that body (`extra=forbid`). Resource-context tool responses still carry `currentActor`. ADMIN resource-context is `SYSTEM_SCOPE`.
 - Hidden tools: self-progress / self-recent-commits / leader-team-context / lecturer-course-context / lecturer-progress-report / admin-system-report. Artifact download reauth covers SRS + Lecturer Course report + Admin system report.
 - Auto-review typed client + AFTER_COMMIT orchestration. No HF/runtime smoke claim.

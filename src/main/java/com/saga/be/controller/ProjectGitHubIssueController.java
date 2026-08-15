@@ -8,8 +8,12 @@ import com.saga.be.service.GitHubIssueReadService;
 import com.saga.be.service.GitHubTraceabilityService;
 import java.util.UUID;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import com.saga.be.dto.response.IssueCommitLinkResponse;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -71,5 +75,34 @@ public class ProjectGitHubIssueController {
             @PathVariable UUID issueId
     ) {
         return traceabilityService.issueDetail(actor, projectId, issueId);
+    }
+
+    @PostMapping("/{issueId}/commits/{commitId}")
+    @io.swagger.v3.oas.annotations.Operation(
+            summary = "Liên kết GitHub Issue với Commit",
+            description = "Tạo quan hệ truy vết thủ công tường minh trong SAGA; không gọi GitHub và không suy từ commit message."
+    )
+    public IssueCommitLinkResponse linkCommit(
+            @AuthenticationPrincipal SagaPrincipal actor,
+            @PathVariable UUID projectId,
+            @PathVariable UUID issueId,
+            @PathVariable UUID commitId
+    ) {
+        return traceabilityService.linkCommit(actor, projectId, issueId, commitId);
+    }
+
+    @DeleteMapping("/{issueId}/commits/{commitId}")
+    @io.swagger.v3.oas.annotations.Operation(
+            summary = "Gỡ liên kết GitHub Issue khỏi Commit",
+            description = "Xóa quan hệ truy vết local; repeated unlink vẫn trả 204."
+    )
+    public ResponseEntity<Void> unlinkCommit(
+            @AuthenticationPrincipal SagaPrincipal actor,
+            @PathVariable UUID projectId,
+            @PathVariable UUID issueId,
+            @PathVariable UUID commitId
+    ) {
+        traceabilityService.unlinkCommit(actor, projectId, issueId, commitId);
+        return ResponseEntity.noContent().build();
     }
 }

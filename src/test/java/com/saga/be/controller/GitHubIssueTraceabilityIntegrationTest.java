@@ -314,6 +314,63 @@ class GitHubIssueTraceabilityIntegrationTest {
                 .andExpect(jsonPath("$.error").value("GITHUB_REPOSITORY_NOT_FOUND"));
     }
 
+    @Test
+    void commitLinkIsIdempotentManualOnlyAndRepeatedUnlinkIsNoContent() throws Exception {
+        Fixture f = fixture("COMMIT-LINK");
+        GitIssue issue = issue(f.repo(), 81, "Manual commit link", IssueState.OPEN,
+                null, null, LocalDateTime.now());
+        CommitData commit = commit(f.repo(), "fedcba9876543210fedcba9876543210fedcba98",
+                "Fixes SAGA-81 #81", LocalDateTime.now());
+        Authentication leader = auth(ApplicationRole.STUDENT, f.leader().getId());
+        String path = "/api/projects/{projectId}/github/issues/{issueId}/commits/{commitId}";
+
+        for (int attempt = 0; attempt < 2; attempt++) {
+            mockMvc.perform(post(path, f.project().getId(), issue.getId(), commit.getId())
+                            .with(authentication(leader)).with(csrf()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.linked").value(true));
+        }
+        assertEquals(1, issueCommitLinks.count());
+        assertEquals(TraceabilityRelationType.MANUAL, issueCommitLinks.findAll().get(0).getRelationType());
+
+        mockMvc.perform(get("/api/projects/{projectId}/github/issues/{issueId}",
+                        f.project().getId(), issue.getId()).with(authentication(leader)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.linkedCommits.items[0].sha")
+                        .value("fedcba9876543210fedcba9876543210fedcba98"));
+
+        for (int attempt = 0; attempt < 2; attempt++) {
+            mockMvc.perform(delete(path, f.project().getId(), issue.getId(), commit.getId())
+                            .with(authentication(leader)).with(csrf()))
+                    .andExpect(status().isNoContent());
+        }
+        assertEquals(0, issueCommitLinks.count());
+    }
+
+    @Test
+    void commitLinkRejectsCrossProjectMemberAndMissingCsrf() throws Exception {
+        Fixture f = fixture("COMMIT-AUTH");
+        Fixture other = fixture("COMMIT-OTHER");
+        GitIssue issue = issue(f.repo(), 91, "Scoped issue", IssueState.OPEN,
+                null, null, LocalDateTime.now());
+        CommitData commit = commit(f.repo(), "aa".repeat(20), "local commit", LocalDateTime.now());
+        CommitData foreign = commit(other.repo(), "bb".repeat(20), "foreign commit", LocalDateTime.now());
+        String path = "/api/projects/{projectId}/github/issues/{issueId}/commits/{commitId}";
+
+        mockMvc.perform(post(path, f.project().getId(), issue.getId(), commit.getId())
+                        .with(authentication(auth(ApplicationRole.STUDENT, f.leader().getId()))))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post(path, f.project().getId(), issue.getId(), commit.getId())
+                        .with(authentication(auth(ApplicationRole.STUDENT, f.member().getId())))
+                        .with(csrf()))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post(path, f.project().getId(), issue.getId(), foreign.getId())
+                        .with(authentication(auth(ApplicationRole.ADMIN, UUID.randomUUID())))
+                        .with(csrf()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error").value("TRACEABILITY_PROJECT_MISMATCH"));
+    }
+
     private Fixture fixture(String prefix) {
         Lecturer lecturer = lecturer(prefix + "-LECTURER");
         Course course = courses.saveAndFlush(Course.builder()

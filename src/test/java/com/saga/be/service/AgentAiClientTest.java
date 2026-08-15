@@ -44,9 +44,9 @@ class AgentAiClientTest {
                 .andExpect(header(AgentAiClient.DELEGATED_CONTEXT_HEADER, "opaque-context"))
                 .andExpect(jsonPath("$.ownerId").value("STUDENT:" + actor.localProfileId()))
                 .andExpect(jsonPath("$.applicationRole").value("STUDENT"))
-                .andExpect(jsonPath("$.currentActor.displayName").value("Student"))
-                .andExpect(jsonPath("$.currentActor.studentCode").value("SE123456"))
-                .andExpect(jsonPath("$.currentActor.identitySource").value("SAGA_PRINCIPAL_SESSION"))
+                .andExpect(jsonPath("$.content").value("Review this commit"))
+                .andExpect(jsonPath("$.currentActor").doesNotExist())
+                .andExpect(jsonPath("$.studentCode").doesNotExist())
                 .andRespond(withSuccess(
                         """
                         {
@@ -82,6 +82,40 @@ class AgentAiClientTest {
 
         assertEquals(jobId, result.jobReference().jobId());
         assertEquals("PENDING", result.jobReference().status());
+        server.verify();
+    }
+
+    @Test
+    void createConversationOmitsCurrentActorAndKeepsCamelCaseContract() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        AgentAiClient client = new AgentAiClient(properties("b".repeat(40)), builder.build());
+        SagaPrincipal actor = actor();
+        UUID conversationId = UUID.randomUUID();
+        server.expect(once(), requestTo("https://ai.example/internal/backend/v1/agent/conversations"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(jsonPath("$.ownerId").value("STUDENT:" + actor.localProfileId()))
+                .andExpect(jsonPath("$.applicationRole").value("STUDENT"))
+                .andExpect(jsonPath("$.title").value("Private chat"))
+                .andExpect(jsonPath("$.currentActor").doesNotExist())
+                .andRespond(withSuccess(
+                        """
+                        {
+                          "id":"%s",
+                          "title":"Private chat",
+                          "applicationRoleSnapshot":"STUDENT",
+                          "archived":false,
+                          "createdAt":"2026-08-16T00:00:00Z",
+                          "updatedAt":"2026-08-16T00:00:00Z",
+                          "messages":[]
+                        }
+                        """.formatted(conversationId),
+                        MediaType.APPLICATION_JSON
+                ));
+
+        AgentApiResponses.Conversation created = client.createConversation(actor, "Private chat", "SE123456");
+
+        assertEquals(conversationId, created.id());
         server.verify();
     }
 

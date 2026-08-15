@@ -3,6 +3,7 @@ package com.saga.be.service;
 import com.saga.be.dto.response.GitHubIssueDetailResponse;
 import com.saga.be.dto.response.GitHubIssueSummaryResponse;
 import com.saga.be.dto.response.ProjectTraceabilityResponse;
+import com.saga.be.dto.response.IssueCommitLinkResponse;
 import com.saga.be.dto.response.TaskIssueLinkResponse;
 import com.saga.be.dto.response.TaskTraceabilityResponse;
 import com.saga.be.dto.response.TraceabilityCommitSummaryResponse;
@@ -109,6 +110,42 @@ public class GitHubTraceabilityService {
         requireSameProject(projectId, task, issue);
         taskIssueLinks.findByTaskIdAndGitIssueId(taskId, issueId)
                 .ifPresent(taskIssueLinks::delete);
+    }
+
+    @Transactional
+    public IssueCommitLinkResponse linkCommit(
+            SagaPrincipal actor,
+            UUID projectId,
+            UUID issueId,
+            UUID commitId
+    ) {
+        managers.requireProjectManager(actor, projectId);
+        GitIssue issue = requireIssue(issueId);
+        CommitData commit = requireCommit(commitId);
+        requireSameProject(projectId, issue, commit);
+        if (!issueCommitLinks.existsByGitIssueIdAndCommitId(issueId, commitId)) {
+            issueCommitLinks.saveAndFlush(GitIssueCommitLink.builder()
+                    .gitIssue(issue)
+                    .commit(commit)
+                    .relationType(com.saga.be.entity.enums.TraceabilityRelationType.MANUAL)
+                    .build());
+        }
+        return new IssueCommitLinkResponse(issueId, commitId, true);
+    }
+
+    @Transactional
+    public void unlinkCommit(
+            SagaPrincipal actor,
+            UUID projectId,
+            UUID issueId,
+            UUID commitId
+    ) {
+        managers.requireProjectManager(actor, projectId);
+        GitIssue issue = requireIssue(issueId);
+        CommitData commit = requireCommit(commitId);
+        requireSameProject(projectId, issue, commit);
+        issueCommitLinks.findByGitIssueIdAndCommitId(issueId, commitId)
+                .ifPresent(issueCommitLinks::delete);
     }
 
     @Transactional(readOnly = true)
@@ -267,6 +304,32 @@ public class GitHubTraceabilityService {
             throw IntegrationException.conflict(
                     "TRACEABILITY_PROJECT_MISMATCH",
                     "Task and GitHub issue must belong to the same project"
+            );
+        }
+    }
+
+    private CommitData requireCommit(UUID commitId) {
+        return commits.findWithRepoProjectById(commitId)
+                .orElseThrow(() -> notFound(
+                        "GITHUB_COMMIT_NOT_FOUND",
+                        "The GitHub commit does not exist"
+                ));
+    }
+
+    private void requireSameProject(UUID requestedProjectId, GitIssue issue, CommitData commit) {
+        UUID issueProjectId = issue.getRepo() == null || issue.getRepo().getProject() == null
+                ? null
+                : issue.getRepo().getProject().getId();
+        UUID commitProjectId = commit.getRepo() == null || commit.getRepo().getProject() == null
+                ? null
+                : commit.getRepo().getProject().getId();
+        if (issueProjectId == null
+                || commitProjectId == null
+                || !requestedProjectId.equals(issueProjectId)
+                || !requestedProjectId.equals(commitProjectId)) {
+            throw IntegrationException.conflict(
+                    "TRACEABILITY_PROJECT_MISMATCH",
+                    "GitHub issue and commit must belong to the same project"
             );
         }
     }

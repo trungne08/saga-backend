@@ -197,6 +197,7 @@ public final class InternalAgentToolResponses {
             LecturerAnalyticsResponses.StudentProgress progress,
             StudentProgress assignedTasks,
             List<ConfirmedWarning> confirmedWarnings,
+            List<String> reviewAdvisories,
             List<String> unsupportedSignals,
             List<ResourceTeamContext> candidates,
             List<String> dataLimitations
@@ -230,6 +231,27 @@ public final class InternalAgentToolResponses {
             List<String> unsupportedSignals,
             List<String> reviewAdvisories,
             List<ResourceTeamContext> candidates,
+            List<String> dataLimitations
+    ) {
+    }
+
+    public record LeaderTeamProgressReport(
+            String projectionVersion,
+            String artifactType,
+            String selectionState,
+            java.time.OffsetDateTime generatedAt,
+            UUID teamId,
+            String teamName,
+            UUID projectId,
+            TeamProgress progress,
+            List<OverdueTaskEvidence> overdueTasks,
+            TraceabilitySummary traceability,
+            CommitReviewOperationalAggregate commitReviewOperational,
+            List<ConfirmedWarning> confirmedWarnings,
+            List<String> reviewAdvisories,
+            List<String> unsupportedSignals,
+            List<ResourceTeamContext> candidates,
+            List<String> unsupportedFields,
             List<String> dataLimitations
     ) {
     }
@@ -287,7 +309,10 @@ public final class InternalAgentToolResponses {
             LecturerAnalyticsResponses.ActivityOverview activities,
             LecturerAnalyticsResponses.BurndownChart burndown,
             TraceabilitySummary traceability,
-            List<ConfirmedWarning> confirmedWarnings
+            List<ConfirmedWarning> confirmedWarnings,
+            List<String> reviewAdvisories,
+            List<String> unsupportedSignals,
+            List<String> dataLimitations
     ) {
     }
 

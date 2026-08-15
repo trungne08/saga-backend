@@ -27,6 +27,17 @@ public interface DocumentRepository extends JpaRepository<Document, UUID> {
             UUID projectId, UUID authorId, Pageable pageable);
 
     @Query("""
+            select max(document.createdAt) from Document document
+            where document.createdAt is not null
+              and document.project.id = :projectId
+              and document.author.id = :authorId
+            """)
+    LocalDateTime findLatestCreatedAtByProjectAndAuthor(
+            @Param("projectId") UUID projectId,
+            @Param("authorId") UUID authorId
+    );
+
+    @Query("""
             select document.author.id, function('date', document.createdAt), count(document)
             from Document document
             where document.project.id = :projectId

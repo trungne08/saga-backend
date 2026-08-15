@@ -85,11 +85,16 @@ class CommitReviewAiClientTest {
                           "reviewPolicyVersion":"commit-review-live-task-aware-v1",
                           "priority":"HIGH",
                           "finalResult":{
-                            "kind":"LIVE_TASK_LINKED",
-                            "messageQuality":"GOOD",
-                            "confidence":"HIGH",
-                            "traceability":"EXPLICIT_LINKS_PRESENT",
-                            "verdictStatus":"NEEDS_CHANGES",
+                            "schemaVersion":"commit-review-result-v2",
+                            "reviewMode":"TASK_LINKED",
+                            "traceability":{"status":"VERIFIED"},
+                            "commitMessageAssessment":{"quality":"GOOD"},
+                            "codeAssessment":{"quality":"RISKS"},
+                            "taskAlignment":{"status":"NEEDS_CHANGES"},
+                            "verdict":{"eligible":true,"status":"NEEDS_CHANGES"},
+                            "overallStatus":"NEEDS_CHANGES",
+                            "requirementCoverage":"PROVEN",
+                            "verificationFacts":{"commitPresent":true},
                             "findings":[],
                             "evidenceRefs":[]
                           }
@@ -98,7 +103,7 @@ class CommitReviewAiClientTest {
 
         CommitReviewJobResponses.Status completed = client.status(jobId);
         assertEquals("COMPLETED", completed.status());
-        assertEquals("NEEDS_CHANGES", completed.finalResult().get("verdictStatus"));
+        assertEquals("TASK_LINKED", completed.finalResult().get("reviewMode"));
         server.verify();
 
         RestClient.Builder unknownBuilder = RestClient.builder();
@@ -111,10 +116,16 @@ class CommitReviewAiClientTest {
                           "jobId":"%s",
                           "status":"COMPLETED",
                           "finalResult":{
-                            "kind":"BRAND_NEW",
-                            "messageQuality":"GOOD",
-                            "confidence":"HIGH",
-                            "traceability":"NOT_PROVEN"
+                            "schemaVersion":"commit-review-result-v2",
+                            "reviewMode":"BRAND_NEW",
+                            "traceability":{"status":"VERIFIED"},
+                            "commitMessageAssessment":{"quality":"GOOD"},
+                            "codeAssessment":{"quality":"GOOD"},
+                            "taskAlignment":{"status":"ALIGNED"},
+                            "verdict":{"eligible":true,"status":"PASS"},
+                            "overallStatus":"PASS",
+                            "requirementCoverage":"PROVEN",
+                            "verificationFacts":{"commitPresent":true}
                           }
                         }
                         """.formatted(unknownJob), MediaType.APPLICATION_JSON));
@@ -128,23 +139,11 @@ class CommitReviewAiClientTest {
     void failedAndCancelledAreNotNeedsChanges() {
         assertFalse(CommitReviewResultParser.eligibleForNeedsChangesWarning(
                 "FAILED",
-                CommitReviewResultParser.parse(java.util.Map.of(
-                        "kind", "LIVE_TASK_LINKED",
-                        "messageQuality", "GOOD",
-                        "confidence", "HIGH",
-                        "traceability", "EXPLICIT_LINKS_PRESENT",
-                        "verdictStatus", "NEEDS_CHANGES"
-                ))
+                CommitReviewResultParser.parse(CommitReviewResultParserTest.linkedNeedsChanges())
         ));
         assertFalse(CommitReviewResultParser.eligibleForNeedsChangesWarning(
                 "CANCELLED",
-                CommitReviewResultParser.parse(java.util.Map.of(
-                        "kind", "LIVE_TASK_LINKED",
-                        "messageQuality", "GOOD",
-                        "confidence", "HIGH",
-                        "traceability", "EXPLICIT_LINKS_PRESENT",
-                        "verdictStatus", "NEEDS_CHANGES"
-                ))
+                CommitReviewResultParser.parse(CommitReviewResultParserTest.linkedNeedsChanges())
         ));
         assertThrows(
                 CommitReviewPolicyVersion.CommitReviewContractRejected.class,

@@ -17,9 +17,11 @@ import com.saga.be.dto.response.AgentApiResponses;
 import com.saga.be.entity.Course;
 import com.saga.be.entity.enums.AccountStatus;
 import com.saga.be.entity.enums.Priority;
+import com.saga.be.entity.enums.RoleInTeam;
 import com.saga.be.entity.enums.TaskType;
 import com.saga.be.exception.IntegrationException;
 import com.saga.be.repository.StudentRepository;
+import com.saga.be.repository.TeamMemberRepository;
 import com.saga.be.security.ApplicationRole;
 import com.saga.be.security.SagaPrincipal;
 import java.util.Map;
@@ -113,7 +115,8 @@ class AgentGatewayServiceTest {
                 ai, mock(AgentDelegationService.class),
                 mock(JiraTaskWriteService.class), projects,
                 mock(com.saga.be.repository.StudentRepository.class),
-                mock(LecturerAnalyticsAuthorizationService.class)
+                mock(LecturerAnalyticsAuthorizationService.class),
+                mock(com.saga.be.repository.TeamMemberRepository.class)
         );
         SagaPrincipal actor = actor(ApplicationRole.STUDENT);
         UUID artifactId = UUID.randomUUID();
@@ -140,7 +143,8 @@ class AgentGatewayServiceTest {
                 ai, mock(AgentDelegationService.class),
                 mock(JiraTaskWriteService.class), projects,
                 mock(com.saga.be.repository.StudentRepository.class),
-                mock(LecturerAnalyticsAuthorizationService.class)
+                mock(LecturerAnalyticsAuthorizationService.class),
+                mock(com.saga.be.repository.TeamMemberRepository.class)
         );
         SagaPrincipal actor = actor(ApplicationRole.STUDENT);
         UUID artifactId = UUID.randomUUID();
@@ -164,7 +168,8 @@ class AgentGatewayServiceTest {
         AgentGatewayService service = new AgentGatewayService(
                 ai, mock(AgentDelegationService.class),
                 mock(JiraTaskWriteService.class), mock(ProjectDetailService.class),
-                mock(StudentRepository.class), authorization
+                mock(StudentRepository.class), authorization,
+                mock(com.saga.be.repository.TeamMemberRepository.class)
         );
         UUID artifactId = UUID.randomUUID();
         UUID courseId = UUID.randomUUID();
@@ -228,7 +233,8 @@ class AgentGatewayServiceTest {
         AgentGatewayService service = new AgentGatewayService(
                 ai, mock(AgentDelegationService.class),
                 mock(JiraTaskWriteService.class), mock(ProjectDetailService.class),
-                mock(StudentRepository.class), mock(LecturerAnalyticsAuthorizationService.class)
+                mock(StudentRepository.class), mock(LecturerAnalyticsAuthorizationService.class),
+                mock(com.saga.be.repository.TeamMemberRepository.class)
         );
         UUID artifactId = UUID.randomUUID();
         SagaPrincipal admin = actor(ApplicationRole.ADMIN);
@@ -249,6 +255,43 @@ class AgentGatewayServiceTest {
         assertThrows(IntegrationException.class, () -> service.download(lecturer, artifactId));
     }
 
+    @Test
+    void leaderTeamReportDownloadRequiresExactCurrentLeader() {
+        AgentAiClient ai = mock(AgentAiClient.class);
+        TeamMemberRepository teamMembers = mock(TeamMemberRepository.class);
+        AgentGatewayService service = new AgentGatewayService(
+                ai, mock(AgentDelegationService.class),
+                mock(JiraTaskWriteService.class), mock(ProjectDetailService.class),
+                mock(StudentRepository.class), mock(LecturerAnalyticsAuthorizationService.class),
+                teamMembers
+        );
+        UUID artifactId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
+        SagaPrincipal leader = actor(ApplicationRole.STUDENT);
+        when(ai.artifact(leader, artifactId)).thenReturn(new AgentApiResponses.GeneratedArtifact(
+                artifactId, UUID.randomUUID().toString(), "LEADER_TEAM_PROGRESS_REPORT", "TEAM",
+                teamId.toString(), "Leader-Team-Progress-Report-team.docx",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        ));
+        when(teamMembers.existsByTeamIdAndStudentIdAndRoleInTeam(
+                teamId, leader.localProfileId(), RoleInTeam.LEADER
+        )).thenReturn(true);
+        when(ai.artifactContent(leader, artifactId)).thenReturn(new byte[]{7});
+        assertEquals("Leader-Team-Progress-Report-team.docx", service.download(leader, artifactId).filename());
+
+        SagaPrincipal member = actor(ApplicationRole.STUDENT);
+        when(ai.artifact(member, artifactId)).thenReturn(new AgentApiResponses.GeneratedArtifact(
+                artifactId, UUID.randomUUID().toString(), "LEADER_TEAM_PROGRESS_REPORT", "TEAM",
+                teamId.toString(), "Leader-Team-Progress-Report-team.docx",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        ));
+        when(teamMembers.existsByTeamIdAndStudentIdAndRoleInTeam(
+                teamId, member.localProfileId(), RoleInTeam.LEADER
+        )).thenReturn(false);
+        assertThrows(IntegrationException.class, () -> service.download(member, artifactId));
+        verify(ai, never()).artifactContent(eq(member), any());
+    }
+
     private AgentGatewayService service(AgentAiClient ai, JiraTaskWriteService writes) {
         return new AgentGatewayService(
                 ai,
@@ -256,7 +299,8 @@ class AgentGatewayServiceTest {
                 writes,
                 mock(ProjectDetailService.class),
                 mock(StudentRepository.class),
-                mock(LecturerAnalyticsAuthorizationService.class)
+                mock(LecturerAnalyticsAuthorizationService.class),
+                mock(com.saga.be.repository.TeamMemberRepository.class)
         );
     }
 

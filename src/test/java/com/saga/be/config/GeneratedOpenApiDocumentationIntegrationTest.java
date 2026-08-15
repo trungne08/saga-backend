@@ -94,8 +94,8 @@ class GeneratedOpenApiDocumentationIntegrationTest {
             }
         }
 
-        assertEquals(150, operationCount,
-                "Added GET team contribution flowchart");
+        assertEquals(152, operationCount,
+                "Added POST+DELETE GitIssue-Commit manual links");
         System.out.println("Generated OpenAPI operation count: " + operationCount);
         assertEquals(usedTags, documentedTags, "Global tags phải đúng bằng tập tag thực sự có operation");
         assertEquals(documentedTags.size(), root.path("tags").size(), "Global tags không được trùng tên");
@@ -149,6 +149,9 @@ class GeneratedOpenApiDocumentationIntegrationTest {
         assertFalse(root.path("paths").has("/internal/ai/v1/agent/tools/project-summary"));
         assertTrue(root.at("/paths/~1api~1projects~1{projectId}~1github~1issues/get").isObject());
         assertTrue(root.at("/paths/~1api~1projects~1{projectId}~1github~1issues~1{issueId}/get").isObject());
+        assertTrue(root.at("/paths/~1api~1projects~1{projectId}~1github~1issues~1{issueId}~1commits~1{commitId}/post").isObject());
+        assertTrue(root.at("/paths/~1api~1projects~1{projectId}~1github~1issues~1{issueId}~1commits~1{commitId}/delete").isObject());
+        assertFalse(root.path("paths").has("/internal/ai/v1/agent/tools/leader-team-progress-report"));
         assertTrue(root.at("/paths/~1api~1v1~1projects~1{projectId}~1tasks~1{taskId}~1github-issues~1{issueId}/post").isObject());
         assertTrue(root.at("/paths/~1api~1v1~1projects~1{projectId}~1tasks~1{taskId}~1github-issues~1{issueId}/delete").isObject());
         assertTrue(root.at("/paths/~1api~1v1~1projects~1{projectId}~1tasks~1{taskId}~1traceability/get").isObject());

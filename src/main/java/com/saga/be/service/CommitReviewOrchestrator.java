@@ -22,15 +22,24 @@ public class CommitReviewOrchestrator {
     private final CommitReviewIntentService intents;
     private final CommitReviewIntentRepository intentRepository;
     private final CommitReviewAiClient client;
+    private final CommitReviewResultPersistenceService results;
+    private final CommitReviewWarningPublisher warnings;
+    private final CommitReviewHistoricalDiscoveryService historicalDiscovery;
 
     public CommitReviewOrchestrator(
             CommitReviewIntentService intents,
             CommitReviewIntentRepository intentRepository,
-            CommitReviewAiClient client
+            CommitReviewAiClient client,
+            CommitReviewResultPersistenceService results,
+            CommitReviewWarningPublisher warnings,
+            CommitReviewHistoricalDiscoveryService historicalDiscovery
     ) {
         this.intents = intents;
         this.intentRepository = intentRepository;
         this.client = client;
+        this.results = results;
+        this.warnings = warnings;
+        this.historicalDiscovery = historicalDiscovery;
     }
 
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -43,6 +52,7 @@ public class CommitReviewOrchestrator {
 
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public void drainPendingAndPoll() {
+        historicalDiscovery.discoverBoundedPage();
         if (!client.isConfigured()) {
             return;
         }
@@ -59,16 +69,22 @@ public class CommitReviewOrchestrator {
         )) {
             poll(inFlight.getId());
         }
+        historicalDiscovery.publishBoundedDigests();
     }
 
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public void poll(UUID intentId) {
-        CommitReviewIntent intent = intentRepository.findById(intentId).orElse(null);
+        CommitReviewIntent intent = intentRepository.findWithReviewTargetById(intentId).orElse(null);
         if (intent == null || intent.getAiJobId() == null) {
             return;
         }
         try {
             CommitReviewJobResponses.Status status = client.status(intent.getAiJobId());
+            if ("COMPLETED".equals(status.status())) {
+                CommitReviewResultParser.ParsedResult parsed = CommitReviewResultParser.parse(status.finalResult());
+                results.persistOnce(intent, intent.getAiJobId(), parsed);
+                warnings.publish(intent, status.status(), parsed);
+            }
             intents.markPolled(intentId, status);
         } catch (CommitReviewResultParser.CommitReviewResultRejected rejected) {
             intents.markFailed(intentId, rejected.code());

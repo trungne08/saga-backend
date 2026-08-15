@@ -15,6 +15,7 @@ import com.saga.be.dto.response.InternalAgentToolResponses.TraceabilitySummary;
 import com.saga.be.dto.response.LecturerAnalyticsResponses;
 import com.saga.be.dto.response.LecturerCourseDashboardResponses;
 import com.saga.be.dto.response.ProjectTraceabilityResponse;
+import com.saga.be.entity.BusinessWarning;
 import com.saga.be.entity.CommitData;
 import com.saga.be.entity.Course;
 import com.saga.be.entity.GitRepo;
@@ -24,11 +25,14 @@ import com.saga.be.entity.Team;
 import com.saga.be.entity.TeamMember;
 import com.saga.be.entity.enums.AdminAnomalySignalType;
 import com.saga.be.entity.enums.AdminReportSupportStatus;
+import com.saga.be.entity.enums.BusinessWarningCategory;
 import com.saga.be.entity.enums.CommitReviewIntentStatus;
 import com.saga.be.entity.enums.IdentityMappingStatus;
 import com.saga.be.entity.enums.IntegrationProvider;
+import com.saga.be.entity.enums.NotificationType;
 import com.saga.be.entity.enums.RoleInTeam;
 import com.saga.be.entity.enums.TaskStatus;
+import com.saga.be.repository.BusinessWarningRepository;
 import com.saga.be.repository.CommitDataRepository;
 import com.saga.be.repository.CommitReviewIntentRepository;
 import com.saga.be.repository.CourseRepository;
@@ -60,7 +64,9 @@ public class AgentRoleAwareProjectionService {
 
     static final String LECTURER_REPORT_VERSION = "saga-lecturer-course-report-context-v1";
     static final String ADMIN_REPORT_VERSION = "saga-admin-system-report-context-v1";
+    static final String LEADER_REPORT_VERSION = "saga-leader-team-report-context-v1";
     static final String LECTURER_ARTIFACT_TYPE = "LECTURER_PROGRESS_REPORT";
+    static final String LEADER_ARTIFACT_TYPE = "LEADER_TEAM_PROGRESS_REPORT";
     static final String ADMIN_ARTIFACT_TYPE = "ADMIN_SYSTEM_REPORT";
     static final int RECENT_COMMIT_LIMIT = 10;
     static final int OVERDUE_TASK_LIMIT = 50;
@@ -69,11 +75,7 @@ public class AgentRoleAwareProjectionService {
     static final int ACTIVITY_WINDOW_DAYS = 14;
 
     private static final List<String> UNSUPPORTED_WARNING_SIGNALS = List.of(
-            "MEMBER_NO_RECENT_ACTIVITY_3D",
-            "TEAM_NO_RECENT_ACTIVITY_3D",
-            "SPRINT_PROGRESS_BEHIND",
-            "REPEATED_COMMIT_ISSUES",
-            "AUTO_COMMIT_REVIEW_RESULT_WARNING"
+            "INACTIVITY_GRACE_PERIOD=TBD_PRODUCT"
     );
     private static final List<String> LECTURER_UNSUPPORTED = List.of(
             "finalGrade", "aiRiskScore", "fabricatedTrend", "providerCredentials",
@@ -84,11 +86,7 @@ public class AgentRoleAwareProjectionService {
             "perUserHistoricalAudit", "officialGrade", "graphProcessingHistory"
     );
     private static final List<String> ADMIN_UNSUPPORTED_SIGNALS = List.of(
-            "MEMBER_NO_RECENT_ACTIVITY_3D",
-            "TEAM_NO_RECENT_ACTIVITY_3D",
-            "SPRINT_PROGRESS_BEHIND",
-            "REPEATED_COMMIT_ISSUES",
-            "AUTO_COMMIT_REVIEW_RESULT_WARNING",
+            "INACTIVITY_GRACE_PERIOD=TBD_PRODUCT",
             "MSR",
             "DEADLINE_PROCESS",
             "SNA_ISOLATION"
@@ -108,6 +106,7 @@ public class AgentRoleAwareProjectionService {
     private final AdminDashboardReportService adminReports;
     private final LecturerAnalyticsAuthorizationService courseAccess;
     private final CommitReviewIntentRepository reviewIntents;
+    private final BusinessWarningRepository businessWarnings;
     private final JiraTimeZoneProperties jiraTimeZone;
 
     public AgentRoleAwareProjectionService(
@@ -125,6 +124,7 @@ public class AgentRoleAwareProjectionService {
             AdminDashboardReportService adminReports,
             LecturerAnalyticsAuthorizationService courseAccess,
             CommitReviewIntentRepository reviewIntents,
+            BusinessWarningRepository businessWarnings,
             JiraTimeZoneProperties jiraTimeZone
     ) {
         this.projections = projections;
@@ -141,6 +141,7 @@ public class AgentRoleAwareProjectionService {
         this.adminReports = adminReports;
         this.courseAccess = courseAccess;
         this.reviewIntents = reviewIntents;
+        this.businessWarnings = businessWarnings;
         this.jiraTimeZone = jiraTimeZone;
     }
 
@@ -172,11 +173,18 @@ public class AgentRoleAwareProjectionService {
         List<Task> ownTasks = resolvedProject == null
                 ? List.of()
                 : tasks.findByProjectIdAndAssigneeId(resolvedProject, actor.localProfileId());
+        WarningSplit split = warningSplit(
+                deadlineWarnings(team.getId(), ownTasks),
+                businessWarnings.findByStudentIdOrderByCreatedAtDescIdDesc(actor.localProfileId()),
+                team.getId(),
+                actor.localProfileId()
+        );
         return new InternalAgentToolResponses.SelfProgress(
                 "SINGLE_MATCH", resolvedCourse, team.getId(), resolvedProject,
                 progress, assigned,
-                deadlineWarnings(team.getId(), ownTasks),
-                UNSUPPORTED_WARNING_SIGNALS,
+                split.confirmed(),
+                split.advisories(),
+                split.unsupported(),
                 List.of(),
                 List.of()
         );
@@ -238,15 +246,70 @@ public class AgentRoleAwareProjectionService {
         List<Task> teamTasks = team.getProject() == null
                 ? List.of()
                 : tasks.findByProjectId(team.getProject().getId());
+        WarningSplit split = warningSplit(
+                deadlineWarnings(team.getId(), teamTasks),
+                businessWarnings.findByTeamIdOrderByCreatedAtDescIdDesc(team.getId()),
+                team.getId(),
+                null
+        );
         return new InternalAgentToolResponses.LeaderTeamContext(
                 "SINGLE_MATCH",
                 team.getId(),
                 progress,
                 overdueTasks(team),
+                split.confirmed(),
+                split.unsupported(),
+                split.advisories(),
+                List.of(),
+                List.of()
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public InternalAgentToolResponses.LeaderTeamProgressReport leaderTeamProgressReport(
+            SagaPrincipal actor, UUID teamId
+    ) {
+        requireStudent(actor);
+        List<TeamMember> led = ownedMemberships(actor.localProfileId()).stream()
+                .filter(membership -> membership.getRoleInTeam() == RoleInTeam.LEADER)
+                .toList();
+        List<TeamMember> matches = teamId == null
+                ? led
+                : led.stream().filter(membership -> teamId.equals(membership.getTeam().getId())).toList();
+        if (matches.isEmpty()) {
+            return emptyLeaderReport("ZERO_MATCH", candidates(led));
+        }
+        if (matches.size() > 1) {
+            return emptyLeaderReport("MULTIPLE_MATCH", candidates(matches));
+        }
+        Team team = matches.get(0).getTeam();
+        UUID projectId = team.getProject() == null ? null : team.getProject().getId();
+        List<Task> teamTasks = projectId == null ? List.of() : tasks.findByProjectId(projectId);
+        WarningSplit split = warningSplit(
                 deadlineWarnings(team.getId(), teamTasks),
-                UNSUPPORTED_WARNING_SIGNALS,
+                businessWarnings.findByTeamIdOrderByCreatedAtDescIdDesc(team.getId()),
+                team.getId(),
+                null
+        );
+        return new InternalAgentToolResponses.LeaderTeamProgressReport(
+                LEADER_REPORT_VERSION,
+                LEADER_ARTIFACT_TYPE,
+                "SINGLE_MATCH",
+                OffsetDateTime.now(ZoneOffset.UTC),
+                team.getId(),
+                team.getName(),
+                projectId,
+                projections.teamProgress(actor, team.getId()),
+                overdueTasks(team),
+                projectTraceability(actor, projectId),
+                operationalAggregate(projectId == null
+                        ? List.of()
+                        : reviewIntents.countStatusByProjectIds(List.of(projectId))),
+                split.confirmed(),
+                split.advisories(),
+                split.unsupported(),
                 List.of(),
-                List.of(),
+                List.of("finalGrade", "aiRiskScore"),
                 List.of()
         );
     }
@@ -328,7 +391,7 @@ public class AgentRoleAwareProjectionService {
                 operationalAggregate(reviewIntents.countStatusAll()),
                 confirmedAdminWarnings(anomalies),
                 ADMIN_UNSUPPORTED_SIGNALS,
-                List.of(),
+                adminReviewAdvisories(),
                 ADMIN_UNSUPPORTED,
                 List.of()
         );
@@ -355,6 +418,7 @@ public class AgentRoleAwareProjectionService {
         List<TeamReportSection> sections = new ArrayList<>();
         List<LecturerAnalyticsResponses.SprintVelocity> velocities = new ArrayList<>();
         List<ConfirmedWarning> confirmed = new ArrayList<>(earlyWarningSignals(warnings));
+        List<String> advisories = new ArrayList<>();
         List<String> limitations = new ArrayList<>();
         List<UUID> projectIds = new ArrayList<>();
         int included = 0;
@@ -372,6 +436,7 @@ public class AgentRoleAwareProjectionService {
                 velocities.add(section.velocity());
             }
             confirmed.addAll(section.confirmedWarnings());
+            advisories.addAll(section.reviewAdvisories());
             if (section.projectId() != null) {
                 projectIds.add(section.projectId());
             }
@@ -402,7 +467,7 @@ public class AgentRoleAwareProjectionService {
                         : reviewIntents.countStatusByProjectIds(projectIds)),
                 List.copyOf(confirmed),
                 UNSUPPORTED_WARNING_SIGNALS,
-                List.of(),
+                List.copyOf(advisories),
                 List.of(),
                 LECTURER_UNSUPPORTED,
                 List.copyOf(limitations)
@@ -452,6 +517,12 @@ public class AgentRoleAwareProjectionService {
             }
         }
         List<Task> teamTasks = projectId == null ? List.of() : tasks.findByProjectId(projectId);
+        WarningSplit split = warningSplit(
+                deadlineWarnings(teamId, teamTasks),
+                businessWarnings.findByTeamIdOrderByCreatedAtDescIdDesc(teamId),
+                teamId,
+                null
+        );
         return new TeamReportSection(
                 teamId,
                 team.teamName(),
@@ -462,7 +533,10 @@ public class AgentRoleAwareProjectionService {
                 activities,
                 burndown,
                 traceability,
-                deadlineWarnings(teamId, teamTasks)
+                split.confirmed(),
+                split.advisories(),
+                split.unsupported(),
+                List.of()
         );
     }
 
@@ -471,7 +545,7 @@ public class AgentRoleAwareProjectionService {
     ) {
         return new InternalAgentToolResponses.SelfProgress(
                 selection, null, null, null, null, null,
-                List.of(), UNSUPPORTED_WARNING_SIGNALS, candidates, List.of()
+                List.of(), List.of(), UNSUPPORTED_WARNING_SIGNALS, candidates, List.of()
         );
     }
 
@@ -482,6 +556,20 @@ public class AgentRoleAwareProjectionService {
                 selection, null, null, List.of(),
                 List.of(), UNSUPPORTED_WARNING_SIGNALS, List.of(),
                 candidates, List.of()
+        );
+    }
+
+    private InternalAgentToolResponses.LeaderTeamProgressReport emptyLeaderReport(
+            String selection, List<ResourceTeamContext> candidates
+    ) {
+        return new InternalAgentToolResponses.LeaderTeamProgressReport(
+                LEADER_REPORT_VERSION,
+                LEADER_ARTIFACT_TYPE,
+                selection,
+                OffsetDateTime.now(ZoneOffset.UTC),
+                null, null, null, null, List.of(), null, emptyOperational(),
+                List.of(), List.of(), UNSUPPORTED_WARNING_SIGNALS,
+                candidates, List.of("finalGrade", "aiRiskScore"), List.of()
         );
     }
 
@@ -626,22 +714,145 @@ public class AgentRoleAwareProjectionService {
     }
 
     private List<ConfirmedWarning> confirmedAdminWarnings(AdminAnomaliesReportResponse anomalies) {
-        if (anomalies == null || anomalies.signals() == null) {
-            return List.of();
+        List<ConfirmedWarning> confirmed = new ArrayList<>(anomalies == null || anomalies.signals() == null
+                ? List.of()
+                : anomalies.signals().stream()
+                        .filter(signal -> signal.type() == AdminAnomalySignalType.OVERDUE_TASK
+                                && signal.supportStatus() == AdminReportSupportStatus.SUPPORTED)
+                        .map(signal -> new ConfirmedWarning(
+                                "OVERDUE_TASK",
+                                null,
+                                null,
+                                null,
+                                null,
+                                "Authoritative overdue assigned team-member task aggregate count=" + signal.count(),
+                                null
+                        ))
+                        .toList());
+        for (NotificationType type : List.of(
+                NotificationType.COMMIT_REVIEW_NEEDS_CHANGES,
+                NotificationType.MEMBER_NO_RECENT_ACTIVITY_3D,
+                NotificationType.TEAM_NO_RECENT_ACTIVITY_3D,
+                NotificationType.SPRINT_PROGRESS_BEHIND,
+                NotificationType.REPEATED_COMMIT_ISSUES
+        )) {
+            long count = businessWarnings.countByWarningType(type);
+            if (count <= 0) {
+                continue;
+            }
+            confirmed.add(new ConfirmedWarning(
+                    type.name(),
+                    null,
+                    null,
+                    null,
+                    null,
+                    "Supported count=" + count,
+                    null
+            ));
         }
-        return anomalies.signals().stream()
-                .filter(signal -> signal.type() == AdminAnomalySignalType.OVERDUE_TASK
-                        && signal.supportStatus() == AdminReportSupportStatus.SUPPORTED)
-                .map(signal -> new ConfirmedWarning(
-                        "OVERDUE_TASK",
-                        null,
-                        null,
-                        null,
-                        null,
-                        "Authoritative overdue assigned team-member task aggregate",
-                        null
-                ))
-                .toList();
+        return List.copyOf(confirmed);
+    }
+
+    private List<String> adminReviewAdvisories() {
+        List<String> advisories = new ArrayList<>();
+        for (NotificationType type : List.of(
+                NotificationType.UNLINKED_COMMIT_ADVISORY,
+                NotificationType.HISTORICAL_REVIEW_DIGEST
+        )) {
+            long count = businessWarnings.countByWarningType(type);
+            if (count > 0) {
+                advisories.add(type.name() + " count=" + count);
+            }
+        }
+        return List.copyOf(advisories);
+    }
+
+    private WarningSplit warningSplit(
+            List<ConfirmedWarning> deadlines,
+            List<BusinessWarning> source,
+            UUID teamId,
+            UUID studentId
+    ) {
+        List<ConfirmedWarning> confirmed = new ArrayList<>(deadlines == null ? List.of() : deadlines);
+        List<String> advisories = new ArrayList<>();
+        if (source != null) {
+            for (BusinessWarning warning : source) {
+                if (warning == null) {
+                    continue;
+                }
+                if (teamId != null && warning.getTeamId() != null && !teamId.equals(warning.getTeamId())) {
+                    continue;
+                }
+                if (studentId != null && warning.getStudentId() != null
+                        && !studentId.equals(warning.getStudentId())) {
+                    continue;
+                }
+                if (warning.getCategory() == BusinessWarningCategory.ADVISORY) {
+                    advisories.add(advisoryText(warning));
+                    continue;
+                }
+                confirmed.add(toConfirmed(warning));
+            }
+        }
+        return new WarningSplit(
+                List.copyOf(confirmed),
+                List.copyOf(advisories),
+                UNSUPPORTED_WARNING_SIGNALS
+        );
+    }
+
+    private ConfirmedWarning toConfirmed(BusinessWarning warning) {
+        StringBuilder evidence = new StringBuilder(warning.getEvidenceSummary());
+        if (warning.getCommitSha() != null && !warning.getCommitSha().isBlank()) {
+            evidence.append(" sha=").append(warning.getCommitSha());
+        }
+        if (warning.getProgressMode() != null) {
+            evidence.append(" mode=").append(warning.getProgressMode().name());
+        }
+        if (warning.getSeverity() != null) {
+            evidence.append(" severity=").append(warning.getSeverity().name());
+        }
+        return new ConfirmedWarning(
+                warning.getWarningType().name(),
+                warning.getTeamId(),
+                null,
+                warning.getStudentId(),
+                null,
+                evidence.toString(),
+                null
+        );
+    }
+
+    private String advisoryText(BusinessWarning warning) {
+        StringBuilder text = new StringBuilder(warning.getWarningType().name());
+        text.append(": ").append(warning.getEvidenceSummary());
+        if (warning.getCommitSha() != null && !warning.getCommitSha().isBlank()) {
+            text.append(" sha=").append(warning.getCommitSha());
+        }
+        return text.toString();
+    }
+
+    private TraceabilitySummary projectTraceability(SagaPrincipal actor, UUID projectId) {
+        if (projectId == null) {
+            return null;
+        }
+        ProjectTraceabilityResponse trace = projections.projectTraceability(actor, projectId);
+        if (trace == null) {
+            return null;
+        }
+        return new TraceabilitySummary(
+                projectId,
+                trace.timeline() == null ? 0 : trace.timeline().size(),
+                trace.truncated(),
+                List.of()
+        );
+    }
+
+    private record WarningSplit(
+            List<ConfirmedWarning> confirmed,
+            List<String> advisories,
+            List<String> unsupported
+    ) {
     }
 
     private CommitReviewOperationalAggregate operationalAggregate(List<Object[]> rows) {
@@ -659,7 +870,7 @@ public class AgentRoleAwareProjectionService {
             }
         }
         return new CommitReviewOperationalAggregate(
-                false,
+                true,
                 counts.get(CommitReviewIntentStatus.PENDING),
                 counts.get(CommitReviewIntentStatus.STARTING),
                 counts.get(CommitReviewIntentStatus.STARTED),
@@ -672,7 +883,7 @@ public class AgentRoleAwareProjectionService {
     }
 
     private CommitReviewOperationalAggregate emptyOperational() {
-        return new CommitReviewOperationalAggregate(false, 0, 0, 0, 0, 0, 0, 0, 0);
+        return new CommitReviewOperationalAggregate(true, 0, 0, 0, 0, 0, 0, 0, 0);
     }
 
     private LocalDate today() {

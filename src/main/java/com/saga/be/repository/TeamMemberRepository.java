@@ -36,6 +36,8 @@ public interface TeamMemberRepository extends JpaRepository<TeamMember, UUID> {
 
     List<TeamMember> findByTeamId(UUID teamId);
 
+    List<TeamMember> findByTeamIdAndRoleInTeam(UUID teamId, RoleInTeam roleInTeam);
+
     List<TeamMember> findByStudentId(UUID studentId);
 
     @EntityGraph(attributePaths = {"team", "team.course", "team.project"})
