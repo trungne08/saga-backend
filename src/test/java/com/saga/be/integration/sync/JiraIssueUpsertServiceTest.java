@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -16,14 +17,17 @@ import com.saga.be.entity.Project;
 import com.saga.be.entity.Student;
 import com.saga.be.entity.Sprint;
 import com.saga.be.entity.Task;
+import com.saga.be.entity.TaskAttachment;
 import com.saga.be.entity.value.TaskComponentSnapshot;
 import com.saga.be.entity.enums.Priority;
 import com.saga.be.entity.enums.TaskStatus;
 import com.saga.be.entity.enums.TaskType;
 import com.saga.be.integration.identity.IdentityMappingService;
+import com.saga.be.integration.provider.JiraAttachmentSnapshot;
 import com.saga.be.integration.provider.JiraIssueSnapshot;
 import com.saga.be.repository.JiraBoardRepository;
 import com.saga.be.repository.SprintRepository;
+import com.saga.be.repository.TaskAttachmentRepository;
 import com.saga.be.repository.TaskRepository;
 import com.saga.be.service.TeamContributionRefreshService;
 import java.time.LocalDateTime;
@@ -45,6 +49,7 @@ class JiraIssueUpsertServiceTest {
     private IdentityMappingService mappingService;
     private TeamContributionRefreshService teamContributionRefreshService;
     private SprintRepository sprintRepository;
+    private TaskAttachmentRepository taskAttachmentRepository;
     private JiraIssueUpsertService service;
     private UUID boardId;
     private UUID projectId;
@@ -56,6 +61,7 @@ class JiraIssueUpsertServiceTest {
         mappingService = mock(IdentityMappingService.class);
         teamContributionRefreshService = mock(TeamContributionRefreshService.class);
         sprintRepository = mock(SprintRepository.class);
+        taskAttachmentRepository = mock(TaskAttachmentRepository.class);
         PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
         when(transactionManager.getTransaction(any(TransactionDefinition.class))).thenReturn(mock(TransactionStatus.class));
         service = new JiraIssueUpsertService(
@@ -64,6 +70,7 @@ class JiraIssueUpsertServiceTest {
                 sprintRepository,
                 mappingService,
                 teamContributionRefreshService,
+                taskAttachmentRepository,
                 transactionManager
         );
         boardId = UUID.randomUUID();
@@ -374,6 +381,59 @@ class JiraIssueUpsertServiceTest {
         assertEquals(end, canonical.getEndDate());
     }
 
+    @Test
+    void replacesTaskAttachmentsFromJiraMetadataWithoutDownloadingContent() {
+        UUID taskId = UUID.randomUUID();
+        Task existing = new Task();
+        existing.setId(taskId);
+        existing.setExternalId("jira-10001");
+        TaskAttachment kept = TaskAttachment.builder()
+                .task(existing)
+                .externalId("att-1")
+                .filename("old-name.pdf")
+                .build();
+        kept.setId(UUID.randomUUID());
+        TaskAttachment stale = TaskAttachment.builder()
+                .task(existing)
+                .externalId("att-stale")
+                .filename("gone.docx")
+                .build();
+        stale.setId(UUID.randomUUID());
+        when(taskRepository.findByProjectIdAndExternalId(projectId, "jira-10001"))
+                .thenReturn(Optional.of(existing));
+        when(taskRepository.saveAndFlush(any(Task.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(taskAttachmentRepository.findByTaskIdAndExternalId(taskId, "att-1"))
+                .thenReturn(Optional.of(kept));
+        when(taskAttachmentRepository.findByTaskIdAndExternalId(taskId, "att-2"))
+                .thenReturn(Optional.empty());
+        when(taskAttachmentRepository.findByTaskId(taskId)).thenReturn(List.of(kept, stale));
+
+        assertTrue(service.upsert(boardId, snapshotWithAttachments(
+                "jira-10001",
+                List.of(
+                        new JiraAttachmentSnapshot("att-1", "spec.pdf", "application/pdf", 12L, "account-1"),
+                        new JiraAttachmentSnapshot("att-2", "notes.txt", "text/plain", 4L, "account-2")
+                )
+        )));
+
+        ArgumentCaptor<TaskAttachment> saved = ArgumentCaptor.forClass(TaskAttachment.class);
+        verify(taskAttachmentRepository, org.mockito.Mockito.times(2)).save(saved.capture());
+        assertEquals("spec.pdf", kept.getFilename());
+        assertEquals("application/pdf", kept.getMimeType());
+        assertEquals(12L, kept.getSizeBytes());
+        assertEquals("account-1", kept.getAuthorExternalId());
+        TaskAttachment created = saved.getAllValues().stream()
+                .filter(attachment -> "att-2".equals(attachment.getExternalId()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("notes.txt", created.getFilename());
+        assertEquals("text/plain", created.getMimeType());
+        assertEquals(4L, created.getSizeBytes());
+        assertEquals("account-2", created.getAuthorExternalId());
+        verify(taskAttachmentRepository).delete(stale);
+        verify(taskAttachmentRepository, never()).delete(eq(kept));
+    }
+
     private JiraIssueSnapshot snapshot(
             String id,
             String status,
@@ -450,6 +510,37 @@ class JiraIssueUpsertServiceTest {
                 null,
                 List.of(),
                 authoritative
+        );
+    }
+
+    private JiraIssueSnapshot snapshotWithAttachments(
+            String id,
+            List<JiraAttachmentSnapshot> attachments
+    ) {
+        LocalDateTime updatedAt = LocalDateTime.parse("2026-07-29T10:00:00");
+        return new JiraIssueSnapshot(
+                id,
+                "SAGA-1",
+                "task title",
+                "Bug",
+                "Done",
+                "High",
+                3,
+                "atlassian-id-1",
+                null,
+                null,
+                LocalDateTime.parse("2026-07-28T10:00:00"),
+                updatedAt,
+                null,
+                null,
+                null,
+                null,
+                updatedAt.toInstant(java.time.ZoneOffset.UTC),
+                List.of(),
+                null,
+                List.of(),
+                attachments,
+                true
         );
     }
 }

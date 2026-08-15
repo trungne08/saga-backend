@@ -308,6 +308,7 @@ class JiraProviderClientImplTest {
                     .contains("labels")
                     .contains("components")
                     .contains("description")
+                    .contains("attachment")
                     .doesNotContain(":57")
                     .doesNotContain(":02")
                     .doesNotContainPattern(
@@ -425,6 +426,103 @@ class JiraProviderClientImplTest {
                         + "\"content\":[{\"type\":\"text\",\"text\":\"Heading \"},"
                         + "{\"type\":\"text\",\"text\":\"body\"}]}]}"
         ).description());
+    }
+
+    @Test
+    void parsesMissingNullAndEmptyAttachmentsAsEmptyImmutableLists() {
+        assertThat(searchFirstIssueWithRaw(null, null, null, null).attachments()).isEmpty();
+        assertThat(searchFirstIssueWithRaw(null, null, null, "null").attachments()).isEmpty();
+        assertThat(searchFirstIssueWithRaw(null, null, null, "[]").attachments()).isEmpty();
+    }
+
+    @Test
+    void parsesAttachmentMetadataWithoutContentUrls() {
+        JiraIssueSnapshot issue = searchFirstIssueWithRaw(
+                null,
+                null,
+                null,
+                "[{\"id\":\"10001\",\"filename\":\"spec.pdf\",\"mimeType\":\"application/pdf\","
+                        + "\"size\":2048,\"author\":{\"accountId\":\"acct-1\"}}]"
+        );
+
+        assertThat(issue.attachments()).containsExactly(
+                new JiraAttachmentSnapshot("10001", "spec.pdf", "application/pdf", 2048L, "acct-1")
+        );
+        assertThrows(UnsupportedOperationException.class,
+                () -> issue.attachments().add(new JiraAttachmentSnapshot("x", "y", "z", 1L, "a")));
+    }
+
+    @Test
+    void rejectsInvalidAttachmentShapes() {
+        assertEquals("JIRA_RESPONSE_INVALID", assertThrows(
+                IntegrationException.class,
+                () -> searchFirstIssueWithRaw(null, null, null, "{\"id\":\"not-an-array\"}")
+        ).getCode());
+        assertEquals("JIRA_RESPONSE_INVALID", assertThrows(
+                IntegrationException.class,
+                () -> searchFirstIssueWithRaw(null, null, null, "[{\"filename\":\"missing-id.pdf\"}]")
+        ).getCode());
+    }
+
+    @Test
+    void uploadsIssueAttachmentsAsMultipartWithAtlassianToken() {
+        Fixture fixture = fixture();
+        fixture.server.expect(requestTo(BASE + "/ex/jira/" + CLOUD_ID + "/rest/api/3/issue/101/attachments"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.header(
+                        "X-Atlassian-Token", "no-check"))
+                .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.header(
+                        HttpHeaders.AUTHORIZATION, "Bearer ACCESS_TOKEN_SECRET"))
+                .andExpect(content().contentTypeCompatibleWith(MediaType.MULTIPART_FORM_DATA))
+                .andRespond(json("""
+                        [{"id":"20001","filename":"spec.pdf","mimeType":"application/pdf",
+                          "size":12,"author":{"accountId":"acct-1"}}]
+                        """));
+
+        List<JiraAttachmentSnapshot> uploaded = fixture.client.addIssueAttachments(
+                "ACCESS_TOKEN_SECRET",
+                CLOUD_ID,
+                "101",
+                List.of(new JiraAttachmentUpload("spec.pdf", "application/pdf", "hello-world!".getBytes()))
+        );
+
+        assertThat(uploaded).containsExactly(
+                new JiraAttachmentSnapshot("20001", "spec.pdf", "application/pdf", 12L, "acct-1")
+        );
+        fixture.server.verify();
+    }
+
+    @Test
+    void rejectsEmptyAttachmentUploadBeforeCallingJira() {
+        Fixture fixture = fixture();
+
+        assertEquals("JIRA_ATTACHMENT_REQUIRED", assertThrows(
+                IntegrationException.class,
+                () -> fixture.client.addIssueAttachments("ACCESS_TOKEN_SECRET", CLOUD_ID, "101", List.of())
+        ).getCode());
+        fixture.server.verify();
+    }
+
+    @Test
+    void createsIssueRemoteLinkForASubmittedEvidenceUrl() {
+        Fixture fixture = fixture();
+        fixture.server.expect(requestTo(BASE + "/ex/jira/" + CLOUD_ID + "/rest/api/3/issue/101/remotelink"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.header(
+                        HttpHeaders.AUTHORIZATION, "Bearer ACCESS_TOKEN_SECRET"))
+                .andExpect(content().json("""
+                        {"object":{"url":"https://drive.google.com/file/d/abc/view","title":"drive.google.com"}}
+                        """))
+                .andRespond(json("{\"id\":10000,\"self\":\"https://example.atlassian.net/rest/api/3/issue/101/remotelink/10000\"}"));
+
+        assertEquals("10000", fixture.client.addIssueRemoteLink(
+                "ACCESS_TOKEN_SECRET",
+                CLOUD_ID,
+                "101",
+                "https://drive.google.com/file/d/abc/view",
+                "drive.google.com"
+        ));
+        fixture.server.verify();
     }
 
     @Test
@@ -1057,7 +1155,7 @@ class JiraProviderClientImplTest {
             );
             assertThat(URLDecoder.decode(
                     request.getURI().getRawQuery(), StandardCharsets.UTF_8
-            )).contains("labels").contains("components").contains("description");
+            )).contains("labels").contains("components").contains("description").contains("attachment");
         }).andRespond(json("""
                 {"id":"10452","key":"SDP-42","fields":{
                   "summary":"Canonical issue","issuetype":{"name":"Task"},
@@ -1081,6 +1179,7 @@ class JiraProviderClientImplTest {
                 new TaskComponentSnapshot("10", "API")
         );
         assertEquals("Safe description", issue.description());
+        assertThat(issue.attachments()).isEmpty();
         assertThat(issue.assigneeAccountId()).isNull();
         assertThat(issue.sprintId()).isNull();
         assertThat(issue.storyPoints()).isNull();
@@ -1436,17 +1535,27 @@ class JiraProviderClientImplTest {
             String componentsJson,
             String descriptionJson
     ) {
+        return searchFirstIssueWithRaw(labelsJson, componentsJson, descriptionJson, null);
+    }
+
+    private JiraIssueSnapshot searchFirstIssueWithRaw(
+            String labelsJson,
+            String componentsJson,
+            String descriptionJson,
+            String attachmentJson
+    ) {
         Fixture fixture = fixture();
         String labelsField = optionalJsonField("labels", labelsJson);
         String componentsField = optionalJsonField("components", componentsJson);
         String descriptionField = optionalJsonField("description", descriptionJson);
+        String attachmentField = optionalJsonField("attachment", attachmentJson);
         fixture.server.expect(request -> { }).andRespond(json("""
                 {"isLast":true,"issues":[{
                   "id":"10452","key":"SDP-1",
                   "fields":{"summary":"Labels test",
-                    "updated":"2026-07-31T00:30:57.360+0700"%s%s%s}
+                    "updated":"2026-07-31T00:30:57.360+0700"%s%s%s%s}
                 }]}
-                """.formatted(labelsField, componentsField, descriptionField)));
+                """.formatted(labelsField, componentsField, descriptionField, attachmentField)));
 
         JiraIssueSnapshot issue = fixture.client.searchIssues(
                 "ACCESS_TOKEN_SECRET",

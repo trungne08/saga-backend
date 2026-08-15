@@ -1,3 +1,34 @@
+## DEC-093 — Students attach files/images/links to a Jira Task through SAGA
+
+- Ngày: 2026-08-15; trạng thái: ACCEPTED / CONFIRMED_SOURCE_TEST.
+- `POST /api/v1/projects/{projectId}/tasks/{taskId}/attachments` uploads files to Jira `POST /rest/api/3/issue/{id}/attachments` (`X-Atlassian-Token: no-check`, multipart `file`) and/or submits an `http`/`https` `link` via Jira `POST /rest/api/3/issue/{id}/remotelink`. Then canonical `getIssue` + upsert persists `task_attachment` metadata (no bytes, no content URL). Links persist in `task_web_link` (URL + optional Jira remote-link id). Do **not** store links in `task_attachment` — issue upsert replace-all would delete them.
+- Authorization: **STUDENT team member only** — not Lecturer, not Admin, not Leader-only. Scope `write:jira-work`. Idempotency-Key like other Jira writes. Max 5 files / 10MB; images + common documents. `link` max 2048 chars. At least one file or a link required (`JIRA_EVIDENCE_REQUIRED`).
+- DOCUMENT/RESEARCH story points count when the Task has ≥1 Jira file **or** ≥1 submitted web link.
+- OpenAPI **148 → 149**. Migration **V38** (`task_attachment`) + **V39** (`task_web_link`). `TASK_ATTACHMENT` is STRING enum on `jira_write_operation`.
+
+## DEC-092 — Contribution % is absolute weighted slice × peer; project final sums slices then applies project P
+
+- Ngày: 2026-08-15; trạng thái: ACCEPTED / CONFIRMED_SOURCE_TEST.
+- **Supersede DEC-091:** không còn `(điểm sv / tổng team)×weight` trong từng tiêu chí, không `normalizeForActiveSlices`, không trung bình đều % sprint.
+- `slice = (Σ SP_code)×Wc + (Σ SP_test)×Wt + (Σ SP_doc)×Wd + (Σ SP_research)×Wr` với trọng số dạng 0.40. `% sprint = (slice × P_s) / Σ adjust`. `% cuối = (Σ_s slice × P) / Σ adjust`, `P` = sao cá nhân / sao team cả dự án. Sprint chưa peer: `P_s = 1`. Cả dự án chưa peer: `P = 1`.
+- Spec + ví dụ từng task: `docs/CONTRIBUTION_CALCULATION_SPEC.md`. Mixer: `SprintFirstContributionMixer`. Evaluation API returns pre-peer `sliceScore` / `sliceContributionPercentage` plus after-peer `finalContributionPercentage`. OpenAPI **149**. Không migration.
+
+## DEC-091 — Contribution % is sprint-first: mix + peer per sprint, then average to the project final
+
+- Ngày: 2026-08-15; trạng thái: SUPERSEDED by DEC-092.
+- **Supersede the project-pool mix in DEC-090's evaluation path:** `finalContributionPercentage` is no longer `(project C/T/D/R mix) × project peer`. For each sprint with recognized criteria, compute slice shares from **that sprint's** recognized story points, `normalizeForActiveSlices` **inside that sprint**, mix with Course/Team weights, multiply by **that sprint's** peer coefficient `P_s`, then normalize the sprint to 100%. Project final = **equal average** of those sprint percentages (then existing override normalize to 100%). Project peer is **not** multiplied again.
+- Unscheduled (null-sprint) tasks **do not score**. Each sprint mixes criteria then multiplies by `P_s` (`P_s = 1.0` while that sprint has no peer yet — typical for an in-progress sprint). The last sprint is included in the same way, using its peer when present. Project final = equal average of those sprint percentages.
+- `sprintBreakdowns[].contributionPercentage` is the per-sprint result. Radar `code/test/document/researchContributionPercentage` stays project-level slice share. `peerReviewScore` stays project-level `stars_i / teamStars` (display only).
+- `SprintFirstContributionMixer` is shared by `TeamContributionService` and `ContributionCalculationService`. OpenAPI **148** (one new field on an existing response record, no new route). No migration.
+
+## DEC-090 — Labels are the only Task→criterion authority; DOCUMENT/RESEARCH story points require a Jira attachment
+
+- Ngày: 2026-08-15; trạng thái: ACCEPTED / CONFIRMED_SOURCE_TEST; runtime migration **NOT_YET_UNTIL_DEPLOY**.
+- **Supersede DEC-089's keyword fallback:** `TaskContributionClassifier` routes a DONE Task into CODE/TEST/DOCUMENT/RESEARCH **only** via exact reserved labels `saga:code`/`saga:test`/`saga:document`/`saga:research` (`ReservedContributionMarkerClassifier`, trim + case-sensitive exact match). No `classifyTaskSlice` keyword/title/`TaskType` fallback. Unlabeled or `AMBIGUOUS` Tasks enter no criterion. `adjustedSprintScore` still counts those story points.
+- **DOCUMENT/RESEARCH attachment gate:** story points (`storyPoint ?? 1.0`) count toward the criterion **only if** the Task has at least one `TaskAttachment`. Extra files do not add points. Without an attachment, that Task's story points are not recognized for DOCUMENT/RESEARCH (`adjustedSprintScore` still counts them). CODE/TEST ignore attachments. SAGA `Document` rows are **not** a Contribution evidence source.
+- **Jira attachment metadata ingestion:** `JiraProviderClientImpl` requests field `attachment`. Missing/null/empty = empty list. `JiraIssueUpsertService` replace-all syncs `task_attachment` after `saveAndFlush` (skip if Task id is still null). Persist id/filename/mimeType/sizeBytes/authorExternalId only — no file download, no content URL. `V38__add_task_attachment.sql` (`uk_task_attachment_external`, `ON DELETE CASCADE`). GitHub attachments remain **not implemented**.
+- **Contracts:** OpenAPI **148** (unchanged). Migration head **V37 → V38**. Peer Review / Rubric / individual override / Course-Team weights / Jira-GitHub sync routes **unchanged**.
+
 ## DEC-089 — Task is the sole numeric Contribution authority; explicit reserved markers (saga:code/test/document/research) classify Task criterion; legacy DESIGN weight folded into DOCUMENT
 
 - Ngày: 2026-08-15; trạng thái: ACCEPTED / CONFIRMED_SOURCE_TEST (foundation only — provider ingestion for external evidence remains gated, see below); runtime migration **NOT_YET_UNTIL_DEPLOY**.

@@ -97,6 +97,21 @@ public interface JiraProviderClient {
             String accessToken, String cloudId, String issueIdOrKey, String accountId
     );
 
+    List<JiraAttachmentSnapshot> addIssueAttachments(
+            String accessToken,
+            String cloudId,
+            String issueIdOrKey,
+            List<JiraAttachmentUpload> files
+    );
+
+    String addIssueRemoteLink(
+            String accessToken,
+            String cloudId,
+            String issueIdOrKey,
+            String url,
+            String title
+    );
+
     JiraSprintSnapshot getSprint(String accessToken, String cloudId, String sprintId);
 
     JiraSprintSnapshot createSprint(

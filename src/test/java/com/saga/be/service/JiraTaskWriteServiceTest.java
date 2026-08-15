@@ -26,6 +26,8 @@ import com.saga.be.entity.IdentityMap;
 import com.saga.be.entity.Project;
 import com.saga.be.entity.Sprint;
 import com.saga.be.entity.Task;
+import com.saga.be.entity.TaskAttachment;
+import com.saga.be.entity.TaskWebLink;
 import com.saga.be.entity.value.TaskComponentSnapshot;
 import com.saga.be.entity.enums.AccountStatus;
 import com.saga.be.entity.enums.IntegrationStatus;
@@ -42,6 +44,7 @@ import com.saga.be.integration.provider.JiraCreateFieldAllowedValue;
 import com.saga.be.integration.provider.JiraCreateIssueType;
 import com.saga.be.integration.provider.JiraIssueReference;
 import com.saga.be.integration.provider.JiraIssueSnapshot;
+import com.saga.be.integration.provider.JiraAttachmentSnapshot;
 import com.saga.be.integration.provider.JiraProviderClient;
 import com.saga.be.integration.security.ProjectIntegrationAuthorizationService;
 import com.saga.be.integration.sync.JiraIssueUpsertService;
@@ -52,6 +55,8 @@ import com.saga.be.integration.write.JiraTaskSprintFinalizationService;
 import com.saga.be.repository.IdentityMapRepository;
 import com.saga.be.repository.JiraBoardRepository;
 import com.saga.be.repository.TaskRepository;
+import com.saga.be.repository.TaskAttachmentRepository;
+import com.saga.be.repository.TaskWebLinkRepository;
 import com.saga.be.repository.SprintRepository;
 import com.saga.be.security.ApplicationRole;
 import com.saga.be.security.SagaPrincipal;
@@ -67,6 +72,7 @@ import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 import org.slf4j.LoggerFactory;
+import org.springframework.mock.web.MockMultipartFile;
 
 class JiraTaskWriteServiceTest {
 
@@ -1268,6 +1274,121 @@ class JiraTaskWriteServiceTest {
         verify(fixture.operations).complete(fixture.operation.getId());
     }
 
+    @Test
+    void teamMemberCanAttachFilesAndImagesThenCanonicalFetchPersistsMetadata() {
+        AttachFixture fixture = attachFixture();
+        MockMultipartFile pdf = new MockMultipartFile("files", "spec.pdf", "application/pdf", "pdf-bytes".getBytes());
+        MockMultipartFile image = new MockMultipartFile("files", "wireframe.png", "image/png", "png-bytes".getBytes());
+        when(fixture.provider.addIssueAttachments(eq("token"), eq("cloud"), eq("101"), any()))
+                .thenReturn(List.of(
+                        new JiraAttachmentSnapshot("20001", "spec.pdf", "application/pdf", 9L, "acct-1"),
+                        new JiraAttachmentSnapshot("20002", "wireframe.png", "image/png", 9L, "acct-1")
+                ));
+
+        var response = fixture.service.attach(
+                fixture.principal, fixture.projectId, fixture.task.getId(), "key", List.of(pdf, image), null
+        );
+
+        assertEquals(fixture.task.getId(), response.taskId());
+        assertEquals(1, response.attachments().size());
+        assertEquals("spec.pdf", response.attachments().get(0).filename());
+        verify(fixture.authorization).requireProjectContributor(fixture.principal, fixture.projectId);
+        verify(fixture.authorization, never()).requireProjectManager(any(), any());
+        verify(fixture.provider).addIssueAttachments(eq("token"), eq("cloud"), eq("101"), argThat(uploads ->
+                uploads.size() == 2
+                        && "spec.pdf".equals(uploads.get(0).filename())
+                        && "wireframe.png".equals(uploads.get(1).filename())));
+        verify(fixture.provider, never()).addIssueRemoteLink(any(), any(), any(), any(), any());
+        verify(fixture.provider).getIssue("token", "cloud", "101");
+        verify(fixture.upserts).upsert(eq(fixture.board.getId()), any());
+    }
+
+    @Test
+    void teamMemberCanSubmitAnHttpsLinkWithoutFiles() {
+        AttachFixture fixture = attachFixture();
+        TaskWebLink stored = TaskWebLink.builder()
+                .task(fixture.task)
+                .url("https://drive.google.com/file/d/abc/view")
+                .title("drive.google.com")
+                .remoteLinkId("10000")
+                .build();
+        stored.setId(UUID.randomUUID());
+        when(fixture.attachments.findByTaskId(fixture.task.getId())).thenReturn(List.of());
+        when(fixture.webLinks.findByTaskIdAndUrl(fixture.task.getId(), "https://drive.google.com/file/d/abc/view"))
+                .thenReturn(Optional.empty());
+        when(fixture.webLinks.findByTaskId(fixture.task.getId())).thenReturn(List.of(stored));
+        when(fixture.provider.addIssueRemoteLink(
+                eq("token"), eq("cloud"), eq("101"),
+                eq("https://drive.google.com/file/d/abc/view"),
+                eq("drive.google.com")
+        )).thenReturn("10000");
+
+        var response = fixture.service.attach(
+                fixture.principal,
+                fixture.projectId,
+                fixture.task.getId(),
+                "key",
+                List.of(),
+                "https://drive.google.com/file/d/abc/view"
+        );
+
+        assertEquals(fixture.task.getId(), response.taskId());
+        assertTrue(response.attachments().isEmpty());
+        assertEquals(1, response.links().size());
+        assertEquals("https://drive.google.com/file/d/abc/view", response.links().get(0).url());
+        verify(fixture.provider, never()).addIssueAttachments(any(), any(), any(), any());
+        verify(fixture.provider).addIssueRemoteLink(
+                eq("token"), eq("cloud"), eq("101"),
+                eq("https://drive.google.com/file/d/abc/view"),
+                eq("drive.google.com")
+        );
+        verify(fixture.webLinks).save(argThat(saved ->
+                "https://drive.google.com/file/d/abc/view".equals(saved.getUrl())
+                        && "10000".equals(saved.getRemoteLinkId())));
+    }
+
+    @Test
+    void rejectsInvalidEvidenceLinkBeforeCallingJira() {
+        AttachFixture fixture = attachFixture();
+
+        assertEquals("JIRA_LINK_INVALID", assertThrows(
+                IntegrationException.class,
+                () -> fixture.service.attach(
+                        fixture.principal, fixture.projectId, fixture.task.getId(), "key", List.of(), "javascript:alert(1)"
+                )
+        ).getCode());
+        verify(fixture.provider, never()).addIssueAttachments(any(), any(), any(), any());
+        verify(fixture.provider, never()).addIssueRemoteLink(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void rejectsUnsupportedAttachmentTypeBeforeCallingJira() {
+        AttachFixture fixture = attachFixture();
+        MockMultipartFile exe = new MockMultipartFile("files", "payload.exe", "application/octet-stream", "x".getBytes());
+
+        assertEquals("JIRA_ATTACHMENT_TYPE_UNSUPPORTED", assertThrows(
+                IntegrationException.class,
+                () -> fixture.service.attach(
+                        fixture.principal, fixture.projectId, fixture.task.getId(), "key", List.of(exe), null
+                )
+        ).getCode());
+        verify(fixture.provider, never()).addIssueAttachments(any(), any(), any(), any());
+    }
+
+    @Test
+    void rejectsEmptyAttachmentUpload() {
+        AttachFixture fixture = attachFixture();
+        MockMultipartFile empty = new MockMultipartFile("files", "notes.txt", "text/plain", new byte[0]);
+
+        assertEquals("JIRA_EVIDENCE_REQUIRED", assertThrows(
+                IntegrationException.class,
+                () -> fixture.service.attach(
+                        fixture.principal, fixture.projectId, fixture.task.getId(), "key", List.of(empty), null
+                )
+        ).getCode());
+        verify(fixture.provider, never()).addIssueAttachments(any(), any(), any(), any());
+    }
+
     private void assertUpdateSendsOnly(String expectedField, JiraTaskUpdateRequest request) {
         UpdateFixture fixture = updateFixture();
 
@@ -1489,6 +1610,56 @@ class JiraTaskWriteServiceTest {
                 projectId, task, operation, principal, response);
     }
 
+    private AttachFixture attachFixture() {
+        ProjectIntegrationAuthorizationService authorization = mock(ProjectIntegrationAuthorizationService.class);
+        JiraBoardRepository boards = mock(JiraBoardRepository.class);
+        JiraCredentialService credentials = mock(JiraCredentialService.class);
+        JiraProviderClient provider = mock(JiraProviderClient.class);
+        JiraIssueUpsertService upserts = mock(JiraIssueUpsertService.class);
+        JiraWriteOperationService operations = mock(JiraWriteOperationService.class);
+        JiraCanonicalTaskReadService canonicalReads = mock(JiraCanonicalTaskReadService.class);
+        TaskRepository tasks = mock(TaskRepository.class);
+        TaskAttachmentRepository attachments = mock(TaskAttachmentRepository.class);
+        TaskWebLinkRepository webLinks = mock(TaskWebLinkRepository.class);
+        UUID projectId = UUID.randomUUID();
+        Project project = Project.builder().name("Project").build();
+        project.setId(projectId);
+        JiraBoard board = JiraBoard.builder().project(project).cloudId("cloud").jiraProjectId("10000")
+                .connectionStatus(IntegrationStatus.ACTIVE).grantedScopes("write:jira-work").build();
+        board.setId(UUID.randomUUID());
+        Task task = Task.builder().project(project).externalId("101").externalKey("P-1").title("Research").build();
+        task.setId(UUID.randomUUID());
+        JiraWriteOperation operation = JiraWriteOperation.builder().project(project)
+                .operationType(JiraWriteOperationType.TASK_ATTACHMENT).status(JiraWriteOperationStatus.PENDING).build();
+        operation.setId(UUID.randomUUID());
+        SagaPrincipal principal = new SagaPrincipal("sub", "a@b.test", "User", ApplicationRole.STUDENT,
+                UUID.randomUUID(), AccountStatus.ACTIVE);
+        TaskAttachment stored = TaskAttachment.builder()
+                .task(task)
+                .externalId("20001")
+                .filename("spec.pdf")
+                .mimeType("application/pdf")
+                .sizeBytes(9L)
+                .build();
+        stored.setId(UUID.randomUUID());
+        when(authorization.requireProjectContributor(principal, projectId)).thenReturn(project);
+        when(tasks.findByIdAndProjectId(task.getId(), projectId)).thenReturn(Optional.of(task));
+        when(operations.fingerprint(any())).thenReturn("fingerprint");
+        when(operations.claim(project, principal, JiraWriteOperationType.TASK_ATTACHMENT, "key", "fingerprint"))
+                .thenReturn(operation);
+        when(boards.findByProjectId(projectId)).thenReturn(Optional.of(board));
+        when(credentials.validAccessToken(board)).thenReturn("token");
+        when(provider.getIssue("token", "cloud", "101")).thenReturn(snapshot());
+        when(canonicalReads.findResponse(projectId, "101")).thenReturn(Optional.of(TaskReadResponse.from(task)));
+        when(attachments.findByTaskId(task.getId())).thenReturn(List.of(stored));
+        JiraTaskWriteService service = new JiraTaskWriteService(authorization, boards, credentials, provider, upserts,
+                operations, canonicalReads, mock(JiraTaskSprintFinalizationService.class), tasks,
+                mock(IdentityMapRepository.class), mock(SprintRepository.class), mock(JiraSprintUpsertService.class),
+                null, attachments, webLinks);
+        return new AttachFixture(service, authorization, provider, upserts, projectId, board, task, principal,
+                attachments, webLinks);
+    }
+
     private EstimationFixture estimationFixture(int storyPoint) {
         ProjectIntegrationAuthorizationService authorization = mock(ProjectIntegrationAuthorizationService.class);
         JiraBoardRepository boards = mock(JiraBoardRepository.class);
@@ -1592,6 +1763,20 @@ class JiraTaskWriteServiceTest {
             JiraWriteOperation operation,
             SagaPrincipal principal,
             TaskReadResponse response
+    ) {
+    }
+
+    private record AttachFixture(
+            JiraTaskWriteService service,
+            ProjectIntegrationAuthorizationService authorization,
+            JiraProviderClient provider,
+            JiraIssueUpsertService upserts,
+            UUID projectId,
+            JiraBoard board,
+            Task task,
+            SagaPrincipal principal,
+            TaskAttachmentRepository attachments,
+            TaskWebLinkRepository webLinks
     ) {
     }
 

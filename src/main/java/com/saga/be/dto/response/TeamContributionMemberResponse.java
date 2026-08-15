@@ -18,6 +18,8 @@ public record TeamContributionMemberResponse(
         double peerReviewScore,
         double taskContributionScore,
         double taskContributionPercentage,
+        double sliceScore,
+        double sliceContributionPercentage,
         double finalContributionPercentage,
         int evidenceCount,
         List<SprintContributionBreakdown> sprintBreakdowns,
@@ -29,6 +31,9 @@ public record TeamContributionMemberResponse(
             double taskScore,
             double retrospectiveMultiplier,
             double adjustedTaskScore,
-            int peerReviewCount
+            int peerReviewCount,
+            double sliceScore,
+            double sliceContributionPercentage,
+            double contributionPercentage
     ) {}
 }

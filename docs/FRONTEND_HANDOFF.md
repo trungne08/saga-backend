@@ -1,13 +1,48 @@
 # SAGA Frontend Handoff
 
-## Task is sole numeric Contribution authority + reserved markers (foundation only) — 2026-08-15
+## Jira task attachments from SAGA (DEC-093) — 2026-08-15
 
-Current Backend contracts: OpenAPI **151** (unchanged), migration head **V37**.
+Current Backend contracts: OpenAPI **149**, migration head **V39**.
+
+- `POST /api/v1/projects/{projectId}/tasks/{taskId}/attachments` — multipart `files` (optional, max 5, 10MB each) and/or form field `link` (optional `http`/`https`, max 2048 chars). At least one of files or link is required.
+- **Chỉ STUDENT** thành viên Team sở hữu Project. Lecturer và Admin **không** gọi được endpoint này. Requires session + CSRF + `Idempotency-Key`.
+- File: SAGA upload lên Jira rồi canonical-fetch, lưu metadata `task_attachment` (không URL tải file). Link: POST Jira remote link, lưu `task_web_link` (URL only). Response `{taskId, attachments[], links[]}`.
+- DOCUMENT/RESEARCH contribution cần ≥1 file **hoặc** ≥1 link.
+
+## Absolute weighted slice × peer (DEC-092) — 2026-08-15
+
+Current Backend contracts: OpenAPI **149**, no migration.
+
+- `GET /api/v1/teams/{teamId}/contribution-evaluation`:
+  - `sliceScore` = Σ slice (Σ SP × trọng số) **trước** khi nhân peer. `sliceContributionPercentage` = `sliceScore / Σ slice team × 100`.
+  - `finalContributionPercentage` = `(Σ slice × project P) / team adjust × 100` — đã gồm peer. Do not re-apply peer on the client.
+  - Per sprint: `sprintBreakdowns[].sliceScore` / `sliceContributionPercentage` (chưa nhân `P_s`) và `contributionPercentage` (đã nhân `P_s`). `P_s = 1` nếu sprint chưa có peer.
+- Tasks with no sprint do not score. Radar `code/test/document/researchContributionPercentage` stays project-level criterion share.
+
+## Sprint-first contribution % (DEC-091) — 2026-08-15
+
+**SUPERSEDED by DEC-092.** Equal-average of per-sprint mix is no longer the evaluation path.
+
+## Labels-only Task scoring + Jira attachment metadata (DEC-090) — 2026-08-15
+
+Current Backend contracts: OpenAPI **148**, migration head **V38**.
+
+- A DONE Jira Task only scores into a Contribution criterion when it has **exactly one** reserved label: `saga:code`, `saga:test`, `saga:document`, `saga:research`. Ordinary labels (`backend`, `ui-ux`, …) and issue type/title **do not** classify the task anymore.
+- Conflicting reserved labels (e.g. `saga:test` + `saga:research`) still exclude the task from all four criteria until fixed — silent in the score, no new error API.
+- **DOCUMENT / RESEARCH:** story points count **only if** the task has at least one Jira file attachment **or** one submitted web link. Extra files/links do not add extra points. **CODE / TEST:** story points always count; attachments/links are ignored.
+- SAGA still stores **attachment metadata only** (id, filename, mime, size, author) during Jira issue sync **and after student upload**. There is **no** file download and **no** content URL. GitHub attachments are still not ingested.
+- Students (Team members) upload via `POST /api/v1/projects/{projectId}/tasks/{taskId}/attachments` (DEC-093).
+- Lecturer still edits Course/Team weights directly. Weight-request / Admin-approval APIs remain removed.
+
+## Task is sole numeric Contribution authority + reserved markers (DEC-089) — 2026-08-15
+
+Current Backend contracts: OpenAPI **148**, migration head **V37**. DEC-090 above supersedes the keyword-fallback and “attachments not implemented” notes from this section.
+
+- Lecturer sửa trọng số Course/Team trực tiếp. Các API gửi đơn / lấy danh sách đơn / Admin duyệt trọng số **đã gỡ**.
 
 - New reserved Jira Task labels: `saga:code`, `saga:test`, `saga:document`, `saga:research` — exact match only (typos/case differences do nothing). A DONE Task carrying one of these routes its story points into that Contribution criterion, so `testContributionScore`/`researchContributionScore` can now be genuinely non-zero (previously always `0`). No Task with the marker → still `0`, unchanged.
 - A Task with more than one conflicting marker (e.g. `saga:test` + `saga:research`) is silently excluded from all four criteria — no error is surfaced to FE, it just won't show up in any criterion's score until the label conflict is fixed.
 - Internal-only change, no new FE-visible field: a commit linked to a Task no longer adds any score on top of that Task's own DONE contribution.
-- **Still foundation-only** — Jira attachment and GitHub Issue/comment attachment ingestion (the rest of the originally-planned milestone) are **not implemented**. Don't build UI expecting SAGA to auto-import external attachments yet.
 
 ## Contribution weight: Course-default + optional exclusive Team override — 2026-08-15
 
@@ -49,7 +84,7 @@ Current Backend contracts: OpenAPI **150**, migration head **V33**. Browser `JSE
 
 - **Avatar:** render `avatarUrl` từ `GET /api/auth/me` (nullable). Fallback UI khi null. Không gọi Google image API, không gửi provider token/avatar URL.
 - **Progress:** `GET /api/v1/courses/{courseId}/students/{studentId}/progress`. MEMBER self only; LEADER own Team members (exact Team, kể cả khi target còn membership Team khác trong Course); Lecturer Course owner; Admin retained; MENTOR forbidden. Không Course-wide.
-- **Course weights:** `GET` + `PUT /api/v1/courses/{courseId}/contribution-slice-weights`. Lecturer direct edit exact Course only. Body `{codeWeight, documentWeight, designWeight}` scale 0–100. Mutation gửi CSRF. Normal FE **không** dùng old approval flow.
+- **Course weights:** `GET` + `PUT /api/v1/courses/{courseId}/contribution-slice-weights`. Lecturer direct edit exact Course only. Body `{codeWeight, documentWeight, designWeight}` scale 0–100. Mutation gửi CSRF. Không còn luồng gửi đơn / Admin duyệt trọng số.
 - **teams-progress:** `activeSprints[]` is authority. One active → keep `currentSprint` UI. Multiple active → list/picker; burndown uses `activeSprints[i].sprintId`. Do not treat `currentSprint` as primary when the list has more than one.
 
 See `FRONTEND_API_INTEGRATION.md` for the detailed 2026-08-15 contracts. DEC-082 (OpenAPI 149 / V32) is a historical snapshot.

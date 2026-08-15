@@ -1,14 +1,35 @@
+## Jira task attachments from SAGA (DEC-093) — 2026-08-15
+
+- **Đã hoàn thành / CONFIRMED_SOURCE_TEST:** Chỉ Student thành viên Team nộp file/ảnh hoặc link vào Jira Task qua SAGA. File metadata `task_attachment` sau canonical fetch. Link lưu `task_web_link` + Jira remote link.
+- **Contracts:** OpenAPI **149**. Migration head **V39**.
+
+## Absolute weighted slice × peer (DEC-092) — 2026-08-15
+
+- **Đã hoàn thành / CONFIRMED_SOURCE_TEST:** `slice = Σ SP cùng tiêu chí × trọng số`. `% sprint` = `(slice × P_s) / Σ adjust`. `% cuối` = `(Σ slice × P cả dự án) / Σ adjust`. API evaluation trả thêm `sliceScore` / `sliceContributionPercentage` (trước peer) cạnh `% đã nhân peer`. Không chia share trong tiêu chí, không trung bình đều % sprint. Sprint giữa kỳ chưa peer: `P_s = 1`. Task không gắn sprint không tính điểm.
+- **Contracts:** OpenAPI **149**. Không migration. Spec: `docs/CONTRIBUTION_CALCULATION_SPEC.md`.
+
+## Sprint-first contribution % (DEC-091) — 2026-08-15
+
+- **SUPERSEDED by DEC-092.** Trung bình đều % sprint không còn là đường evaluate.
+
+## Labels-only Task scoring + Jira attachment metadata (DEC-090) — 2026-08-15
+
+- **Đã hoàn thành / CONFIRMED_SOURCE_TEST:** criterion của Task = **labels only** (`saga:code`/`saga:test`/`saga:document`/`saga:research`). Keyword/title/`TaskType` fallback đã gỡ. Task không marker hoặc AMBIGUOUS không vào criterion; sprint score vẫn đếm story point.
+- **DOCUMENT/RESEARCH:** `storyPoint` (hoặc 1.0) **chỉ công nhận khi Task có ≥1 Jira attachment**. Số file không cộng thêm điểm. **CODE/TEST** không cần attachment. Bảng `Document` **không** tham gia Contribution.
+- **Jira attachment metadata** được persist lúc issue upsert (`task_attachment`, `V38`). Không tải file, không lưu content URL. Field `attachment` thiếu = list rỗng (replace-all). GitHub attachment **chưa** ingest.
+- **Contracts:** OpenAPI **148**. Migration head **V37 → V38**.
+
 ## Task-is-sole-numeric-authority + reserved Contribution markers (DEC-089) — 2026-08-15
 
 - **Đã hoàn thành (foundation only) / CONFIRMED_SOURCE_TEST:** provider-independent foundation cho milestone "external evidence + 4-criteria scoring" — ingestion Jira attachment/GitHub attachment **KHÔNG được implement** trong lần này (block bởi các TBD runtime chưa kiểm chứng: Jira attachment endpoint chưa smoke-test, GitHub App permission grant thực tế chưa xác nhận runtime, private-repo attachment CDN auth path chưa chứng minh).
 - **`ContributionCriterion` (CODE/TEST/DOCUMENT/RESEARCH)** tách biệt hoàn toàn khỏi `TaskType` (native MySQL ENUM, mở rộng cần migration vật lý như V29 từng làm cho REQUEST) và `DocumentType`.
 - **Reserved marker exact-match:** `saga:code/saga:test/saga:document/saga:research` — case-sensitive, không substring/fuzzy/AI. >1 marker xung đột trên cùng Task = AMBIGUOUS, Task đó bị loại khỏi cả 4 criteria (không pick-first).
-- **Precedence:** marker (nếu có) → nếu không có, fallback nguyên vẹn vào legacy keyword classifier hiện hữu (không sửa, không unify hai bản classifier hơi khác nhau giữa `TeamContributionService`/`ContributionCalculationService` — ghi nhận technical debt).
+- **Precedence (historical DEC-089, superseded by DEC-090):** marker (nếu có) → nếu không có, fallback nguyên vẹn vào legacy keyword classifier. DEC-090 đã gỡ fallback đó — chỉ còn labels.
 - **`TaskWeightConfig` audit xác nhận KHÔNG phải scoring authority** — chỉ dùng làm delete-dependency guard trong `CourseService`, chưa từng được Contribution service nào đọc.
 - **Task là numeric authority duy nhất khi evidence có Task-link — đây là thay đổi semantic thật, không phải no-op:** `NUMERIC_TASK_FORMULA_CHANGED = NO` (công thức per-Task, `storyPoint ?? 1.0`, không đổi) nhưng `COMMIT_NUMERIC_CONTRIBUTION_CHANGED = YES` (xoá hoàn toàn per-commit scoring loop dùng `commit.task` FK — audit xác nhận không production writer nào từng ghi field này — khỏi cả hai service; một commit liên kết Task giờ luôn cộng đúng 0 điểm bổ sung, trước đây cộng đủ trọng số) và `OVERALL_CONTRIBUTION_SOURCE_SEMANTIC_CHANGED = YES` (quyết định sản phẩm có chủ đích để chống double-count, không được mô tả là "formula unchanged"). Test matrix A–J (theo đúng spec) đã pass.
 - **TEST/RESEARCH có evidence source thật đầu tiên:** Task DONE mang `saga:test`/`saga:research` route full `storyPoint`-hoặc-1.0 vào `testScoreByStudent`/`researchScoreByStudent` — không còn hardcode 0 cho path này (provider-sourced TEST/RESEARCH vẫn TBD).
 - **`V37__fold_legacy_design_weight_into_document.sql` (mới, không sửa V34/V35/V36 vì applied status không xác nhận được):** `document = document + design; design = 0` cho cả `course` và `project_group_weight_config`. `code`/`test`/`research` không bị đụng. **Guard đã sửa sau audit:** bản đầu chỉ check `design ≠ 0` — KHÔNG an toàn, vì audit xác nhận cả `CourseContributionWeightService#updateCurrentWeights` lẫn `ProjectGroupWeightConfigService#update` (khi update row đã tồn tại) đều không zero cột `design` — một row có thể đã được cấu hình hợp lệ 4-field active sum=100/1.0 trong khi `design` legacy vẫn còn dương. Guard cuối cùng: chỉ fold khi `code+test+document+research+design` vẫn đúng bằng 100/1.0 (tức design thật sự là phần thiếu của tổng legacy cũ, không phải leftover cạnh một cấu hình mới đã hợp lệ). Chứng minh bằng test THỰC THI (`LegacyDesignWeightFoldMigrationContractTest`, chạy SQL V37 thật trên H2 in-memory) — string-match không đủ để chứng minh logic điều kiện này.
-- **Contracts:** OpenAPI **không đổi (151)** — không route mới. Migration head **V36 → V37**. Peer Review/Rubric/individual override/Student progress/AI Agent/Jira-GitHub sync/ProjectType/COURSE-TEAM mode (DEC-088) **không đổi**.
+- **Contracts:** OpenAPI **148** (gỡ 3 route legacy gửi đơn / lấy danh sách / Admin duyệt trọng số). Migration head **V36 → V37**. Peer Review/Rubric/individual override/Student progress/AI Agent/Jira-GitHub sync/ProjectType/COURSE-TEAM mode (DEC-088) **không đổi**.
 
 ## Contribution weight: Course-default + optional exclusive Team override, COURSE/TEAM mode (DEC-088) — 2026-08-15
 
@@ -50,7 +71,7 @@
 - **Đã hoàn thành / CONFIRMED_SOURCE_TEST:** OIDC avatar sync, STUDENT MEMBER/LEADER progress access, Lecturer direct Course slice-weight PUT. OpenAPI **150** (PASS). Migration head **V33** (PASS). DEC-082 (149 / V32) là lịch sử.
 - **Avatar:** `picture` → `avatar_url` nullable; `/api/auth/me.avatarUrl`; Basic Info đọc Student. Cognito mapping console **CONFIRMED**; runtime login smoke **TBD**.
 - **Progress:** existing GET route; MEMBER self; LEADER exact Team (union nếu lead nhiều Team); MENTOR/cross-Team forbidden; Lecturer owner / Admin retained. DEC-085: không 409 chỉ vì target có membership khác trong Course. Không mở analytics khác cho STUDENT.
-- **Course weights:** official `PUT .../contribution-slice-weights` scale 100; actor từ principal; ADMIN direct PUT forbidden. Legacy approval flow còn tồn tại, deprecated for new FE. GroupWeight precedence unchanged.
+- **Course weights:** official `PUT .../contribution-slice-weights` scale 100; actor từ principal; ADMIN direct PUT forbidden. Luồng gửi đơn / Admin duyệt trọng số đã gỡ. GroupWeight precedence unchanged.
 - **Full clean:** **1019 / 23 fail / 8 error**. Không ghi FULL_SUITE=PASS. 22 CSRF isolation + DEC-023 + 8 MyCourseTeamMembers cleanup order-dependent (isolated PASS). Feature A/B/C **NONE_PROVEN** regression.
 
 ## Merged main — Project V1 / Lecturer Dashboard / Admin Dashboard V1 / AI Agent — 2026-08-15

@@ -76,6 +76,17 @@ public class JiraTaskWriteService {
     private final SprintRepository sprintRepository;
     private final JiraSprintUpsertService sprintUpsertService;
     private final JiraMutationNotificationProducer notificationProducer;
+    private final com.saga.be.repository.TaskAttachmentRepository taskAttachmentRepository;
+    private final com.saga.be.repository.TaskWebLinkRepository taskWebLinkRepository;
+
+    private static final int MAX_ATTACHMENT_FILES = 5;
+    private static final long MAX_ATTACHMENT_BYTES = 10L * 1024 * 1024;
+    private static final int MAX_EVIDENCE_LINK_CHARS = 2048;
+    private static final java.util.Set<String> ALLOWED_ATTACHMENT_EXTENSIONS = java.util.Set.of(
+            "png", "jpg", "jpeg", "gif", "webp", "bmp",
+            "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
+            "txt", "md", "csv", "zip"
+    );
 
     @Autowired
     public JiraTaskWriteService(ProjectIntegrationAuthorizationService authorization, JiraBoardRepository boardRepository,
@@ -84,7 +95,9 @@ public class JiraTaskWriteService {
             JiraCanonicalTaskReadService canonicalTaskReadService, JiraTaskSprintFinalizationService sprintFinalizationService,
             TaskRepository taskRepository, IdentityMapRepository identityMapRepository,
             SprintRepository sprintRepository, JiraSprintUpsertService sprintUpsertService,
-            JiraMutationNotificationProducer notificationProducer) {
+            JiraMutationNotificationProducer notificationProducer,
+            com.saga.be.repository.TaskAttachmentRepository taskAttachmentRepository,
+            com.saga.be.repository.TaskWebLinkRepository taskWebLinkRepository) {
         this.authorization = authorization;
         this.boardRepository = boardRepository;
         this.credentialService = credentialService;
@@ -98,6 +111,8 @@ public class JiraTaskWriteService {
         this.sprintRepository = sprintRepository;
         this.sprintUpsertService = sprintUpsertService;
         this.notificationProducer = notificationProducer;
+        this.taskAttachmentRepository = taskAttachmentRepository;
+        this.taskWebLinkRepository = taskWebLinkRepository;
     }
 
     public JiraTaskWriteService(ProjectIntegrationAuthorizationService authorization, JiraBoardRepository boardRepository,
@@ -108,7 +123,19 @@ public class JiraTaskWriteService {
             SprintRepository sprintRepository, JiraSprintUpsertService sprintUpsertService) {
         this(authorization, boardRepository, credentialService, jiraClient, issueUpsertService, operationService,
                 canonicalTaskReadService, sprintFinalizationService, taskRepository, identityMapRepository,
-                sprintRepository, sprintUpsertService, null);
+                sprintRepository, sprintUpsertService, null, null, null);
+    }
+
+    public JiraTaskWriteService(ProjectIntegrationAuthorizationService authorization, JiraBoardRepository boardRepository,
+            JiraCredentialService credentialService, JiraProviderClient jiraClient,
+            JiraIssueUpsertService issueUpsertService, JiraWriteOperationService operationService,
+            JiraCanonicalTaskReadService canonicalTaskReadService, JiraTaskSprintFinalizationService sprintFinalizationService,
+            TaskRepository taskRepository, IdentityMapRepository identityMapRepository,
+            SprintRepository sprintRepository, JiraSprintUpsertService sprintUpsertService,
+            JiraMutationNotificationProducer notificationProducer) {
+        this(authorization, boardRepository, credentialService, jiraClient, issueUpsertService, operationService,
+                canonicalTaskReadService, sprintFinalizationService, taskRepository, identityMapRepository,
+                sprintRepository, sprintUpsertService, notificationProducer, null, null);
     }
 
     @Transactional(readOnly = true)
@@ -285,15 +312,79 @@ public class JiraTaskWriteService {
         emitCompleted(operation, NotificationType.TASK_DELETED, principal);
     }
 
+    @Transactional
+    public com.saga.be.dto.response.JiraTaskAttachmentsResponse attach(
+            SagaPrincipal principal,
+            UUID projectId,
+            UUID taskId,
+            String key,
+            List<org.springframework.web.multipart.MultipartFile> files,
+            String link
+    ) {
+        List<com.saga.be.integration.provider.JiraAttachmentUpload> uploads = optionalUploads(files);
+        String url = validatedEvidenceLink(link);
+        if (uploads.isEmpty() && url == null) {
+            throw IntegrationException.invalid(
+                    "JIRA_EVIDENCE_REQUIRED",
+                    "At least one file or a link is required"
+            );
+        }
+        boolean linkAlreadyStored = url != null
+                && taskWebLinkRepository != null
+                && taskWebLinkRepository.findByTaskIdAndUrl(taskId, url).isPresent();
+        java.util.concurrent.atomic.AtomicReference<String> remoteLinkId =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        TaskReadResponse task = mutate(
+                principal,
+                projectId,
+                taskId,
+                key,
+                JiraWriteOperationType.TASK_ATTACHMENT,
+                evidenceFingerprint(uploads, url),
+                JiraWriteScope.CLASSIC_WRITE_SCOPE,
+                null,
+                false,
+                (token, board, existing) -> {
+                    if (!uploads.isEmpty()) {
+                        jiraClient.addIssueAttachments(
+                                token,
+                                board.getCloudId(),
+                                external(existing),
+                                uploads
+                        );
+                    }
+                    if (url != null && !linkAlreadyStored) {
+                        remoteLinkId.set(jiraClient.addIssueRemoteLink(
+                                token,
+                                board.getCloudId(),
+                                external(existing),
+                                url,
+                                evidenceLinkTitle(url)
+                        ));
+                    }
+                }
+        );
+        persistWebLink(projectId, task.id(), url, remoteLinkId.get());
+        return attachmentsResponse(task.id());
+    }
+
     private TaskReadResponse mutate(SagaPrincipal principal, UUID projectId, UUID taskId, String key,
             JiraWriteOperationType type, String fingerprint, String requiredScope, TaskMutation remote) {
-        return mutate(principal, projectId, taskId, key, type, fingerprint, requiredScope, null, remote);
+        return mutate(principal, projectId, taskId, key, type, fingerprint, requiredScope, null, true, remote);
     }
 
     private TaskReadResponse mutate(SagaPrincipal principal, UUID projectId, UUID taskId, String key,
             JiraWriteOperationType type, String fingerprint, String requiredScope,
             TaskType expectedTaskType, TaskMutation remote) {
-        Project project = authorization.requireProjectManager(principal, projectId);
+        return mutate(principal, projectId, taskId, key, type, fingerprint, requiredScope, expectedTaskType, true, remote);
+    }
+
+    private TaskReadResponse mutate(SagaPrincipal principal, UUID projectId, UUID taskId, String key,
+            JiraWriteOperationType type, String fingerprint, String requiredScope,
+            TaskType expectedTaskType, boolean managerOnly, TaskMutation remote) {
+        Project project = managerOnly
+                ? authorization.requireProjectManager(principal, projectId)
+                : authorization.requireProjectContributor(principal, projectId);
         Task task = task(projectId, taskId);
         JiraWriteOperation operation = operationService.claim(project, principal, type, key, operationService.fingerprint(fingerprint));
         if (operation.getStatus() == JiraWriteOperationStatus.COMPLETED) return TaskReadResponse.from(task);
@@ -318,6 +409,184 @@ public class JiraTaskWriteService {
     private IntegrationException notFound(String message) { return new IntegrationException(HttpStatus.NOT_FOUND, "JIRA_RESOURCE_NOT_FOUND", message); }
 
     private String external(Task task) { if (task.getExternalId() == null || task.getExternalId().isBlank()) throw IntegrationException.conflict("JIRA_TASK_NOT_LINKED", "The task is not linked to Jira"); return task.getExternalId(); }
+
+    private List<com.saga.be.integration.provider.JiraAttachmentUpload> optionalUploads(
+            List<org.springframework.web.multipart.MultipartFile> files
+    ) {
+        if (files == null || files.isEmpty() || files.stream().allMatch(file -> file == null || file.isEmpty())) {
+            return List.of();
+        }
+        List<org.springframework.web.multipart.MultipartFile> present = files.stream()
+                .filter(file -> file != null && !file.isEmpty())
+                .toList();
+        if (present.size() > MAX_ATTACHMENT_FILES) {
+            throw IntegrationException.invalid(
+                    "JIRA_ATTACHMENT_LIMIT_EXCEEDED",
+                    "A task accepts at most 5 files in one upload"
+            );
+        }
+        List<com.saga.be.integration.provider.JiraAttachmentUpload> uploads = new java.util.ArrayList<>();
+        for (org.springframework.web.multipart.MultipartFile file : present) {
+            if (file.getSize() > MAX_ATTACHMENT_BYTES) {
+                throw IntegrationException.invalid(
+                        "JIRA_ATTACHMENT_TOO_LARGE",
+                        "Each attachment must be 10 MB or smaller"
+                );
+            }
+            String filename = safeAttachmentFilename(file.getOriginalFilename());
+            String extension = attachmentExtension(filename);
+            if (!ALLOWED_ATTACHMENT_EXTENSIONS.contains(extension)) {
+                throw IntegrationException.invalid(
+                        "JIRA_ATTACHMENT_TYPE_UNSUPPORTED",
+                        "Only images and common document files can be attached"
+                );
+            }
+            try {
+                uploads.add(new com.saga.be.integration.provider.JiraAttachmentUpload(
+                        filename,
+                        file.getContentType(),
+                        file.getBytes()
+                ));
+            } catch (java.io.IOException exception) {
+                throw IntegrationException.invalid(
+                        "JIRA_ATTACHMENT_UNREADABLE",
+                        "The uploaded file could not be read"
+                );
+            }
+        }
+        return List.copyOf(uploads);
+    }
+
+    private String safeAttachmentFilename(String original) {
+        if (original == null || original.isBlank()) {
+            throw IntegrationException.invalid(
+                    "JIRA_ATTACHMENT_FILENAME_INVALID",
+                    "Each attachment must have a file name"
+            );
+        }
+        String name = original.replace('\\', '/');
+        int slash = name.lastIndexOf('/');
+        if (slash >= 0) {
+            name = name.substring(slash + 1);
+        }
+        name = name.trim();
+        if (name.isBlank() || ".".equals(name) || "..".equals(name)) {
+            throw IntegrationException.invalid(
+                    "JIRA_ATTACHMENT_FILENAME_INVALID",
+                    "Each attachment must have a file name"
+            );
+        }
+        if (name.length() > 255) {
+            name = name.substring(name.length() - 255);
+        }
+        return name;
+    }
+
+    private String attachmentExtension(String filename) {
+        int dot = filename.lastIndexOf('.');
+        if (dot < 0 || dot == filename.length() - 1) {
+            return "";
+        }
+        return filename.substring(dot + 1).toLowerCase(Locale.ROOT);
+    }
+
+    private String evidenceFingerprint(
+            List<com.saga.be.integration.provider.JiraAttachmentUpload> uploads,
+            String url
+    ) {
+        StringBuilder builder = new StringBuilder();
+        for (com.saga.be.integration.provider.JiraAttachmentUpload upload : uploads) {
+            builder.append(upload.filename()).append('|')
+                    .append(upload.content().length).append('|')
+                    .append(java.util.Arrays.hashCode(upload.content()))
+                    .append(';');
+        }
+        builder.append("link=").append(url == null ? "" : url);
+        return builder.toString();
+    }
+
+    private String validatedEvidenceLink(String link) {
+        if (link == null || link.isBlank()) {
+            return null;
+        }
+        String trimmed = link.trim();
+        if (trimmed.length() > MAX_EVIDENCE_LINK_CHARS) {
+            throw IntegrationException.invalid(
+                    "JIRA_LINK_TOO_LONG",
+                    "A submitted link must be 2048 characters or shorter"
+            );
+        }
+        java.net.URI uri;
+        try {
+            uri = java.net.URI.create(trimmed);
+        } catch (IllegalArgumentException exception) {
+            throw IntegrationException.invalid("JIRA_LINK_INVALID", "The submitted link is not a valid URL");
+        }
+        String scheme = uri.getScheme();
+        if (
+            (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme))
+            || uri.getHost() == null
+            || uri.getHost().isBlank()
+        ) {
+            throw IntegrationException.invalid(
+                    "JIRA_LINK_INVALID",
+                    "A submitted link must be an http or https URL"
+            );
+        }
+        return trimmed;
+    }
+
+    private String evidenceLinkTitle(String url) {
+        try {
+            String host = java.net.URI.create(url).getHost();
+            if (host != null && !host.isBlank()) {
+                return host;
+            }
+        } catch (IllegalArgumentException ignored) {
+            // Fall through to the generic title.
+        }
+        return "Evidence link";
+    }
+
+    private void persistWebLink(UUID projectId, UUID taskId, String url, String remoteLinkId) {
+        if (url == null || taskWebLinkRepository == null) {
+            return;
+        }
+        if (taskWebLinkRepository.findByTaskIdAndUrl(taskId, url).isPresent()) {
+            return;
+        }
+        Task task = task(projectId, taskId);
+        taskWebLinkRepository.save(com.saga.be.entity.TaskWebLink.builder()
+                .task(task)
+                .url(url)
+                .title(evidenceLinkTitle(url))
+                .remoteLinkId(remoteLinkId)
+                .build());
+    }
+
+    private com.saga.be.dto.response.JiraTaskAttachmentsResponse attachmentsResponse(UUID taskId) {
+        List<com.saga.be.dto.response.JiraTaskAttachmentsResponse.Item> items = taskAttachmentRepository == null
+                ? List.of()
+                : taskAttachmentRepository.findByTaskId(taskId).stream()
+                        .map(attachment -> new com.saga.be.dto.response.JiraTaskAttachmentsResponse.Item(
+                                attachment.getId(),
+                                attachment.getExternalId(),
+                                attachment.getFilename(),
+                                attachment.getMimeType(),
+                                attachment.getSizeBytes()
+                        ))
+                        .toList();
+        List<com.saga.be.dto.response.JiraTaskAttachmentsResponse.LinkItem> links = taskWebLinkRepository == null
+                ? List.of()
+                : taskWebLinkRepository.findByTaskId(taskId).stream()
+                        .map(webLink -> new com.saga.be.dto.response.JiraTaskAttachmentsResponse.LinkItem(
+                                webLink.getId(),
+                                webLink.getUrl(),
+                                webLink.getRemoteLinkId()
+                        ))
+                        .toList();
+        return new com.saga.be.dto.response.JiraTaskAttachmentsResponse(taskId, items, links);
+    }
 
     private Map<String, Object> updateFields(
             Task task,
