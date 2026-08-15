@@ -44,8 +44,6 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.json.JsonMapper;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -128,31 +126,6 @@ class TeamProjectControllerIntegrationTest {
                 .orElseThrow();
         Project reloadedProject = projectRepository.findById(reloadedTeam.getProject().getId()).orElseThrow();
         assertEquals(projectType.getId(), reloadedProject.getProjectType().getId());
-    }
-
-    @Test
-    void projectTypeCreatedThroughAdminApiIsUsableToCreateProject() throws Exception {
-        Fixture fixture = fixture();
-
-        String createTypeResponse = mockMvc.perform(post("/api/project-types")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"code\":\"" + unique("ADMIN-MANAGED") + "\",\"name\":\"Admin managed type\"}")
-                        .with(authentication(authenticationFor(ApplicationRole.ADMIN, UUID.randomUUID())))
-                        .with(csrf()))
-                .andExpect(status().isCreated())
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
-        JsonNode createdType = JsonMapper.builder().build().readTree(createTypeResponse);
-        String projectTypeId = createdType.get("projectTypeId").asText();
-
-        mockMvc.perform(post("/api/teams/{teamId}/projects", fixture.team().getId())
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"Bootstrapped project\",\"projectTypeId\":\"" + projectTypeId + "\"}")
-                        .with(authentication(leaderAuth(fixture)))
-                        .with(csrf()))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.projectType.projectTypeId").value(projectTypeId));
     }
 
     @Test

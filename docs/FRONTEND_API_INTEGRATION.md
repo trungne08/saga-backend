@@ -1,3 +1,36 @@
+## Contribution weight: Course-default + optional exclusive Team override (DEC-088, supersedes DEC-087) — 2026-08-15
+
+OpenAPI **148 (DEC-087) → 151** (revived `PUT .../group-weights`, new `PUT .../contribution-config-mode`, new `GET .../contribution-team-weights`). Migration head **V35 → V36**.
+
+- Each Course has exactly one active Contribution config mode — `Course.contributionConfigMode` = `COURSE` or `TEAM`. **There is no "Team override if present, else Course" hybrid** — a Course is entirely in one mode. Do not build a per-Team "override toggle" UI that silently falls back; if a Course is in TEAM mode and a Team has no override, that Team's Contribution is **not computable** (Backend returns `TEAM_WEIGHT_CONFIG_INCOMPLETE`), not "using Course weights."
+- Criteria universe is now **`CODE/TEST/DOCUMENT/RESEARCH`** — `DESIGN` is retired as a Contribution criterion (it still exists as a ProjectType catalog value, `DESIGN_ARCHITECTURE`, but the two concepts are unrelated — ProjectType does not decide Contribution weight).
+- **COURSE mode (default):** `GET/PUT /api/v1/courses/{courseId}/contribution-slice-weights` — same route, body/response now `{codeWeight, testWeight, documentWeight, researchWeight}` (all required, `>= 0`, sum 100 ± 0.01). PUT still LECTURER exact instructor only, CSRF required, no `lecturerId`. Applies to every Team in the Course while in COURSE mode.
+- **TEAM mode:** `PUT /api/projects/{projectId}/group-weights` is **revived** — `{groupId, codeWeight, testWeight, documentWeight, researchWeight, note?}`, 0..1 scale (not 0..100 — do not convert), sum must be exactly 1.0. Authorization: ADMIN or the exact Course-instructor LECTURER only — **never** the Team leader/student.
+- **Mode switch:** `PUT /api/v1/courses/{courseId}/contribution-config-mode` with `{"mode": "COURSE"|"TEAM"}` — LECTURER exact instructor, CSRF required. Switching to `TEAM` validates that **every current Team** in the Course already has a valid `group-weights` override; if any is missing, the switch is rejected with 409 `TEAM_MODE_CONFIGURATION_INCOMPLETE` and the mode stays `COURSE` (atomic — no partial activation). FE flow: let the Lecturer configure each Team's weights first (as "drafts"), then call this endpoint to activate; show the 409's missing-Team detail if rejected. Switching back to `COURSE` always succeeds and does not delete the Teams' saved overrides (they become inactive/historical, reusable if TEAM mode is activated again later). A Team created after TEAM mode is already active is **not** automatically covered by Course weights — it needs its own override before Contribution can be computed for it.
+- **Team menu read:** `GET /api/v1/courses/{courseId}/contribution-team-weights` (ADMIN/LECTURER) — new endpoint returning the Course's current mode plus each Team's effective weights and source. Use this to populate a "current effective weights per Team" screen instead of re-deriving it client-side.
+- FE UI: one "Course Contribution Criteria" form (Code/Test/Document/Research, sum 100%) for COURSE mode, plus a per-Team weight screen (Code/Test/Document/Research, sum 1.0) for TEAM mode, gated by the Course's current mode and an explicit "activate Team mode" action that can fail with a clear "N Teams still need weights" message.
+- **`testWeight`/`researchWeight` (DEC-089 update): scoring now works for a specific evidence path only.** If at least one DONE Task in a Team/Project carries the exact Jira label `saga:test` or `saga:research` (case-sensitive exact match, no substring), its story points route into that criterion and `testContributionScore`/`researchContributionScore` (and their `*Percentage` counterparts) become genuinely non-zero. If no Task carries that marker, they stay `0` and the weight budget redistributes to the active criteria, same as before. This is still only a foundation piece — evidence sourced from Jira/GitHub attachments or from commits (via traceability) is **not implemented yet**, so do not present 4-criteria scoring as fully complete in FE copy; only the Task-marker path is real.
+- **Existing Course and Team weight rows keep their prior Code/Document values** after these migrations (not reset). Only the new columns are backfilled to `0`/`COURSE` for them.
+
+## Task-is-sole-numeric-authority + reserved Contribution markers (DEC-089, foundation only) — 2026-08-15
+
+Migration head **V36 → V37**. No OpenAPI change (no new route).
+
+- New reserved Jira labels FE can let Lecturers/Students see/set on a Task (via the existing Jira label editing flow — no new SAGA endpoint): `saga:code`, `saga:test`, `saga:document`, `saga:research`. Exact string match only; a typo like `saga:test-extra` or wrong case does nothing.
+- If a Task carries more than one of these markers at once (e.g. `saga:test` + `saga:research`), Backend treats it as ambiguous and excludes it from all four criteria until the conflict is resolved — it does not silently pick one. There is no dedicated error surfaced to FE for this today (it's silent in the score, not a rejected write) — a Lecturer would only notice via an unexpectedly low/zero criterion score.
+- A commit linked to a Task never adds extra score on top of that Task's own DONE contribution — the Task's story points are the only number that counts. This is an internal scoring-engine change with no new FE-visible field.
+- Attachment/document ingestion from Jira or GitHub is **not implemented** — do not build UI expecting SAGA to auto-import Jira attachments or GitHub issue/comment attachments yet.
+
+## ProjectType fixed canonical catalog (DEC-086) — 2026-08-15
+
+OpenAPI **150 → 149** (one public POST removed). Migration head **V33 → V34**.
+
+- ProjectType is now a **fixed, migration-seeded canonical SAGA catalog** — not a dynamic ADMIN-managed one. There is no create/update/delete API or UI for it.
+- `GET /api/project-types` — unchanged contract (authenticated ADMIN/LECTURER/STUDENT, no CSRF, no Bearer) — always returns exactly 4 rows: `DESIGN_ARCHITECTURE` ("Design & Architecture"), `RESEARCH` ("Research"), `TESTER` ("Tester"), `DOCUMENT` ("Document"). ProjectType does **not** decide Contribution weight (see the section above — the two are independent).
+- `POST /api/project-types` **no longer exists**. Do not build an Admin "create ProjectType" UI.
+- Project create is unchanged: `POST /api/teams/{teamId}/projects` still requires `projectTypeId` (missing → `PROJECT_TYPE_REQUIRED`; unknown → `PROJECT_TYPE_NOT_FOUND`). FE flow: `GET /api/project-types` first, then send the selected `projectTypeId`. Do not send `code`/`name` in place of the UUID.
+- Existing projects created before this migration read back `projectType: null` (legacy-compatible) since their old catalog row no longer exists — this is a product-approved reset, not a bug.
+
 ## Avatar / Student progress / Lecturer Course weights — 2026-08-15
 
 Browser auth: `JSESSIONID` + `credentials: "include"`. GET không CSRF. POST/PUT/PATCH/DELETE cần CSRF. **Không Bearer.** OpenAPI **150**. Migration **V33**. Full suite **không** green (1019 / 23 fail / 8 error).
@@ -38,7 +71,7 @@ type AuthMeResponse = {
 
 ### Course contribution slice weights (official new FE)
 
-Scale **0..100**, example `30 / 20 / 50`. Sum = 100 ± 0.01. Không nhầm Project group weights (`0..1`, sum `1.0`).
+Scale **0..100**, example `30 / 20 / 10 / 40`. Sum = 100 ± 0.01. Không nhầm Team/Project group weights (`0..1`, sum `1.0`).
 
 ```http
 GET /api/v1/courses/{courseId}/contribution-slice-weights
@@ -48,13 +81,13 @@ PUT /api/v1/courses/{courseId}/contribution-slice-weights
 PUT body — **không** `lecturerId` / `adminId`:
 
 ```json
-{ "codeWeight": 30, "documentWeight": 20, "designWeight": 50 }
+{ "codeWeight": 30, "testWeight": 20, "documentWeight": 10, "researchWeight": 40 }
 ```
 
 - GET: ADMIN mọi Course; LECTURER chỉ Course mình dạy
 - PUT: LECTURER exact instructor; other Course / STUDENT / ADMIN → 403
 - PUT cần CSRF; GET không
-- Direct PUT chỉ sửa Course fallback. Precedence: exact Project+Team `ProjectGroupWeightConfig` trước, Course weights sau.
+- **Không còn "precedence" (Project+Team trước, Course sau).** Course dùng một trong hai mode loại trừ nhau (`Course.contributionConfigMode`): PUT này chỉ có hiệu lực khi Course đang ở `COURSE` mode. Khi Course ở `TEAM` mode, mọi Team phải có `ProjectGroupWeightConfig` riêng qua `PUT /api/projects/{projectId}/group-weights` — không Team nào fallback về giá trị PUT này. Xem section "Contribution weight: Course-default + optional exclusive Team override (DEC-088)" ở đầu file cho chi tiết mode switch.
 - Legacy request → Admin decision vẫn tồn tại; **new FE không dùng** cho normal Course-weight editing.
 
 ## J1J Update Priority business contract — 2026-08-10
@@ -1346,7 +1379,9 @@ Contribution API dùng session. Tất cả mutation phải gửi CSRF; GET khôn
 | GET | `/api/v1/teams/{teamId}/contribution-evaluation` | ADMIN, LECTURER, STUDENT | ADMIN mọi Team; LECTURER chỉ Course mình phụ trách; STUDENT chỉ exact `RoleInTeam.LEADER` của chính Team. MEMBER/MENTOR/cross-Team Leader 403 | `200 TeamContributionEvaluationResponse` |
 | POST | `/api/v1/teams/{teamId}/contribution-override` | ADMIN, LECTURER | ADMIN mọi Team; LECTURER phải là Course instructor | `200 ContributionOverrideResponse` |
 | GET | `/api/v1/courses/{courseId}/contribution-slice-weights` | ADMIN, LECTURER | ADMIN mọi Course; LECTURER chỉ exact Course instructor. Actor từ `SagaPrincipal` | `200 CourseContributionSliceWeightResponse` |
-| PUT | `/api/v1/courses/{courseId}/contribution-slice-weights` | LECTURER | Official new FE mutation. Exact Course instructor; no `lecturerId`. Other Course / STUDENT / ADMIN 403. CSRF required. Scale 0–100, sum 100 ± 0.01 | `200 CourseContributionSliceWeightResponse` |
+| PUT | `/api/v1/courses/{courseId}/contribution-slice-weights` | LECTURER | Official new FE mutation. Exact Course instructor; no `lecturerId`. Other Course / STUDENT / ADMIN 403. CSRF required. Scale 0–100, sum 100 ± 0.01. `{codeWeight,testWeight,documentWeight,researchWeight}`. Only authoritative while Course is in `COURSE` mode | `200 CourseContributionSliceWeightResponse` |
+| PUT | `/api/v1/courses/{courseId}/contribution-config-mode` | LECTURER | Exact Course instructor, CSRF required. `{"mode":"COURSE"\|"TEAM"}`. Activating `TEAM` requires every current Team to already have a valid `group-weights` override (atomic; 409 `TEAM_MODE_CONFIGURATION_INCOMPLETE` if any is missing) | `200 ContributionConfigModeResponse` |
+| GET | `/api/v1/courses/{courseId}/contribution-team-weights` | ADMIN, LECTURER | Team-menu read: current mode + effective weights + source per Team | `200 CourseTeamContributionWeightsResponse` |
 | POST | `/api/v1/courses/{courseId}/contribution-slice-weight-requests` | LECTURER | **Legacy / deprecated for new FE.** Body `lecturerId` phải là instructor; chưa bind actor hoàn toàn với principal | `200 CourseContributionSliceWeightRequestResponse` |
 | GET | `/api/v1/courses/contribution-slice-weight-requests` | ADMIN, LECTURER | Legacy list. ADMIN xem theo filter; LECTURER được scope theo principal/Course của mình | `200` danh sách request |
 | PUT | `/api/v1/courses/contribution-slice-weight-requests/{requestId}/decision` | ADMIN | **Legacy.** Decision dùng `adminId` nullable từ body | `200 CourseContributionSliceWeightRequestResponse` |

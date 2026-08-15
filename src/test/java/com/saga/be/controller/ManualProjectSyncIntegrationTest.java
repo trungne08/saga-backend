@@ -32,6 +32,7 @@ import com.saga.be.repository.JiraBoardRepository;
 import com.saga.be.repository.LecturerRepository;
 import com.saga.be.repository.ProjectRepository;
 import com.saga.be.repository.StudentRepository;
+import com.saga.be.repository.SyncJobLogRepository;
 import com.saga.be.repository.TeamMemberRepository;
 import com.saga.be.repository.TeamRepository;
 import com.saga.be.security.ApplicationRole;
@@ -68,6 +69,7 @@ class ManualProjectSyncIntegrationTest {
     @Autowired private JiraBoardRepository jiraBoardRepository;
     @Autowired private GitHubInstallationRepository installationRepository;
     @Autowired private GitRepoRepository gitRepoRepository;
+    @Autowired private SyncJobLogRepository syncJobLogRepository;
 
     @MockitoBean private ManualReconciliationExecutor executor;
     @MockitoBean private IntegrationAvailability availability;
@@ -76,8 +78,18 @@ class ManualProjectSyncIntegrationTest {
     @MockitoBean private GitHubProviderClient gitHubProviderClient;
 
     @AfterEach
-    void providerWasNeverCalledFromControllerRequest() {
+    void cleanUp() {
         verifyNoInteractions(jiraProviderClient, gitHubProviderClient);
+        syncJobLogRepository.deleteAll();
+        gitRepoRepository.deleteAll();
+        jiraBoardRepository.deleteAll();
+        installationRepository.deleteAll();
+        teamMemberRepository.deleteAll();
+        teamRepository.deleteAll();
+        projectRepository.deleteAll();
+        studentRepository.deleteAll();
+        courseRepository.deleteAll();
+        lecturerRepository.deleteAll();
     }
 
     @Test

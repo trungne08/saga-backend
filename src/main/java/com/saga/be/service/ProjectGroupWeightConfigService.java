@@ -18,6 +18,12 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+/**
+ * Per-Team Contribution weight override, used only when the owning Course is in
+ * {@link com.saga.be.entity.enums.ContributionConfigMode#TEAM} mode. Storage stays 0..1 (matching
+ * the existing {@code project_group_weight_config} schema); the public Course API uses 0..100 —
+ * the boundary normalization stays in the service layer, the DB unit is unchanged.
+ */
 @Service
 public class ProjectGroupWeightConfigService {
 
@@ -66,24 +72,27 @@ public class ProjectGroupWeightConfigService {
         }
 
         BigDecimal codeWeight = requireWeightInRange(request.codeWeight(), "codeWeight");
+        BigDecimal testWeight = requireWeightInRange(request.testWeight(), "testWeight");
         BigDecimal documentWeight = requireWeightInRange(request.documentWeight(), "documentWeight");
-        BigDecimal designWeight = requireWeightInRange(request.designWeight(), "designWeight");
-        BigDecimal total = codeWeight.add(documentWeight).add(designWeight);
+        BigDecimal researchWeight = requireWeightInRange(request.researchWeight(), "researchWeight");
+        BigDecimal total = codeWeight.add(testWeight).add(documentWeight).add(researchWeight);
         if (total.compareTo(BigDecimal.ONE) != 0) {
             throw IntegrationException.invalid(
                     "GROUP_WEIGHT_SUM_INVALID",
-                    "codeWeight, documentWeight and designWeight must add up to exactly 1.0"
+                    "codeWeight, testWeight, documentWeight and researchWeight must add up to exactly 1.0"
             );
         }
 
         ProjectGroupWeightConfig config = configRepository.findByProjectId(projectId)
                 .orElseGet(() -> ProjectGroupWeightConfig.builder()
                         .project(project)
+                        .designWeight(BigDecimal.ZERO)
                         .build());
         config.setTeam(team);
         config.setCodeWeight(codeWeight);
+        config.setTestWeight(testWeight);
         config.setDocumentWeight(documentWeight);
-        config.setDesignWeight(designWeight);
+        config.setResearchWeight(researchWeight);
         config.setNote(normalizeNote(request.note()));
         config.setUpdatedByProfileId(principal.localProfileId());
 

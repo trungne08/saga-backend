@@ -9,8 +9,9 @@ public record ProjectGroupWeightConfigResponse(
         UUID projectId,
         UUID groupId,
         BigDecimal codeWeight,
+        BigDecimal testWeight,
         BigDecimal documentWeight,
-        BigDecimal designWeight,
+        BigDecimal researchWeight,
         String note,
         LocalDateTime updatedAt,
         UUID updatedByProfileId
@@ -20,8 +21,9 @@ public record ProjectGroupWeightConfigResponse(
                 config.getProject().getId(),
                 config.getTeam().getId(),
                 config.getCodeWeight(),
+                config.getTestWeight(),
                 config.getDocumentWeight(),
-                config.getDesignWeight(),
+                config.getResearchWeight(),
                 config.getNote(),
                 config.getUpdatedAt(),
                 config.getUpdatedByProfileId()

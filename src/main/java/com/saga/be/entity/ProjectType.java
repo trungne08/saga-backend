@@ -18,6 +18,12 @@ import lombok.Setter;
 @Builder
 public class ProjectType extends BaseEntity {
 
+    /** Fixed canonical SAGA catalog codes seeded by {@code V34__replace_project_type_with_canonical_catalog.sql}. */
+    public static final String CODE_DESIGN_ARCHITECTURE = "DESIGN_ARCHITECTURE";
+    public static final String CODE_RESEARCH = "RESEARCH";
+    public static final String CODE_TESTER = "TESTER";
+    public static final String CODE_DOCUMENT = "DOCUMENT";
+
     @Column(name = "code", nullable = false, unique = true)
     private String code;
 

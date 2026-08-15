@@ -1,3 +1,48 @@
+## Task-is-sole-numeric-authority + reserved Contribution markers (DEC-089, foundation only, 2026-08-15)
+
+No route added/removed — internal scoring-engine change only. Migration head **V36 → V37**.
+
+- `TEST_SLICE_CLASSIFICATION`/`RESEARCH_SLICE_CLASSIFICATION` are **no longer unconditionally `TBD_PRODUCT_RULE`** — a DONE Task whose `labels` contains the exact reserved marker `saga:test`/`saga:research` (case-sensitive exact match, no substring) routes its story points into that criterion, so `testContributionScore`/`researchContributionScore` in the Contribution evaluation response can now be genuinely non-zero. Absent that marker, they remain `0` exactly as before. Provider-sourced (Jira/GitHub attachment, commit-via-traceability) evidence remains `TBD_PRODUCT_RULE` — not implemented this turn.
+- A Task carrying more than one conflicting reserved marker (e.g. `saga:test` + `saga:research`) is excluded from all four criteria (`AMBIGUOUS`) — never pick-first-resolved. No new error response; it's silent in the score.
+- `TASK_IS_SOLE_NUMERIC_AUTHORITY_WHEN_LINKED = YES` — a commit linked to a Task no longer contributes any additional score; only the Task's own DONE-completion storyPoint counts. Fixes a latent double-count path in the pre-existing formula (a Task that was both DONE-and-assigned and had a task-linked commit would previously be counted twice).
+- `V37__fold_legacy_design_weight_into_document.sql` supersedes `LEGACY_DESIGN_WEIGHT_MIGRATION = TBD` from DEC-088's earlier draft: `document = document + design; design = 0` for both `course` and `project_group_weight_config`. `code`/`test`/`research` columns are never written by this migration. Guard (corrected after audit — the naive "design ≠ 0" check was unsafe): only folds a row where `code+test+document+research+design` still equals exactly 100/1.0, i.e. design is genuinely the missing piece of an untouched legacy total; a row already validly configured with the active four fields alone summing to 100/1.0 is left untouched. Proven by an executed test against real H2 (`LegacyDesignWeightFoldMigrationContractTest`), not string matching.
+
+## Contribution weight: Course-default + optional exclusive Team override (DEC-088, supersedes DEC-087, 2026-08-15)
+
+| Method | Path | Success | Auth / CSRF | Semantics |
+| --- | --- | --- | --- | --- |
+| GET | `/api/v1/courses/{courseId}/contribution-slice-weights` | 200, four weights sum 100 | ADMIN all; LECTURER exact instructor; no CSRF | Authoritative only while Course is in `COURSE` mode; applies to every Team while active |
+| PUT | `/api/v1/courses/{courseId}/contribution-slice-weights` | 200, updated four weights | LECTURER exact instructor + CSRF | `{codeWeight,testWeight,documentWeight,researchWeight}` all required, sum 100 ± 0.01; ADMIN/STUDENT/other Course 403 |
+| PUT | `/api/projects/{projectId}/group-weights` | 200, updated Team override (0..1 scale) | ADMIN or exact Course-instructor LECTURER + CSRF | **Revived** (was removed by DEC-087). `{groupId,codeWeight,testWeight,documentWeight,researchWeight,note?}`, sum exactly 1.0. Authoritative only while Course is in `TEAM` mode (writable any time as a "draft") |
+| PUT | `/api/v1/courses/{courseId}/contribution-config-mode` | 200, new mode | LECTURER exact instructor + CSRF | `{"mode":"COURSE"\|"TEAM"}`. Activating `TEAM` requires every current Team to already have a valid `group-weights` override — 409 `TEAM_MODE_CONFIGURATION_INCOMPLETE` if any is missing (atomic, no partial activation). Activating `COURSE` never deletes Team overrides |
+| GET | `/api/v1/courses/{courseId}/contribution-team-weights` | 200, mode + per-Team effective weights/source | ADMIN, LECTURER | New team-menu read endpoint |
+
+OpenAPI operation count **148 (DEC-087) → 151** (one PUT revived, one PUT + one GET added). Migration head **V35 → V36**. `PROJECT_GROUP_WEIGHT_CONTRIBUTION_AUTHORITY = YES, but only while the owning Course is in TEAM mode` — resolution is mode-aware and fail-closed (`ContributionSliceWeightResolver`), never a Team→Course fallback. `DESIGN_CRITERION_ACTIVE = NO` — DESIGN retired from the Contribution criteria universe (`CODE/TEST/DOCUMENT/RESEARCH`); it remains a `ProjectType` catalog value only, unrelated to Contribution weight.
+
+`TEST_SLICE_CLASSIFICATION`/`RESEARCH_SLICE_CLASSIFICATION = TBD_PRODUCT_RULE`: `testWeight`/`researchWeight` are accepted/stored/read-back (schema backward-safe) but always treated as zero-evidence slices during Contribution calculation — no authoritative testing/QA or research evidence marker exists yet, so their budget is always redistributed to Code/Document and `testContributionScore`/`researchContributionScore` (and percentages) are always `0`. `V35`/`V36` migrations do **not** rewrite existing rows: prior Code/Document values are preserved as-is; only the new columns are added, defaulting to `0`/`COURSE`. `LEGACY_DESIGN_WEIGHT_MIGRATION = TBD` — no safe formula exists to convert historical `design_contribution_weight`/`design_weight` into `research`; those columns are retained purely as historical/inactive data.
+
+## Course-wide 4-slice Contribution weights (DEC-087, SUPERSEDED BY DEC-088 above, 2026-08-15)
+
+| Method | Path | Success | Auth / CSRF | Semantics |
+| --- | --- | --- | --- | --- |
+| GET | `/api/v1/courses/{courseId}/contribution-slice-weights` | 200, four weights sum 100 | ADMIN all; LECTURER exact instructor; no CSRF | Course-only authority; applies to every Team in the Course |
+| PUT | `/api/v1/courses/{courseId}/contribution-slice-weights` | 200, updated four weights | LECTURER exact instructor + CSRF | `{codeWeight,testWeight,documentWeight,designWeight}` all required, sum 100 ± 0.01; ADMIN/STUDENT/other Course 403 |
+| PUT | `/api/projects/{projectId}/group-weights` | **removed** — route no longer mapped | n/a | `ProjectGroupWeightConfig` retained as historical data only; never read by Contribution |
+
+OpenAPI operation count **149 → 148** (one public PUT removed, PASS). Migration head **V34 → V35**. `PROJECT_GROUP_WEIGHT_CONTRIBUTION_AUTHORITY = NO`. Historical `ProjectGroupWeightConfig` rows verified ignored by regression test.
+
+`TEST_SLICE_CLASSIFICATION = TBD_PRODUCT_RULE`: `testWeight` is accepted/stored/read-back (schema backward-safe) but always treated as a zero-evidence slice during Contribution calculation — no `TaskType.TEST`/`DocumentType.TEST` or authoritative marker exists yet, so its budget is always redistributed to Code/Document/Design and `testContributionScore`/`testContributionPercentage` are always `0`. `V35` migration does **not** rewrite existing Course rows: `code_contribution_weight`/`document_contribution_weight`/`design_contribution_weight` are preserved as-is; only the new `test_contribution_weight` column is added, defaulting to `0` for pre-existing rows. New Course rows created after V35 get `25/25/25/25` from the application-level default (`Course#applyDefaultContributionWeights`), not from the migration.
+
+## ProjectType fixed canonical catalog (DEC-086, 2026-08-15)
+
+| Method | Path | Success | Auth / CSRF | Semantics |
+| --- | --- | --- | --- | --- |
+| GET | `/api/project-types` | 200, exactly 4 canonical rows | Authenticated ADMIN/LECTURER/STUDENT; no CSRF | Fixed migration-seeded catalog (`DESIGN_ARCHITECTURE`/`RESEARCH`/`TESTER`/`DOCUMENT`); never `[]` after migration; does not decide Contribution weight (see DEC-088 above) |
+| POST | `/api/project-types` | **removed** — route no longer mapped | n/a | Existing app-wide gap: unmapped POST on a mapped path falls through `GlobalExceptionHandler`'s generic `Exception` handler as 500, not a dedicated 405 |
+| POST | `/api/teams/{teamId}/projects` | created Project with ProjectType | existing TeamProject auth + CSRF | Unchanged: `projectTypeId` required → `PROJECT_TYPE_REQUIRED`; unknown → `PROJECT_TYPE_NOT_FOUND` |
+
+OpenAPI operation count **150 → 149** (one public POST removed, PASS). Migration head **V33 → V34**. `PROJECT_TYPE_ADMIN_CREATE = REMOVED`. Existing Project rows read back `projectType: null` after the catalog reset (legacy-compatible, product-approved).
+
 ## Student progress LEADER exact-Team (DEC-085, 2026-08-15)
 
 | Method | Path | Success | Auth / CSRF | Semantics |

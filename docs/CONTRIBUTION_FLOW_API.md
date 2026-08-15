@@ -30,7 +30,10 @@ Tài liệu này mô tả đúng các API hiện có trong code để FE tích h
 
 - Peer review
 - Xem đánh giá đóng góp
-- Lecturer sửa trực tiếp trọng số slice Course (`PUT .../contribution-slice-weights`)
+- Lecturer sửa trực tiếp trọng số slice Course (`PUT .../contribution-slice-weights`, `COURSE` mode)
+- Lecturer sửa trọng số slice theo Team/Project (`PUT /api/projects/{projectId}/group-weights`, `TEAM` mode)
+- Chuyển mode Course-wide Contribution config (`PUT .../contribution-config-mode`)
+- Team-menu read (`GET .../contribution-team-weights`)
 - Legacy đề nghị/duyệt trọng số slice (backward-compatible, deprecated for new FE)
 - Individual contribution override (`POST .../contribution-override`) — unchanged
 
@@ -288,10 +291,12 @@ quyết định quyền bằng UI.
       "studentCode": "SE001",
       "codeContributionScore": 12.5,
       "documentContributionScore": 4.0,
-      "designContributionScore": 0.0,
       "codeContributionPercentage": 32.1,
       "documentContributionPercentage": 10.2,
-      "designContributionPercentage": 0.0,
+      "testContributionScore": 0.0,
+      "testContributionPercentage": 0.0,
+      "researchContributionScore": 0.0,
+      "researchContributionPercentage": 0.0,
       "peerReviewScore": 18.0,
       "taskContributionScore": 16.5,
       "taskContributionPercentage": 42.3,
@@ -318,7 +323,15 @@ quyết định quyền bằng UI.
   committed snapshot theo thời điểm bắt đầu Sprint.
 - `finalContributionPercentage` là % cuối cùng để hiển thị cho ADMIN, Lecturer đúng Course hoặc
   Student LEADER đúng Team theo authorization ở trên.
-- `code/document/design` là breakdown theo slice.
+- `code/document` là breakdown theo slice thực tế có evidence (evidence từng gán DESIGN nay gộp vào `document`).
+- **(Cập nhật DEC-089)** `testContributionScore`/`testContributionPercentage` và
+  `researchContributionScore`/`researchContributionPercentage` **không còn hardcode `0`** — nếu một
+  Task DONE trong Team/Project mang nhãn Jira chính xác `saga:test` hoặc `saga:research` (exact
+  match, không substring/fuzzy), giá trị này phản ánh evidence thật. Nếu không có Task nào mang
+  marker đó, giữ nguyên `0` như trước. Đây vẫn chỉ là **foundation Task-marker path** — evidence từ
+  Jira/GitHub attachment hoặc commit-via-traceability chưa được implement (block bởi runtime TBD),
+  nên FE không nên coi 4-tiêu-chí scoring là hoàn tất toàn diện, chỉ path Task-marker là thật.
+  Xem `CONTRIBUTION_PERCENTAGE_LOGIC.md` section 3.0.
 - `taskContributionPercentage` là % contribution phần task sau normalize.
 - Response DTO thực tế chỉ gồm các field trong `TeamContributionMemberResponse`.
 - Privacy audit: response không có email, Cognito subject, provider credential, raw Peer Review
@@ -326,19 +339,36 @@ quyết định quyền bằng UI.
 
 ---
 
-## 3) Slice weight theo course
+## 3) Slice weight theo course / team (DEC-088, supersedes DEC-087's Course-only model)
 
-Course Code/Document/Design weights dùng thang **0..100**, tổng 100 ± 0.01.
-Không nhầm với Project group weights (`PUT /api/projects/{projectId}/group-weights`, thang **0..1**, tổng 1.0).
+Criteria universe = **Code/Test/Document/Research** (DESIGN retired khỏi Contribution, vẫn là
+ProjectType catalog value độc lập). Course weights dùng thang **0..100**, tổng 100 ± 0.01.
+Team/Project override dùng thang **0..1**, tổng đúng `1.0`.
 
-Contribution **calculation** precedence (không đổi arithmetic):
+**Authority = mode-aware trên `Course.contributionConfigMode`, không còn "Course-only".** Mỗi
+Course có đúng một mode active:
 
-1. exact Project+Team `ProjectGroupWeightConfig` nếu có
-2. nếu không → Course contribution slice weights (fallback)
+- **`COURSE`** (default): mọi Team thuộc Course dùng chung đúng một bộ bốn trọng số Course.
+- **`TEAM`**: **mọi** Team hiện tại của Course bắt buộc có `ProjectGroupWeightConfig` riêng hợp lệ.
+  Thiếu một Team = "chưa hoàn tất" — Contribution của Team đó **không tính được**
+  (`TEAM_WEIGHT_CONFIG_INCOMPLETE`), tuyệt đối **không** fallback về Course weights.
 
-Lecturer direct PUT chỉ sửa Course fallback config.
+**Không có mode hỗn hợp** ("Team override nếu có, không thì Course") — bị cấm tường minh. FE không
+được tự suy diễn/giả lập hành vi này ở client.
 
-### 3.1 Xem trọng số hiện tại (Course fallback)
+`PUT /api/projects/{projectId}/group-weights` **đã được hồi sinh** (từng bị xóa ở milestone
+Course-only trước đó) — xem section 3.4.
+
+**`testWeight`/`researchWeight` hiện chưa ảnh hưởng kết quả tính điểm**
+(`TEST_SLICE_CLASSIFICATION`/`RESEARCH_SLICE_CLASSIFICATION = TBD_PRODUCT_RULE` — xem
+`CONTRIBUTION_PERCENTAGE_LOGIC.md`). Giá trị vẫn được lưu/đọc lại đúng qua API, nhưng `evaluate`
+luôn coi hai slice này là không có evidence nên tự phân bổ lại ngân sách đó cho Code/Document.
+
+**Existing Course và Team weight rows giữ nguyên giá trị Code/Document cũ** sau các migration V35/V36
+— không bị reset. Các cột mới (`testWeight`/`researchWeight`/`contributionConfigMode`) mặc định
+`0`/`0`/`COURSE` cho row đã tồn tại trước đó.
+
+### 3.1 Xem trọng số hiện tại (Course)
 
 `GET /api/v1/courses/{courseId}/contribution-slice-weights`
 
@@ -353,9 +383,10 @@ Actor từ `SagaPrincipal.localProfileId`. Session `JSESSIONID`, `credentials: i
   "courseId": "uuid",
   "courseCode": "SAGA101",
   "courseName": "Software Engineering",
-  "codeWeight": 33.3333333333,
-  "documentWeight": 33.3333333333,
-  "designWeight": 33.3333333333
+  "codeWeight": 25.0,
+  "testWeight": 25.0,
+  "documentWeight": 25.0,
+  "researchWeight": 25.0
 }
 ```
 
@@ -372,18 +403,98 @@ Không gửi `lecturerId` / `adminId`. Actor từ principal. CSRF required. Khô
 ```json
 {
   "codeWeight": 30,
+  "testWeight": 10,
   "documentWeight": 20,
-  "designWeight": 50
+  "researchWeight": 40
 }
 ```
 
-**Response:** cùng shape `CourseContributionSliceWeightResponse` như GET.
+Bốn field đều bắt buộc, mỗi field `>= 0`, tổng phải xấp xỉ `100` (tolerance `0.01`). FE không được
+gửi thiếu `testWeight`/`researchWeight` hoặc tự bịa giá trị nếu Lecturer không nhập.
+
+**Response:** cùng shape `CourseContributionSliceWeightResponse` như GET (kèm `testWeight`/`researchWeight`).
+Một lần PUT chỉ có hiệu lực khi Course đang ở `COURSE` mode — khi đó áp dụng ngay cho **tất cả
+Team** thuộc Course đó. Khi Course ở `TEAM` mode, PUT này vẫn ghi được (giữ vai trò "Course default
+dự phòng" cho lần quay lại COURSE mode sau này) nhưng **không** ảnh hưởng Contribution của bất kỳ
+Team nào cho tới khi mode chuyển về `COURSE`.
+
+### 3.4 Team/Project override (TEAM mode)
+
+`PUT /api/projects/{projectId}/group-weights`
+
+**Controller:** không có `@PreAuthorize` role annotation — mọi authenticated request tới đây, service
+tự kiểm tra.
+
+**Effective service authorization:** ADMIN, hoặc đúng LECTURER phụ trách Course sở hữu Team của
+Project đó. **Không** mở cho Student/Leader dù các route Team khác cho phép Leader quản lý Team —
+route này cố ý dùng authorization hẹp hơn theo quyết định sản phẩm.
+
+**Request body** (0..1 scale, không phải 0..100):
+```json
+{
+  "groupId": "uuid",
+  "codeWeight": 0.5,
+  "testWeight": 0.2,
+  "documentWeight": 0.2,
+  "researchWeight": 0.1,
+  "note": "optional"
+}
+```
+
+`groupId` phải đúng Team sở hữu `projectId` trong path, ngược lại `400 GROUP_PROJECT_MISMATCH`. Mỗi
+field `>= 0` và `<= 1`; tổng phải đúng bằng `1.0` (không có tolerance). Ghi được bất kỳ lúc nào (kể
+cả khi Course đang ở `COURSE` mode, coi như "draft") nhưng chỉ được `ContributionSliceWeightResolver`
+đọc sau khi Course chuyển sang `TEAM` mode.
+
+**Response:** `ProjectGroupWeightConfigResponse` — `{projectId, groupId, codeWeight, testWeight, documentWeight, researchWeight, note, updatedAt, updatedByProfileId}`.
+
+### 3.5 Chuyển mode COURSE ↔ TEAM
+
+`PUT /api/v1/courses/{courseId}/contribution-config-mode`
+
+**Effective service authorization:** LECTURER exact Course instructor only. CSRF required.
+
+**Request body**
+```json
+{ "mode": "TEAM" }
+```
+
+Chuyển sang `TEAM`: backend audit **toàn bộ** Team hiện tại (chưa xoá) của Course — nếu **bất kỳ**
+Team nào thiếu `ProjectGroupWeightConfig` hợp lệ, request bị từ chối nguyên khối với `409
+TEAM_MODE_CONFIGURATION_INCOMPLETE` và mode giữ nguyên `COURSE` (không có trạng thái kích hoạt một
+phần). FE nên hướng dẫn Lecturer cấu hình đủ mọi Team (section 3.4) trước khi gọi endpoint này.
+
+Chuyển về `COURSE`: luôn thành công (Course weights luôn có giá trị hợp lệ nhờ default tầng
+application). `ProjectGroupWeightConfig` của các Team **không bị xoá** — trở thành historical/inactive,
+tái sử dụng được nếu Course quay lại `TEAM` mode sau này. Team tạo mới sau khi `TEAM` mode đã active
+không tự động thừa hưởng Course weights — vẫn cần override riêng trước khi Contribution tính được.
+
+**Response:** `ContributionConfigModeResponse` — `{courseId, mode}`.
+
+### 3.6 Team-menu read
+
+`GET /api/v1/courses/{courseId}/contribution-team-weights`
+
+**Controller role annotation:** ADMIN, LECTURER.
+
+Trả về mode hiện tại của Course cùng effective weights + nguồn (`COURSE` hoặc override) cho từng
+Team — dùng để dựng màn hình "trọng số hiện tại theo Team" mà không cần FE tự suy diễn resolver
+logic ở client.
 
 ---
 
-### 3.3 Legacy / backward compatibility / deprecated for new FE
+### 3.7 Legacy / backward compatibility / deprecated for new FE
 
 Các endpoint dưới **vẫn tồn tại** trong source. Không ghi REMOVED. New FE **không** dùng Lecturer request → Admin decision cho normal Course-weight editing.
+
+**Không mở rộng với `testWeight`/`researchWeight`** (không còn consumer FE mới): request/response
+giữ nguyên ba field `{codeWeight, documentWeight, designWeight}` tổng 100 — DTO legacy này không đổi
+tên field theo DEC-088. Khi Admin duyệt (`APPROVED`), backend ghi `code`/`document` trực tiếp vào
+Course, ghi giá trị `design` đề xuất verbatim vào cột đã inactive `design_contribution_weight` (giữ
+lại cho lịch sử, không discard, không tự suy diễn map sang `research`), và đặt `testWeight = 0`.
+Việc này an toàn dù tổng bốn cột active có thể không đúng 100 theo nghĩa thô, vì
+`ContributionSliceWeights.fromCourse` luôn renormalize theo tổng các slice đang active khi tính
+Contribution thật.
 
 #### Gửi yêu cầu đổi trọng số (legacy)
 
@@ -513,10 +624,12 @@ của Course chứa Team. Với LECTURER, actor lấy từ principal; với ADMI
 2. Student submit `POST .../peer-reviews`
 3. Lecturer xem `GET .../peer-reviews`
 4. Lecturer đúng Course hoặc Student LEADER đúng Team xem `GET .../contribution-evaluation`
-5. Lecturer đúng Course gọi `PUT .../contribution-slice-weights` (CSRF) khi cần sửa Course fallback weights
-6. Legacy `POST .../contribution-slice-weight-requests` rồi Admin `PUT .../decision` vẫn tồn tại nhưng **deprecated for new FE**
-7. Lecturer/admin có thể dùng `POST .../contribution-override` khi cần chỉnh tay có lý do (individual override, không đổi)
-8. FE lấy `GET /api/v1/projects/{projectId}/sprints` hoặc `GET /api/v1/teams/{teamId}/sprints` để chọn `sprintId` trước khi vào luồng contribution/peer review
+5. Lecturer đúng Course gọi `PUT .../contribution-slice-weights` (CSRF) khi Course đang ở `COURSE` mode
+6. Nếu muốn dùng `TEAM` mode: Lecturer gọi `PUT /api/projects/{projectId}/group-weights` (CSRF) cho **từng** Team hiện tại trước, rồi gọi `PUT .../contribution-config-mode` `{"mode":"TEAM"}` để activate — bị từ chối `409` nếu còn Team thiếu override
+7. FE dùng `GET .../contribution-team-weights` để hiển thị mode hiện tại + effective weight từng Team, không tự suy diễn ở client
+8. Legacy `POST .../contribution-slice-weight-requests` rồi Admin `PUT .../decision` vẫn tồn tại nhưng **deprecated for new FE**
+9. Lecturer/admin có thể dùng `POST .../contribution-override` khi cần chỉnh tay có lý do (individual override, không đổi)
+10. FE lấy `GET /api/v1/projects/{projectId}/sprints` hoặc `GET /api/v1/teams/{teamId}/sprints` để chọn `sprintId` trước khi vào luồng contribution/peer review
 
 ### Quan trọng về `sprintId`
 

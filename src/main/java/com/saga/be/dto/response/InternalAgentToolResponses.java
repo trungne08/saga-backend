@@ -88,7 +88,7 @@ public final class InternalAgentToolResponses {
             String studentCode,
             double codeContributionPercentage,
             double documentContributionPercentage,
-            double designContributionPercentage,
+            double researchContributionPercentage,
             double taskContributionPercentage,
             double finalContributionPercentage,
             int evidenceCount

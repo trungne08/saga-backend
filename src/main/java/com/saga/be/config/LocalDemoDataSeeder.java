@@ -57,7 +57,6 @@ public class LocalDemoDataSeeder implements ApplicationRunner {
     static final String COURSE_CODE = "SAGA-LOCAL-DEMO";
     static final String TEAM_NAME = "SAGA Local Demo Team";
     static final String PROJECT_NAME = "SAGA Local Demo Project";
-    static final String PROJECT_TYPE_CODE = "SAGA-LOCAL-DEMO";
     private static final String DEMO_INSTRUCTOR_EMAIL = "local-demo-instructor@saga.invalid";
 
     private final String leaderCognitoSub;
@@ -231,13 +230,10 @@ public class LocalDemoDataSeeder implements ApplicationRunner {
     }
 
     private ProjectType ensureProjectType() {
-        return projectTypeRepository.findAllByOrderByNameAsc().stream()
-                .filter(type -> PROJECT_TYPE_CODE.equals(type.getCode()))
-                .findFirst()
-                .orElseGet(() -> projectTypeRepository.save(ProjectType.builder()
-                        .code(PROJECT_TYPE_CODE)
-                        .name("SAGA Local Demo Project Type")
-                        .description("Local demo project type used only by the opt-in local seeder")
-                        .build()));
+        return projectTypeRepository.findByCode(ProjectType.CODE_DESIGN_ARCHITECTURE)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Canonical ProjectType '" + ProjectType.CODE_DESIGN_ARCHITECTURE
+                                + "' is missing; run the project_type catalog migration before seeding local demo data"
+                ));
     }
 }

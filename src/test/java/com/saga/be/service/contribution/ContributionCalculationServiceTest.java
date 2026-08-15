@@ -6,7 +6,6 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import com.saga.be.entity.CommitData;
 import com.saga.be.entity.Course;
 import com.saga.be.entity.PeerReview;
 import com.saga.be.entity.Project;
@@ -17,10 +16,8 @@ import com.saga.be.entity.Subject;
 import com.saga.be.entity.Team;
 import com.saga.be.entity.TeamMember;
 import com.saga.be.entity.Task;
-import com.saga.be.entity.enums.DocumentType;
 import com.saga.be.entity.enums.TaskStatus;
 import com.saga.be.entity.enums.TaskType;
-import com.saga.be.repository.CommitDataRepository;
 import com.saga.be.repository.DocumentRepository;
 import com.saga.be.repository.PeerReviewRepository;
 import com.saga.be.repository.ProjectGroupWeightConfigRepository;
@@ -39,33 +36,35 @@ class ContributionCalculationServiceTest {
 
     @Test
     void calculatesProjectScopedScoresPercentsAndMixedOverrideDeterministically() {
+        // Product decision: Task is the sole numeric Contribution authority — evidence must come
+        // from genuinely DONE+assigned Tasks (via taskRepository.findByProjectIdAndAssigneeId),
+        // not from commit links, which never mint additional score of their own.
         Fixture fixture = fixture();
         Task firstCodeTask = new Task();
+        firstCodeTask.setStatus(TaskStatus.DONE);
+        firstCodeTask.setAssignee(fixture.first);
         firstCodeTask.setStoryPoint(1);
         firstCodeTask.setLabels(List.of("backend"));
         Task secondCodeTask = new Task();
+        secondCodeTask.setStatus(TaskStatus.DONE);
+        secondCodeTask.setAssignee(fixture.first);
         secondCodeTask.setStoryPoint(1);
         secondCodeTask.setLabels(List.of("backend"));
         Task secondDesignTask = new Task();
-        secondDesignTask.setStoryPoint(1);
+        secondDesignTask.setStatus(TaskStatus.DONE);
+        secondDesignTask.setAssignee(fixture.second);
+        secondDesignTask.setStoryPoint(2);
         secondDesignTask.setLabels(List.of("ui-ux", "design"));
-        when(fixture.commitRepository.findByAuthorIdAndProjectIdAndTaskIsNotNull(
-                fixture.first.getId(), fixture.projectId)).thenReturn(List.of(
-                        commitWithTask(firstCodeTask),
-                        commitWithTask(secondCodeTask)
-                ));
-        when(fixture.commitRepository.findByAuthorIdAndProjectIdAndTaskIsNotNull(
-                fixture.second.getId(), fixture.projectId)).thenReturn(List.of(
-                        commitWithTask(secondDesignTask)
-                ));
-        when(fixture.documentRepository.countByProjectIdAndAuthorIdAndTypeNot(
-                fixture.projectId, fixture.first.getId(), DocumentType.DESIGN)).thenReturn(1L);
-        when(fixture.documentRepository.countByProjectIdAndAuthorIdAndType(
-                fixture.projectId, fixture.second.getId(), DocumentType.DESIGN)).thenReturn(1L);
-        when(fixture.taskRepository.sumDoneEffectiveStoryPoints(
-                fixture.projectId, fixture.sprint.getId(), fixture.first.getId())).thenReturn(3L);
-        when(fixture.taskRepository.sumDoneEffectiveStoryPoints(
-                fixture.projectId, fixture.sprint.getId(), fixture.second.getId())).thenReturn(1L);
+        when(fixture.taskRepository.findByProjectIdAndAssigneeId(fixture.projectId, fixture.first.getId()))
+                .thenReturn(List.of(firstCodeTask, secondCodeTask));
+        when(fixture.taskRepository.findByProjectIdAndAssigneeId(fixture.projectId, fixture.second.getId()))
+                .thenReturn(List.of(secondDesignTask));
+        when(fixture.taskRepository.findByProjectIdAndAssigneeId(fixture.projectId, fixture.third.getId()))
+                .thenReturn(List.of());
+        when(fixture.documentRepository.countByProjectIdAndAuthorId(
+                fixture.projectId, fixture.first.getId())).thenReturn(1L);
+        when(fixture.documentRepository.countByProjectIdAndAuthorId(
+                fixture.projectId, fixture.second.getId())).thenReturn(1L);
 
         ProjectContributionCalculation first = fixture.service.calculate(
                 fixture.projectId,
@@ -81,14 +80,16 @@ class ContributionCalculationServiceTest {
         ContributionBreakdown thirdStudent = breakdown(first, fixture.third);
         assertThat(firstStudent.codeScore()).isEqualByComparingTo("2");
         assertThat(firstStudent.documentScore()).isEqualByComparingTo("1");
-        assertThat(secondStudent.designScore()).isEqualByComparingTo("2");
-        assertThat(firstStudent.adjustedSprintScore()).isEqualByComparingTo("3");
-        assertThat(secondStudent.adjustedSprintScore()).isEqualByComparingTo("1");
+        // DESIGN is retired as an active criterion; the design-labeled task and the standalone
+        // document-type count both fold into DOCUMENT evidence.
+        assertThat(secondStudent.documentScore()).isEqualByComparingTo("3");
+        assertThat(firstStudent.adjustedSprintScore()).isEqualByComparingTo("2");
+        assertThat(secondStudent.adjustedSprintScore()).isEqualByComparingTo("2");
         assertThat(firstStudent.peerCoefficient()).isEqualByComparingTo("1");
         assertThat(firstStudent.codeContributionPercent())
                 .isCloseTo(new BigDecimal("100"),
                         org.assertj.core.data.Offset.offset(new BigDecimal("0.00000000000001")));
-        assertThat(firstStudent.taskContributionPercent()).isEqualByComparingTo("75");
+        assertThat(firstStudent.taskContributionPercent()).isEqualByComparingTo("50");
         assertThat(firstStudent.rawContribution()).isEqualByComparingTo(firstStudent.adjustedContribution());
         assertThat(firstStudent.finalContribution()).isEqualByComparingTo("60");
         assertThat(secondStudent.finalContribution()).isEqualByComparingTo("40");
@@ -144,13 +145,13 @@ class ContributionCalculationServiceTest {
         for (ContributionBreakdown student : result.students()) {
             assertThat(student.codeContributionPercent()).isEqualByComparingTo("0");
             assertThat(student.documentContributionPercent()).isEqualByComparingTo("0");
-            assertThat(student.designContributionPercent()).isEqualByComparingTo("0");
+            assertThat(student.researchContributionPercent()).isEqualByComparingTo("0");
             assertThat(student.taskContributionPercent()).isEqualByComparingTo("0");
         }
     }
 
     @Test
-    void classifiesDoneTasksIntoCodeDocumentAndDesignSlicesUsingJiraMetadata() {
+    void classifiesDoneTasksIntoCodeAndDocumentSlicesUsingJiraMetadata() {
         Fixture fixture = fixture();
         Project project = new Project();
         project.setId(fixture.projectId);
@@ -197,13 +198,13 @@ class ContributionCalculationServiceTest {
         ContributionBreakdown first = breakdown(result, fixture.first);
 
         assertThat(first.codeScore()).isEqualByComparingTo("5");
-        assertThat(first.documentScore()).isEqualByComparingTo("3");
-        assertThat(first.designScore()).isEqualByComparingTo("4");
+        // DESIGN is retired as an active criterion; the design-labeled task folds into DOCUMENT.
+        assertThat(first.documentScore()).isEqualByComparingTo("7");
         assertThat(first.adjustedSprintScore()).isEqualByComparingTo("12");
     }
 
     @Test
-    void classifiesFrontendAndBugFixTasksAsCodeInsteadOfDesign() {
+    void classifiesFrontendAndBugFixTasksAsCodeInsteadOfDocument() {
         Fixture fixture = fixture();
         Project project = new Project();
         project.setId(fixture.projectId);
@@ -242,50 +243,141 @@ class ContributionCalculationServiceTest {
 
         assertThat(first.codeScore()).isEqualByComparingTo("5");
         assertThat(first.documentScore()).isEqualByComparingTo("0");
-        assertThat(first.designScore()).isEqualByComparingTo("0");
         assertThat(first.adjustedSprintScore()).isEqualByComparingTo("5");
     }
 
     @Test
-    void calculateUsesExactProjectGroupWeightConfigOverrideOverCourseWeights() {
+    void exactSagaTestMarkerRoutesTaskToTestOverridingTheLegacyKeywordClassifier() {
         Fixture fixture = fixture();
-        Task codeTask = new Task();
-        codeTask.setStatus(TaskStatus.DONE);
-        codeTask.setStoryPoint(1);
-        codeTask.setLabels(List.of("backend"));
-        Task designTask = new Task();
-        designTask.setStatus(TaskStatus.DONE);
-        designTask.setStoryPoint(1);
-        designTask.setLabels(List.of("ui-ux", "design"));
+        Task markedTask = new Task();
+        markedTask.setAssignee(fixture.first());
+        markedTask.setStatus(TaskStatus.DONE);
+        markedTask.setStoryPoint(5);
+        // "design" keyword present too, but the exact reserved marker takes precedence.
+        markedTask.setLabels(List.of("saga:test", "design-review-needed"));
 
         when(fixture.taskRepository.findByProjectIdAndAssigneeId(fixture.projectId, fixture.first.getId()))
-                .thenReturn(List.of(codeTask));
+                .thenReturn(List.of(markedTask));
         when(fixture.taskRepository.findByProjectIdAndAssigneeId(fixture.projectId, fixture.second.getId()))
-                .thenReturn(List.of(designTask));
+                .thenReturn(List.of());
         when(fixture.taskRepository.findByProjectIdAndAssigneeId(fixture.projectId, fixture.third.getId()))
                 .thenReturn(List.of());
-        when(fixture.projectGroupWeightConfigRepository.findByProjectId(fixture.projectId))
-                .thenReturn(Optional.of(ProjectGroupWeightConfig.builder()
-                        .team(fixture.team)
-                        .codeWeight(new BigDecimal("0.2"))
-                        .documentWeight(new BigDecimal("0.3"))
-                        .designWeight(new BigDecimal("0.5"))
-                        .build()));
 
         ProjectContributionCalculation result = fixture.service.calculate(fixture.projectId, Map.of());
+        ContributionBreakdown first = breakdown(result, fixture.first);
 
-        assertThat(breakdown(result, fixture.first).finalContribution())
-                .isCloseTo(new BigDecimal("28.5714"), org.assertj.core.data.Offset.offset(new BigDecimal("0.0001")));
-        assertThat(breakdown(result, fixture.second).finalContribution())
-                .isCloseTo(new BigDecimal("71.4286"), org.assertj.core.data.Offset.offset(new BigDecimal("0.0001")));
-        assertThat(breakdown(result, fixture.third).finalContribution()).isEqualByComparingTo("0");
+        assertThat(first.testScore()).isEqualByComparingTo("5");
+        assertThat(first.codeScore()).isEqualByComparingTo("0");
+        assertThat(first.documentScore()).isEqualByComparingTo("0");
+        assertThat(first.researchScore()).isEqualByComparingTo("0");
     }
 
     @Test
-    void calculateIgnoresProjectGroupWeightConfigBelongingToAnotherTeam() {
+    void exactCodeDocumentAndResearchMarkersRouteFullStoryPointsToTheirOwnCriteria() {
         Fixture fixture = fixture();
-        Team otherTeam = new Team();
-        otherTeam.setId(UUID.randomUUID());
+        Task codeTask = markedDoneTask(2, "saga:code", "documentation");
+        Task documentTask = markedDoneTask(3, "saga:document", "backend");
+        Task researchTask = markedDoneTask(4, "saga:research", "backend");
+
+        when(fixture.taskRepository.findByProjectIdAndAssigneeId(fixture.projectId, fixture.first.getId()))
+                .thenReturn(List.of(codeTask, documentTask, researchTask));
+        when(fixture.taskRepository.findByProjectIdAndAssigneeId(fixture.projectId, fixture.second.getId()))
+                .thenReturn(List.of());
+        when(fixture.taskRepository.findByProjectIdAndAssigneeId(fixture.projectId, fixture.third.getId()))
+                .thenReturn(List.of());
+
+        ContributionBreakdown result = breakdown(
+                fixture.service.calculate(fixture.projectId, Map.of()), fixture.first
+        );
+
+        assertThat(result.codeScore()).isEqualByComparingTo("2");
+        assertThat(result.testScore()).isEqualByComparingTo("0");
+        assertThat(result.documentScore()).isEqualByComparingTo("3");
+        assertThat(result.researchScore()).isEqualByComparingTo("4");
+        assertThat(result.adjustedSprintScore()).isEqualByComparingTo("9");
+    }
+
+    @Test
+    void nullStoryPointFallsBackToOneWithoutChangingMarkerRouting() {
+        Fixture fixture = fixture();
+        Task researchTask = markedDoneTask(null, "saga:research");
+
+        when(fixture.taskRepository.findByProjectIdAndAssigneeId(fixture.projectId, fixture.first.getId()))
+                .thenReturn(List.of(researchTask));
+        when(fixture.taskRepository.findByProjectIdAndAssigneeId(fixture.projectId, fixture.second.getId()))
+                .thenReturn(List.of());
+        when(fixture.taskRepository.findByProjectIdAndAssigneeId(fixture.projectId, fixture.third.getId()))
+                .thenReturn(List.of());
+
+        ContributionBreakdown result = breakdown(
+                fixture.service.calculate(fixture.projectId, Map.of()), fixture.first
+        );
+
+        assertThat(result.researchScore()).isEqualByComparingTo("1");
+        assertThat(result.adjustedSprintScore()).isEqualByComparingTo("1");
+        assertThat(result.codeScore()).isEqualByComparingTo("0");
+        assertThat(result.testScore()).isEqualByComparingTo("0");
+        assertThat(result.documentScore()).isEqualByComparingTo("0");
+    }
+
+    @Test
+    void nonDoneTaskWithReservedMarkerDoesNotMintCriterionOrNumericScore() {
+        Fixture fixture = fixture();
+        Task inProgressTask = new Task();
+        inProgressTask.setAssignee(fixture.first());
+        inProgressTask.setStatus(TaskStatus.IN_PROGRESS);
+        inProgressTask.setStoryPoint(8);
+        inProgressTask.setLabels(List.of("saga:test"));
+
+        when(fixture.taskRepository.findByProjectIdAndAssigneeId(fixture.projectId, fixture.first.getId()))
+                .thenReturn(List.of(inProgressTask));
+        when(fixture.taskRepository.findByProjectIdAndAssigneeId(fixture.projectId, fixture.second.getId()))
+                .thenReturn(List.of());
+        when(fixture.taskRepository.findByProjectIdAndAssigneeId(fixture.projectId, fixture.third.getId()))
+                .thenReturn(List.of());
+
+        ContributionBreakdown result = breakdown(
+                fixture.service.calculate(fixture.projectId, Map.of()), fixture.first
+        );
+
+        assertThat(result.codeScore()).isEqualByComparingTo("0");
+        assertThat(result.testScore()).isEqualByComparingTo("0");
+        assertThat(result.documentScore()).isEqualByComparingTo("0");
+        assertThat(result.researchScore()).isEqualByComparingTo("0");
+        assertThat(result.adjustedSprintScore()).isEqualByComparingTo("0");
+    }
+
+    @Test
+    void conflictingReservedMarkersExcludeTheTaskFromEveryCriterionButStillCountTowardTaskScore() {
+        Fixture fixture = fixture();
+        Task ambiguousTask = new Task();
+        ambiguousTask.setAssignee(fixture.first());
+        ambiguousTask.setStatus(TaskStatus.DONE);
+        ambiguousTask.setStoryPoint(5);
+        ambiguousTask.setLabels(List.of("saga:test", "saga:research"));
+
+        when(fixture.taskRepository.findByProjectIdAndAssigneeId(fixture.projectId, fixture.first.getId()))
+                .thenReturn(List.of(ambiguousTask));
+        when(fixture.taskRepository.findByProjectIdAndAssigneeId(fixture.projectId, fixture.second.getId()))
+                .thenReturn(List.of());
+        when(fixture.taskRepository.findByProjectIdAndAssigneeId(fixture.projectId, fixture.third.getId()))
+                .thenReturn(List.of());
+
+        ProjectContributionCalculation result = fixture.service.calculate(fixture.projectId, Map.of());
+        ContributionBreakdown first = breakdown(result, fixture.first);
+
+        assertThat(first.codeScore()).isEqualByComparingTo("0");
+        assertThat(first.testScore()).isEqualByComparingTo("0");
+        assertThat(first.documentScore()).isEqualByComparingTo("0");
+        assertThat(first.researchScore()).isEqualByComparingTo("0");
+        // The numeric task/sprint formula is unchanged: the ambiguous Task's storyPoint still
+        // counts toward adjustedSprintScore even though it is excluded from all four criteria.
+        assertThat(first.adjustedSprintScore()).isEqualByComparingTo("5");
+    }
+
+    @Test
+    void calculateIgnoresHistoricalProjectGroupWeightConfigAndUsesCourseWeightsOnly() {
+        Fixture fixture = fixture();
         Task codeTask = new Task();
         codeTask.setStatus(TaskStatus.DONE);
         codeTask.setStoryPoint(1);
@@ -301,9 +393,11 @@ class ContributionCalculationServiceTest {
                 .thenReturn(List.of(designTask));
         when(fixture.taskRepository.findByProjectIdAndAssigneeId(fixture.projectId, fixture.third.getId()))
                 .thenReturn(List.of());
+        // Historical row still exists in the DB but the resolver has no dependency on this
+        // repository, so it is structurally impossible for it to change the result.
         when(fixture.projectGroupWeightConfigRepository.findByProjectId(fixture.projectId))
                 .thenReturn(Optional.of(ProjectGroupWeightConfig.builder()
-                        .team(otherTeam)
+                        .team(fixture.team)
                         .codeWeight(new BigDecimal("0.2"))
                         .documentWeight(new BigDecimal("0.3"))
                         .designWeight(new BigDecimal("0.5"))
@@ -334,8 +428,8 @@ class ContributionCalculationServiceTest {
     @Test
     void defaultsPeerCoefficientToOneWhenNoPeerReviewsExist() {
         Fixture fixture = fixture();
-        when(fixture.documentRepository.countByProjectIdAndAuthorIdAndTypeNot(
-                fixture.projectId, fixture.first.getId(), DocumentType.DESIGN)).thenReturn(1L);
+        when(fixture.documentRepository.countByProjectIdAndAuthorId(
+                fixture.projectId, fixture.first.getId())).thenReturn(1L);
         when(fixture.taskRepository.sumDoneEffectiveStoryPoints(
                 fixture.projectId, fixture.sprint.getId(), fixture.first.getId())).thenReturn(3L);
         ContributionBreakdown result = breakdown(fixture.service.calculate(fixture.projectId, Map.of()), fixture.first);
@@ -408,7 +502,6 @@ class ContributionCalculationServiceTest {
 
         TeamRepository teamRepository = mock(TeamRepository.class);
         TeamMemberRepository teamMemberRepository = mock(TeamMemberRepository.class);
-        CommitDataRepository commitRepository = mock(CommitDataRepository.class);
         DocumentRepository documentRepository = mock(DocumentRepository.class);
         SprintRepository sprintRepository = mock(SprintRepository.class);
         TaskRepository taskRepository = mock(TaskRepository.class);
@@ -426,10 +519,10 @@ class ContributionCalculationServiceTest {
                 .thenReturn(List.of());
 
         return new Fixture(
-                projectId, subjectId, team, first, second, third, sprint, commitRepository,
+                projectId, subjectId, team, first, second, third, sprint,
                 documentRepository, taskRepository, peerReviewRepository, projectGroupWeightConfigRepository,
                 new ContributionCalculationService(
-                        teamRepository, teamMemberRepository, commitRepository, documentRepository,
+                        teamRepository, teamMemberRepository, documentRepository,
                         sprintRepository, taskRepository, peerReviewRepository,
                         new ContributionSliceWeightResolver(projectGroupWeightConfigRepository)
                 )
@@ -442,10 +535,12 @@ class ContributionCalculationServiceTest {
         return student;
     }
 
-    private CommitData commitWithTask(Task task) {
-        CommitData commit = new CommitData();
-        commit.setTask(task);
-        return commit;
+    private Task markedDoneTask(Integer storyPoints, String... labels) {
+        Task task = new Task();
+        task.setStatus(TaskStatus.DONE);
+        task.setStoryPoint(storyPoints);
+        task.setLabels(List.of(labels));
+        return task;
     }
 
     private record Fixture(
@@ -456,7 +551,6 @@ class ContributionCalculationServiceTest {
             Student second,
             Student third,
             Sprint sprint,
-            CommitDataRepository commitRepository,
             DocumentRepository documentRepository,
             TaskRepository taskRepository,
             PeerReviewRepository peerReviewRepository,

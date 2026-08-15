@@ -19,6 +19,8 @@ import com.saga.be.repository.AdminRepository;
 import com.saga.be.repository.CourseRepository;
 import com.saga.be.repository.LecturerRepository;
 import com.saga.be.repository.PolicyOverrideRequestRepository;
+import com.saga.be.repository.ProjectGroupWeightConfigRepository;
+import com.saga.be.repository.TeamRepository;
 import com.saga.be.security.ApplicationRole;
 import com.saga.be.security.SagaPrincipal;
 import java.util.List;
@@ -46,6 +48,12 @@ class CourseContributionWeightServiceTest {
     @Mock
     private AdminRepository adminRepository;
 
+    @Mock
+    private TeamRepository teamRepository;
+
+    @Mock
+    private ProjectGroupWeightConfigRepository projectGroupWeightConfigRepository;
+
     private CourseContributionWeightService service;
 
     @BeforeEach
@@ -54,7 +62,9 @@ class CourseContributionWeightServiceTest {
                 courseRepository,
                 policyOverrideRequestRepository,
                 lecturerRepository,
-                adminRepository
+                adminRepository,
+                teamRepository,
+                projectGroupWeightConfigRepository
         );
     }
 
@@ -128,7 +138,11 @@ class CourseContributionWeightServiceTest {
         assertEquals(PolicyOverrideStatus.APPROVED, response.status());
         assertEquals(60.0, course.getCodeContributionWeight(), 0.0001);
         assertEquals(25.0, course.getDocumentContributionWeight(), 0.0001);
+        // Legacy flow proposes only Code/Document/Design (the retired triad); the legacy value
+        // is preserved verbatim in the retained design_contribution_weight column, and testWeight
+        // is forced to 0 (no legacy consumer proposes it).
         assertEquals(15.0, course.getDesignContributionWeight(), 0.0001);
+        assertEquals(0.0, course.getTestContributionWeight(), 0.0001);
     }
 
     @Test
@@ -253,13 +267,16 @@ class CourseContributionWeightServiceTest {
         CourseContributionSliceWeightResponse response = service.updateCurrentWeights(
                 principal(ApplicationRole.LECTURER, lecturerId),
                 courseId,
-                new CourseContributionSliceWeightUpdateRequest(30.0, 20.0, 50.0)
+                new CourseContributionSliceWeightUpdateRequest(20.0, 10.0, 20.0, 50.0)
         );
 
-        assertEquals(30.0, response.codeWeight(), 0.0001);
+        assertEquals(20.0, response.codeWeight(), 0.0001);
+        assertEquals(10.0, response.testWeight(), 0.0001);
         assertEquals(20.0, response.documentWeight(), 0.0001);
-        assertEquals(50.0, response.designWeight(), 0.0001);
-        assertEquals(30.0, course.getCodeContributionWeight(), 0.0001);
+        assertEquals(50.0, response.researchWeight(), 0.0001);
+        assertEquals(20.0, course.getCodeContributionWeight(), 0.0001);
+        assertEquals(10.0, course.getTestContributionWeight(), 0.0001);
+        assertEquals(50.0, course.getResearchContributionWeight(), 0.0001);
     }
 
     @Test
@@ -272,17 +289,17 @@ class CourseContributionWeightServiceTest {
         assertThrows(ResponseStatusException.class, () -> service.updateCurrentWeights(
                 principal(ApplicationRole.LECTURER, UUID.randomUUID()),
                 courseId,
-                new CourseContributionSliceWeightUpdateRequest(30.0, 20.0, 50.0)
+                new CourseContributionSliceWeightUpdateRequest(20.0, 10.0, 20.0, 50.0)
         ));
         assertThrows(ResponseStatusException.class, () -> service.updateCurrentWeights(
                 principal(ApplicationRole.STUDENT, UUID.randomUUID()),
                 courseId,
-                new CourseContributionSliceWeightUpdateRequest(30.0, 20.0, 50.0)
+                new CourseContributionSliceWeightUpdateRequest(20.0, 10.0, 20.0, 50.0)
         ));
         assertThrows(ResponseStatusException.class, () -> service.updateCurrentWeights(
                 principal(ApplicationRole.ADMIN, UUID.randomUUID()),
                 courseId,
-                new CourseContributionSliceWeightUpdateRequest(30.0, 20.0, 50.0)
+                new CourseContributionSliceWeightUpdateRequest(20.0, 10.0, 20.0, 50.0)
         ));
     }
 
@@ -294,8 +311,9 @@ class CourseContributionWeightServiceTest {
         course.setCourseCode("SE101");
         course.setName("Software Engineering");
         course.setCodeContributionWeight(30.0);
+        course.setTestContributionWeight(10.0);
         course.setDocumentContributionWeight(20.0);
-        course.setDesignContributionWeight(50.0);
+        course.setResearchContributionWeight(40.0);
         course.setInstructor(entityWithId(new Lecturer(), lecturerId));
         when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
 
@@ -309,6 +327,40 @@ class CourseContributionWeightServiceTest {
                 principal(ApplicationRole.LECTURER, UUID.randomUUID()),
                 courseId
         ));
+    }
+
+    @Test
+    void directUpdateRejectsWhenFourWeightsDoNotSumToOneHundred() {
+        UUID courseId = UUID.randomUUID();
+        UUID lecturerId = UUID.randomUUID();
+        Course course = entityWithId(new Course(), courseId);
+        course.setInstructor(entityWithId(new Lecturer(), lecturerId));
+        when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
+
+        ResponseStatusException exception = assertThrows(ResponseStatusException.class, () -> service.updateCurrentWeights(
+                principal(ApplicationRole.LECTURER, lecturerId),
+                courseId,
+                new CourseContributionSliceWeightUpdateRequest(30.0, 30.0, 30.0, 30.0)
+        ));
+
+        assertEquals("400 BAD_REQUEST \"Slice weights must add up to 100\"", exception.getMessage());
+    }
+
+    @Test
+    void directUpdateRejectsNegativeWeightAmongTheFourSlices() {
+        UUID courseId = UUID.randomUUID();
+        UUID lecturerId = UUID.randomUUID();
+        Course course = entityWithId(new Course(), courseId);
+        course.setInstructor(entityWithId(new Lecturer(), lecturerId));
+        when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
+
+        ResponseStatusException exception = assertThrows(ResponseStatusException.class, () -> service.updateCurrentWeights(
+                principal(ApplicationRole.LECTURER, lecturerId),
+                courseId,
+                new CourseContributionSliceWeightUpdateRequest(-10.0, 40.0, 40.0, 30.0)
+        ));
+
+        assertEquals("400 BAD_REQUEST \"Slice weights must be non-negative\"", exception.getMessage());
     }
 
     private <T extends com.saga.be.entity.BaseEntity> T entityWithId(T entity, UUID id) {

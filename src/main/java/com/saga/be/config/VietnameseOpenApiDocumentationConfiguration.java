@@ -140,9 +140,7 @@ public class VietnameseOpenApiDocumentationConfiguration {
             summary("LecturerAnalyticsController#heatmap", "Xem bản đồ nhiệt hoạt động của nhóm"),
             summary("LecturerAnalyticsController#overview", "Xem tổng quan hoạt động theo ngày của nhóm"),
             summary("LecturerAnalyticsController#velocity", "Xem vận tốc Sprint của nhóm"),
-            summary("ProjectGroupWeightConfigController#update", "Cập nhật trọng số nhóm của dự án"),
             summary("ProjectTypeController#list", "Xem danh sách loại dự án"),
-            summary("ProjectTypeController#create", "Tạo loại dự án mới"),
             summary("MyCourseTeamController#getMyCourseTeamMembers", "Xem thành viên nhóm của tôi trong khóa học"),
             summary("MyFirebaseInstallationController#register", "Đăng ký trình duyệt hiện tại để nhận thông báo đẩy"),
             summary("MyFirebaseInstallationController#unregister", "Ngừng nhận thông báo đẩy trên trình duyệt này"),
@@ -343,7 +341,7 @@ public class VietnameseOpenApiDocumentationConfiguration {
                     "AdminReadController", "AdminUserImportController" -> "Quản trị";
             case "SubjectController" -> "Môn học";
             case "MyCourseTeamController", "TeamRosterController" -> "Nhóm";
-            case "TeamProjectController", "ProjectDetailController", "ProjectGroupWeightConfigController" -> "Dự án";
+            case "TeamProjectController", "ProjectDetailController" -> "Dự án";
             case "ProjectTypeController" -> "Loại dự án";
             case "ProjectIntegrationController", "ProjectIntegrationCallbackController" -> "Tích hợp dự án";
             case "ProjectGitHubReadController", "ProjectGitHubIssueController", "ProjectTraceabilityController" -> "GitHub";
@@ -419,7 +417,7 @@ public class VietnameseOpenApiDocumentationConfiguration {
             case "PeerReviewController", "PeerReviewDefaultRubricController", "PeerReviewRubricController" ->
                     "Dữ liệu được giới hạn theo Team, Sprint và quyền Peer Review hiện có.";
             case "ProjectIntegrationController", "ProjectDetailController", "TeamProjectController",
-                    "ProjectGroupWeightConfigController", "ProjectTypeController" ->
+                    "ProjectTypeController" ->
                     "Dữ liệu được giới hạn theo Project và quyền Project Manager hiện có.";
             case "ProjectTaskReadController", "ProjectSprintController" ->
                     "Jira là source of truth; backend xác nhận dữ liệu canonical rồi mới trả kết quả.";

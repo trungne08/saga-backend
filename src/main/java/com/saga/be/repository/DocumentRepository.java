@@ -17,6 +17,8 @@ public interface DocumentRepository extends JpaRepository<Document, UUID> {
 
     long countByProjectIdAndAuthorIdAndTypeNot(UUID projectId, UUID authorId, DocumentType type);
 
+    long countByProjectIdAndAuthorId(UUID projectId, UUID authorId);
+
     List<Document> findByProjectId(UUID projectId);
 
     long countByProjectIdAndAuthorIdAndCreatedAtIsNotNull(UUID projectId, UUID authorId);

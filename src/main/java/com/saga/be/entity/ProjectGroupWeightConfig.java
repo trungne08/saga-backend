@@ -37,9 +37,16 @@ public class ProjectGroupWeightConfig extends BaseEntity {
     @Column(name = "code_weight", precision = 6, scale = 5, nullable = false)
     private BigDecimal codeWeight;
 
+    @Column(name = "test_weight", precision = 6, scale = 5, nullable = false)
+    private BigDecimal testWeight;
+
     @Column(name = "document_weight", precision = 6, scale = 5, nullable = false)
     private BigDecimal documentWeight;
 
+    @Column(name = "research_weight", precision = 6, scale = 5, nullable = false)
+    private BigDecimal researchWeight;
+
+    /** Legacy column from the retired DESIGN criterion; retained for historical rows, inactive. */
     @Column(name = "design_weight", precision = 6, scale = 5, nullable = false)
     private BigDecimal designWeight;
 

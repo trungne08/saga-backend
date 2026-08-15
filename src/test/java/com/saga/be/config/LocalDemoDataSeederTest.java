@@ -79,12 +79,11 @@ class LocalDemoDataSeederTest {
         classService = mock(ClassService.class);
         courseService = mock(CourseService.class);
         teamProjectService = mock(TeamProjectService.class);
-        when(projectTypeRepository.findAllByOrderByNameAsc()).thenReturn(List.of());
-        when(projectTypeRepository.save(any(ProjectType.class))).thenAnswer(invocation -> {
-            ProjectType projectType = invocation.getArgument(0);
-            projectType.setId(UUID.randomUUID());
-            return projectType;
-        });
+        ProjectType canonicalDesign = new ProjectType();
+        canonicalDesign.setId(UUID.randomUUID());
+        canonicalDesign.setCode(ProjectType.CODE_DESIGN_ARCHITECTURE);
+        canonicalDesign.setName("Design");
+        when(projectTypeRepository.findByCode(ProjectType.CODE_DESIGN_ARCHITECTURE)).thenReturn(Optional.of(canonicalDesign));
     }
 
     @Test
@@ -187,6 +186,50 @@ class LocalDemoDataSeederTest {
         verify(teamRepository).save(any(Team.class));
         verify(teamMemberRepository).save(any(TeamMember.class));
         verify(teamProjectService).create(any(), any(), any(), any());
+        verify(projectTypeRepository, never()).save(any());
+    }
+
+    @Test
+    void failsClearlyInsteadOfCreatingAFifthProjectTypeWhenCanonicalDesignIsMissing() {
+        Student leader = entity(new Student());
+        leader.setCognitoSub(LEADER_SUB);
+        leader.setEmail("leader@saga.test");
+        Semester semester = entity(new Semester());
+        Subject subject = entity(new Subject());
+        com.saga.be.entity.Class clazz = entity(new com.saga.be.entity.Class());
+        Lecturer instructor = entity(new Lecturer());
+        Course course = entity(new Course());
+        Team team = entity(new Team());
+        team.setCourse(course);
+
+        when(studentRepository.findByCognitoSub(LEADER_SUB)).thenReturn(Optional.of(leader));
+        when(semesterRepository.findByCode(LocalDemoDataSeeder.SEMESTER_CODE))
+                .thenReturn(Optional.empty(), Optional.of(semester));
+        when(subjectRepository.findBySubjectCodeAndDeletedAtIsNull(LocalDemoDataSeeder.SUBJECT_CODE))
+                .thenReturn(Optional.empty(), Optional.of(subject));
+        when(classRepository.findByClassCodeAndDeletedAtIsNull(LocalDemoDataSeeder.CLASS_CODE))
+                .thenReturn(Optional.empty(), Optional.of(clazz));
+        when(semesterService.createSemester(any())).thenReturn(semester);
+        when(subjectService.createSubject(any())).thenReturn(subject);
+        when(classService.createClass(any())).thenReturn(clazz);
+        when(lecturerRepository.findByEmailIgnoreCase("local-demo-instructor@saga.invalid"))
+                .thenReturn(Optional.empty(), Optional.of(instructor));
+        when(lecturerRepository.save(any(Lecturer.class))).thenReturn(instructor);
+        when(courseRepository.findByCourseCode(LocalDemoDataSeeder.COURSE_CODE))
+                .thenReturn(Optional.empty(), Optional.of(course));
+        when(courseService.createCourse(any())).thenReturn(course);
+        when(teamRepository.findByCourseIdAndName(course.getId(), LocalDemoDataSeeder.TEAM_NAME))
+                .thenReturn(Optional.empty(), Optional.of(team));
+        when(teamRepository.save(any(Team.class))).thenReturn(team);
+        when(teamMemberRepository.findByStudentIdAndTeamCourseId(leader.getId(), course.getId()))
+                .thenReturn(List.of());
+        when(teamMemberRepository.save(any(TeamMember.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(projectTypeRepository.findByCode(ProjectType.CODE_DESIGN_ARCHITECTURE)).thenReturn(Optional.empty());
+
+        assertThrows(IllegalStateException.class, () -> seeder().seed());
+
+        verify(projectTypeRepository, never()).save(any());
+        verify(teamProjectService, never()).create(any(), any(), any(), any());
     }
 
     private LocalDemoDataSeeder seeder() {

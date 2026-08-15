@@ -7,7 +7,8 @@ public record CourseContributionSliceWeightResponse(
         String courseCode,
         String courseName,
         double codeWeight,
+        double testWeight,
         double documentWeight,
-        double designWeight
+        double researchWeight
 ) {
 }

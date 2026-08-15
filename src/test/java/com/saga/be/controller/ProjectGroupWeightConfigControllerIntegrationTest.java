@@ -1,6 +1,6 @@
 package com.saga.be.controller;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -11,20 +11,17 @@ import com.saga.be.OAuth2TestConfiguration;
 import com.saga.be.entity.Course;
 import com.saga.be.entity.Lecturer;
 import com.saga.be.entity.Project;
-import com.saga.be.entity.Student;
+import com.saga.be.entity.ProjectGroupWeightConfig;
 import com.saga.be.entity.Team;
-import com.saga.be.entity.TeamMember;
 import com.saga.be.entity.enums.AccountStatus;
-import com.saga.be.entity.enums.RoleInTeam;
 import com.saga.be.repository.CourseRepository;
 import com.saga.be.repository.LecturerRepository;
 import com.saga.be.repository.ProjectGroupWeightConfigRepository;
 import com.saga.be.repository.ProjectRepository;
-import com.saga.be.repository.StudentRepository;
-import com.saga.be.repository.TeamMemberRepository;
 import com.saga.be.repository.TeamRepository;
 import com.saga.be.security.ApplicationRole;
 import com.saga.be.security.SagaPrincipal;
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -40,6 +37,13 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
+/**
+ * {@code PUT /api/projects/{projectId}/group-weights} is the Team/Project-scope Contribution
+ * weight override, active only while the owning Course is in
+ * {@link com.saga.be.entity.enums.ContributionConfigMode#TEAM} mode. Storage stays 0..1
+ * (unchanged scale); write access is the exact course-instructor LECTURER or ADMIN only — never
+ * the team leader/student, per explicit product instruction not to broaden that authorization.
+ */
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
@@ -63,169 +67,195 @@ class ProjectGroupWeightConfigControllerIntegrationTest {
     private TeamRepository teamRepository;
 
     @Autowired
-    private StudentRepository studentRepository;
-
-    @Autowired
-    private TeamMemberRepository teamMemberRepository;
-
-    @Autowired
     private ProjectGroupWeightConfigRepository configRepository;
 
     @Test
-    void lecturerOwningCourseCanUpdateGroupWeights() throws Exception {
+    void courseOwnerLecturerCanCreateAndUpdateAGroupWeightOverride() throws Exception {
         Fixture fixture = fixture();
 
-        putAs(fixture, ApplicationRole.LECTURER, fixture.instructor().getId(), fixture.team().getId(),
-                "0.5", "0.3", "0.2", "initial split")
+        mockMvc.perform(put("/api/projects/{projectId}/group-weights", fixture.project().getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(fixture.team().getId(), "0.4", "0.1", "0.3", "0.2"))
+                        .with(authentication(authenticationFor(ApplicationRole.LECTURER, fixture.owner().getId())))
+                        .with(csrf()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.projectId").value(fixture.project().getId().toString()))
                 .andExpect(jsonPath("$.groupId").value(fixture.team().getId().toString()))
-                .andExpect(jsonPath("$.codeWeight").value(0.5))
-                .andExpect(jsonPath("$.note").value("initial split"));
-    }
+                .andExpect(jsonPath("$.codeWeight").value(0.4))
+                .andExpect(jsonPath("$.testWeight").value(0.1))
+                .andExpect(jsonPath("$.documentWeight").value(0.3))
+                .andExpect(jsonPath("$.researchWeight").value(0.2));
 
-    @Test
-    void adminCanUpdateGroupWeightsForAnyProject() throws Exception {
-        Fixture fixture = fixture();
-
-        putAs(fixture, ApplicationRole.ADMIN, UUID.randomUUID(), fixture.team().getId(),
-                "0.4", "0.4", "0.2", null)
+        mockMvc.perform(put("/api/projects/{projectId}/group-weights", fixture.project().getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(fixture.team().getId(), "0.7", "0.1", "0.1", "0.1"))
+                        .with(authentication(authenticationFor(ApplicationRole.LECTURER, fixture.owner().getId())))
+                        .with(csrf()))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.codeWeight").value(0.4));
+                .andExpect(jsonPath("$.codeWeight").value(0.7));
+
+        assertThat(configRepository.findByProjectId(fixture.project().getId())).isPresent();
+        ProjectGroupWeightConfig persisted = configRepository.findByProjectId(fixture.project().getId()).orElseThrow();
+        assertThat(persisted.getCodeWeight()).isEqualByComparingTo("0.7");
+        assertThat(persisted.getDesignWeight()).isEqualByComparingTo(BigDecimal.ZERO);
     }
 
     @Test
-    void lecturerOutsideCourseIsForbidden() throws Exception {
+    void adminCanAlsoWriteAGroupWeightOverride() throws Exception {
         Fixture fixture = fixture();
-        Lecturer otherLecturer = saveLecturer("OTHER-LECTURER");
 
-        putAs(fixture, ApplicationRole.LECTURER, otherLecturer.getId(), fixture.team().getId(),
-                "0.5", "0.3", "0.2", null)
-                .andExpect(status().isForbidden());
+        mockMvc.perform(put("/api/projects/{projectId}/group-weights", fixture.project().getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(fixture.team().getId(), "0.25", "0.25", "0.25", "0.25"))
+                        .with(authentication(authenticationFor(ApplicationRole.ADMIN, UUID.randomUUID())))
+                        .with(csrf()))
+                .andExpect(status().isOk());
     }
 
     @Test
-    void studentIncludingTeamLeaderIsForbidden() throws Exception {
+    void otherLecturerAndStudentLeaderAndAnonymousCannotWrite() throws Exception {
         Fixture fixture = fixture();
+        String requestBody = body(fixture.team().getId(), "0.4", "0.1", "0.3", "0.2");
 
-        putAs(fixture, ApplicationRole.STUDENT, fixture.leader().getId(), fixture.team().getId(),
-                "0.5", "0.3", "0.2", null)
+        mockMvc.perform(put("/api/projects/{projectId}/group-weights", fixture.project().getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestBody)
+                        .with(authentication(authenticationFor(ApplicationRole.LECTURER, fixture.otherLecturer().getId())))
+                        .with(csrf()))
                 .andExpect(status().isForbidden());
-        putAs(fixture, ApplicationRole.STUDENT, fixture.member().getId(), fixture.team().getId(),
-                "0.5", "0.3", "0.2", null)
+        mockMvc.perform(put("/api/projects/{projectId}/group-weights", fixture.project().getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestBody)
+                        .with(authentication(authenticationFor(ApplicationRole.STUDENT, UUID.randomUUID())))
+                        .with(csrf()))
                 .andExpect(status().isForbidden());
+        mockMvc.perform(put("/api/projects/{projectId}/group-weights", fixture.project().getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestBody)
+                        .with(csrf()))
+                .andExpect(status().isUnauthorized());
     }
 
     @Test
-    void mismatchedGroupIdFailsClosed() throws Exception {
+    void groupIdMustBelongToTheProjectsOwningTeam() throws Exception {
         Fixture fixture = fixture();
-        Team otherTeam = teamRepository.saveAndFlush(Team.builder()
-                .course(fixture.course())
-                .name(unique("Other team"))
-                .build());
+        UUID unrelatedTeamId = UUID.randomUUID();
 
-        putAs(fixture, ApplicationRole.LECTURER, fixture.instructor().getId(), otherTeam.getId(),
-                "0.5", "0.3", "0.2", null)
+        mockMvc.perform(put("/api/projects/{projectId}/group-weights", fixture.project().getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(unrelatedTeamId, "0.4", "0.1", "0.3", "0.2"))
+                        .with(authentication(authenticationFor(ApplicationRole.LECTURER, fixture.owner().getId())))
+                        .with(csrf()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("GROUP_PROJECT_MISMATCH"));
     }
 
     @Test
-    void negativeWeightIsRejected() throws Exception {
+    void negativeOrOutOfRangeOrNonUnitSumWeightsAreRejected() throws Exception {
         Fixture fixture = fixture();
 
-        putAs(fixture, ApplicationRole.LECTURER, fixture.instructor().getId(), fixture.team().getId(),
-                "-0.1", "0.6", "0.5", null)
+        mockMvc.perform(put("/api/projects/{projectId}/group-weights", fixture.project().getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(fixture.team().getId(), "-0.1", "0.3", "0.4", "0.4"))
+                        .with(authentication(authenticationFor(ApplicationRole.LECTURER, fixture.owner().getId())))
+                        .with(csrf()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("GROUP_WEIGHT_OUT_OF_RANGE"));
-    }
 
-    @Test
-    void weightAboveOneIsRejected() throws Exception {
-        Fixture fixture = fixture();
-
-        putAs(fixture, ApplicationRole.LECTURER, fixture.instructor().getId(), fixture.team().getId(),
-                "1.5", "0.0", "0.0", null)
+        mockMvc.perform(put("/api/projects/{projectId}/group-weights", fixture.project().getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(fixture.team().getId(), "1.1", "0.3", "0.4", "0.4"))
+                        .with(authentication(authenticationFor(ApplicationRole.LECTURER, fixture.owner().getId())))
+                        .with(csrf()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("GROUP_WEIGHT_OUT_OF_RANGE"));
-    }
 
-    @Test
-    void sumNotEqualToOneIsRejected() throws Exception {
-        Fixture fixture = fixture();
-
-        putAs(fixture, ApplicationRole.LECTURER, fixture.instructor().getId(), fixture.team().getId(),
-                "0.5", "0.3", "0.1", null)
+        mockMvc.perform(put("/api/projects/{projectId}/group-weights", fixture.project().getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(fixture.team().getId(), "0.4", "0.1", "0.3", "0.3"))
+                        .with(authentication(authenticationFor(ApplicationRole.LECTURER, fixture.owner().getId())))
+                        .with(csrf()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("GROUP_WEIGHT_SUM_INVALID"));
     }
 
     @Test
-    void repeatedUpdateOnSameProjectIsDeterministicAndDoesNotDuplicateRows() throws Exception {
+    void zeroWeightOnASingleCriterionIsAccepted() throws Exception {
         Fixture fixture = fixture();
 
-        putAs(fixture, ApplicationRole.LECTURER, fixture.instructor().getId(), fixture.team().getId(),
-                "0.5", "0.3", "0.2", "first")
-                .andExpect(status().isOk());
-        putAs(fixture, ApplicationRole.LECTURER, fixture.instructor().getId(), fixture.team().getId(),
-                "0.2", "0.3", "0.5", "second")
+        mockMvc.perform(put("/api/projects/{projectId}/group-weights", fixture.project().getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(fixture.team().getId(), "0.0", "0.4", "0.3", "0.3"))
+                        .with(authentication(authenticationFor(ApplicationRole.LECTURER, fixture.owner().getId())))
+                        .with(csrf()))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.codeWeight").value(0.2))
-                .andExpect(jsonPath("$.note").value("second"));
-
-        assertEquals(1, configRepository.findAll().stream()
-                .filter(config -> config.getProject().getId().equals(fixture.project().getId()))
-                .count());
+                .andExpect(jsonPath("$.codeWeight").value(0.0));
     }
 
     @Test
-    void putRequiresAuthenticationAndValidCsrf() throws Exception {
-        Fixture fixture = fixture();
+    void historicalRowsRemainReadableThroughTheRetainedRepository() {
+        Lecturer instructor = lecturerRepository.saveAndFlush(Lecturer.builder()
+                .cognitoSub(unique("OWNER-SUB"))
+                .email(unique("owner") + "@example.test")
+                .fullName("Owner Lecturer")
+                .accountStatus(AccountStatus.ACTIVE)
+                .build());
+        Course course = courseRepository.saveAndFlush(Course.builder()
+                .instructor(instructor)
+                .courseCode(unique("COURSE"))
+                .name("Historical group weight course")
+                .build());
+        Project project = projectRepository.saveAndFlush(Project.builder()
+                .course(course)
+                .name("Historical group weight project")
+                .build());
+        Team team = teamRepository.saveAndFlush(Team.builder()
+                .course(course)
+                .project(project)
+                .name(unique("Team"))
+                .build());
 
-        mockMvc.perform(put("/api/projects/{projectId}/group-weights", fixture.project().getId())
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(body(fixture.team().getId(), "0.5", "0.3", "0.2", null))
-                        .with(csrf()))
-                .andExpect(status().isUnauthorized());
-        mockMvc.perform(put("/api/projects/{projectId}/group-weights", fixture.project().getId())
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(body(fixture.team().getId(), "0.5", "0.3", "0.2", null))
-                        .with(authentication(authenticationFor(ApplicationRole.LECTURER, fixture.instructor().getId()))))
-                .andExpect(status().isForbidden());
+        ProjectGroupWeightConfig saved = configRepository.saveAndFlush(ProjectGroupWeightConfig.builder()
+                .project(project)
+                .team(team)
+                .codeWeight(new BigDecimal("0.5"))
+                .testWeight(new BigDecimal("0.0"))
+                .documentWeight(new BigDecimal("0.3"))
+                .researchWeight(new BigDecimal("0.0"))
+                .designWeight(new BigDecimal("0.2"))
+                .build());
+
+        assertThat(configRepository.findByProjectId(project.getId())).isPresent();
+        assertThat(configRepository.findById(saved.getId())).isPresent();
     }
 
-    private org.springframework.test.web.servlet.ResultActions putAs(
-            Fixture fixture,
-            ApplicationRole role,
-            UUID profileId,
-            UUID groupId,
-            String codeWeight,
-            String documentWeight,
-            String designWeight,
-            String note
-    ) throws Exception {
-        return mockMvc.perform(put("/api/projects/{projectId}/group-weights", fixture.project().getId())
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(body(groupId, codeWeight, documentWeight, designWeight, note))
-                .with(authentication(authenticationFor(role, profileId)))
-                .with(csrf()));
-    }
-
-    private String body(UUID groupId, String codeWeight, String documentWeight, String designWeight, String note) {
-        String noteJson = note == null ? "null" : "\"" + note + "\"";
-        return "{"
-                + "\"groupId\":\"" + groupId + "\","
-                + "\"codeWeight\":" + codeWeight + ","
-                + "\"documentWeight\":" + documentWeight + ","
-                + "\"designWeight\":" + designWeight + ","
-                + "\"note\":" + noteJson
-                + "}";
+    private String body(UUID groupId, String code, String test, String document, String research) {
+        return """
+                {
+                  "groupId": "%s",
+                  "codeWeight": %s,
+                  "testWeight": %s,
+                  "documentWeight": %s,
+                  "researchWeight": %s
+                }
+                """.formatted(groupId, code, test, document, research);
     }
 
     private Fixture fixture() {
-        Lecturer instructor = saveLecturer("OWNER-LECTURER");
+        Lecturer owner = lecturerRepository.saveAndFlush(Lecturer.builder()
+                .cognitoSub(unique("OWNER-SUB"))
+                .email(unique("owner") + "@example.test")
+                .fullName("Owner Lecturer")
+                .accountStatus(AccountStatus.ACTIVE)
+                .build());
+        Lecturer otherLecturer = lecturerRepository.saveAndFlush(Lecturer.builder()
+                .cognitoSub(unique("OTHER-SUB"))
+                .email(unique("other") + "@example.test")
+                .fullName("Other Lecturer")
+                .accountStatus(AccountStatus.ACTIVE)
+                .build());
         Course course = courseRepository.saveAndFlush(Course.builder()
-                .instructor(instructor)
+                .instructor(owner)
                 .courseCode(unique("COURSE"))
                 .name("Group weight course")
                 .build());
@@ -238,42 +268,12 @@ class ProjectGroupWeightConfigControllerIntegrationTest {
                 .project(project)
                 .name(unique("Team"))
                 .build());
-        Student leader = saveStudent("LEADER");
-        Student member = saveStudent("MEMBER");
-        teamMemberRepository.saveAndFlush(TeamMember.builder()
-                .team(team)
-                .student(leader)
-                .roleInTeam(RoleInTeam.LEADER)
-                .build());
-        teamMemberRepository.saveAndFlush(TeamMember.builder()
-                .team(team)
-                .student(member)
-                .roleInTeam(RoleInTeam.MEMBER)
-                .build());
-        return new Fixture(course, project, team, instructor, leader, member);
-    }
-
-    private Lecturer saveLecturer(String prefix) {
-        return lecturerRepository.saveAndFlush(Lecturer.builder()
-                .cognitoSub(unique(prefix + "-SUB"))
-                .email(unique(prefix.toLowerCase()) + "@example.test")
-                .fullName(prefix + " Lecturer")
-                .build());
-    }
-
-    private Student saveStudent(String prefix) {
-        return studentRepository.saveAndFlush(Student.builder()
-                .cognitoSub(unique(prefix + "-SUB"))
-                .studentCode(unique(prefix + "-CODE"))
-                .email(unique(prefix.toLowerCase()) + "@example.test")
-                .fullName(prefix + " Student")
-                .accountStatus(AccountStatus.ACTIVE)
-                .build());
+        return new Fixture(owner, otherLecturer, project, team);
     }
 
     private Authentication authenticationFor(ApplicationRole role, UUID localProfileId) {
         SagaPrincipal principal = new SagaPrincipal(
-                role.name().toLowerCase() + "-group-weight",
+                role.name().toLowerCase() + "-group-weight-" + UUID.randomUUID(),
                 role.name().toLowerCase() + "@example.test",
                 role.name() + " User",
                 role,
@@ -291,13 +291,5 @@ class ProjectGroupWeightConfigControllerIntegrationTest {
         return prefix + "-" + UUID.randomUUID();
     }
 
-    private record Fixture(
-            Course course,
-            Project project,
-            Team team,
-            Lecturer instructor,
-            Student leader,
-            Student member
-    ) {
-    }
+    private record Fixture(Lecturer owner, Lecturer otherLecturer, Project project, Team team) {}
 }

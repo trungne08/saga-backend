@@ -7,8 +7,9 @@ import java.util.UUID;
 public record ProjectGroupWeightConfigRequest(
         UUID groupId,
         BigDecimal codeWeight,
+        BigDecimal testWeight,
         BigDecimal documentWeight,
-        BigDecimal designWeight,
+        BigDecimal researchWeight,
         @Size(max = 1000) String note
 ) {
 }

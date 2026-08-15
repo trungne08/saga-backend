@@ -55,4 +55,39 @@ class ProjectTypeMigrationContractTest {
                 "contribution"
         );
     }
+
+    @Test
+    void v34ReplacesProjectTypeDataWithExactlyFourCanonicalRowsInSafeOrder() throws Exception {
+        String rawSql = Files.readString(Path.of(
+                "src", "main", "resources", "db", "migration",
+                "V34__replace_project_type_with_canonical_catalog.sql"
+        ), StandardCharsets.UTF_8).replace("\r\n", "\n");
+        String sql = rawSql.toLowerCase();
+
+        int nullOutIndex = sql.indexOf("update project");
+        int deleteIndex = sql.indexOf("delete from project_type");
+        int firstInsertIndex = sql.indexOf("insert into project_type");
+        assertThat(nullOutIndex).isPositive();
+        assertThat(deleteIndex).isGreaterThan(nullOutIndex);
+        assertThat(firstInsertIndex).isGreaterThan(deleteIndex);
+
+        assertThat(sql).contains(
+                "update project",
+                "set project_type_id = null",
+                "delete from project_type",
+                "'design_architecture'",
+                "'research'",
+                "'tester'",
+                "'document'"
+        );
+        assertThat(sql).doesNotContain(
+                "drop table",
+                "drop column",
+                "drop foreign key",
+                "drop constraint fk_project_project_type"
+        );
+
+        long insertCount = sql.lines().filter(line -> line.trim().startsWith("insert into project_type")).count();
+        assertThat(insertCount).isEqualTo(4);
+    }
 }

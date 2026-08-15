@@ -16,7 +16,6 @@ import com.saga.be.entity.StudentCourseInvitation;
 import com.saga.be.entity.Subject;
 import com.saga.be.entity.Team;
 import com.saga.be.entity.TeamMember;
-import com.saga.be.service.contribution.ContributionSliceWeights;
 import com.saga.be.repository.ClassRepository;
 import com.saga.be.repository.CourseRepository;
 import com.saga.be.repository.LecturerRepository;
@@ -78,7 +77,6 @@ public class CourseService {
         }
 
         CourseReferences references = resolveActiveReferences(request);
-        ContributionSliceWeights defaultWeights = ContributionSliceWeights.fromCourse(null);
 
         Course course = Course.builder()
                 .courseCode(courseCode)
@@ -87,9 +85,6 @@ public class CourseService {
                 .clazz(references.clazz())
                 .semester(references.semester())
                 .instructor(references.instructor())
-                .codeContributionWeight(defaultWeights.codeValue())
-                .documentContributionWeight(defaultWeights.documentValue())
-                .designContributionWeight(defaultWeights.designValue())
                 .build();
 
         return courseRepository.save(course);

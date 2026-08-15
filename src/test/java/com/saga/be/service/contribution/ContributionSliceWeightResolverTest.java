@@ -1,6 +1,7 @@
 package com.saga.be.service.contribution;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -8,6 +9,8 @@ import com.saga.be.entity.Course;
 import com.saga.be.entity.Project;
 import com.saga.be.entity.ProjectGroupWeightConfig;
 import com.saga.be.entity.Team;
+import com.saga.be.entity.enums.ContributionConfigMode;
+import com.saga.be.exception.IntegrationException;
 import com.saga.be.repository.ProjectGroupWeightConfigRepository;
 import java.math.BigDecimal;
 import java.util.Optional;
@@ -17,102 +20,125 @@ import org.junit.jupiter.api.Test;
 class ContributionSliceWeightResolverTest {
 
     @Test
-    void fallsBackToCourseWeightsWhenNoConfigExistsForProject() {
+    void courseModeAlwaysUsesTheTeamsOwningCourseWeights() {
+        ProjectGroupWeightConfigRepository repository = mock(ProjectGroupWeightConfigRepository.class);
+        ContributionSliceWeightResolver resolver = new ContributionSliceWeightResolver(repository);
+        Course course = new Course();
+        course.setContributionConfigMode(ContributionConfigMode.COURSE);
+        course.setCodeContributionWeight(40.0);
+        course.setTestContributionWeight(20.0);
+        course.setDocumentContributionWeight(20.0);
+        course.setResearchContributionWeight(20.0);
+        Team team = new Team();
+        team.setId(UUID.randomUUID());
+        team.setCourse(course);
+
+        ContributionSliceWeights weights = resolver.resolve(team);
+
+        assertThat(weights.code()).isEqualByComparingTo("40");
+        assertThat(weights.test()).isEqualByComparingTo("20");
+        assertThat(weights.document()).isEqualByComparingTo("20");
+        assertThat(weights.research()).isEqualByComparingTo("20");
+    }
+
+    @Test
+    void everyTeamInTheSameCourseCourseModeResolvesTheIdenticalWeights() {
+        ProjectGroupWeightConfigRepository repository = mock(ProjectGroupWeightConfigRepository.class);
+        ContributionSliceWeightResolver resolver = new ContributionSliceWeightResolver(repository);
+        Course course = new Course();
+        course.setContributionConfigMode(ContributionConfigMode.COURSE);
+        course.setCodeContributionWeight(10.0);
+        course.setTestContributionWeight(40.0);
+        course.setDocumentContributionWeight(30.0);
+        course.setResearchContributionWeight(20.0);
+        Team first = new Team();
+        first.setId(UUID.randomUUID());
+        first.setCourse(course);
+        Team second = new Team();
+        second.setId(UUID.randomUUID());
+        second.setCourse(course);
+
+        assertThat(resolver.resolve(first)).isEqualTo(resolver.resolve(second));
+    }
+
+    @Test
+    void teamModeUsesTheExactProjectTeamOverride() {
         ProjectGroupWeightConfigRepository repository = mock(ProjectGroupWeightConfigRepository.class);
         ContributionSliceWeightResolver resolver = new ContributionSliceWeightResolver(repository);
         UUID projectId = UUID.randomUUID();
         Course course = new Course();
-        course.setCodeContributionWeight(60.0);
-        course.setDocumentContributionWeight(20.0);
-        course.setDesignContributionWeight(20.0);
+        course.setContributionConfigMode(ContributionConfigMode.TEAM);
+        Project project = new Project();
+        project.setId(projectId);
         Team team = new Team();
         team.setId(UUID.randomUUID());
         team.setCourse(course);
-        when(repository.findByProjectId(projectId)).thenReturn(Optional.empty());
-
-        ContributionSliceWeights weights = resolver.resolve(projectId, team);
-
-        assertThat(weights.code()).isEqualByComparingTo("60");
-        assertThat(weights.document()).isEqualByComparingTo("20");
-        assertThat(weights.design()).isEqualByComparingTo("20");
-    }
-
-    @Test
-    void usesExactProjectTeamOverrideWhenPresent() {
-        ProjectGroupWeightConfigRepository repository = mock(ProjectGroupWeightConfigRepository.class);
-        ContributionSliceWeightResolver resolver = new ContributionSliceWeightResolver(repository);
-        UUID projectId = UUID.randomUUID();
-        Team team = new Team();
-        team.setId(UUID.randomUUID());
-        team.setCourse(new Course());
-        Project project = new Project();
-        project.setId(projectId);
+        team.setProject(project);
         when(repository.findByProjectId(projectId)).thenReturn(Optional.of(ProjectGroupWeightConfig.builder()
                 .project(project)
                 .team(team)
                 .codeWeight(new BigDecimal("0.4"))
+                .testWeight(new BigDecimal("0.1"))
                 .documentWeight(new BigDecimal("0.3"))
-                .designWeight(new BigDecimal("0.3"))
+                .researchWeight(new BigDecimal("0.2"))
                 .build()));
 
-        ContributionSliceWeights weights = resolver.resolve(projectId, team);
+        ContributionSliceWeights weights = resolver.resolve(team);
 
         assertThat(weights.code()).isEqualByComparingTo("40");
+        assertThat(weights.test()).isEqualByComparingTo("10");
         assertThat(weights.document()).isEqualByComparingTo("30");
-        assertThat(weights.design()).isEqualByComparingTo("30");
+        assertThat(weights.research()).isEqualByComparingTo("20");
     }
 
     @Test
-    void ignoresConfigThatBelongsToADifferentTeamAndFallsBackToCourseWeights() {
+    void teamModeFailsClosedInsteadOfFallingBackToCourseWeightsWhenOverrideMissing() {
         ProjectGroupWeightConfigRepository repository = mock(ProjectGroupWeightConfigRepository.class);
         ContributionSliceWeightResolver resolver = new ContributionSliceWeightResolver(repository);
         UUID projectId = UUID.randomUUID();
         Course course = new Course();
-        course.setCodeContributionWeight(60.0);
-        course.setDocumentContributionWeight(20.0);
-        course.setDesignContributionWeight(20.0);
+        course.setContributionConfigMode(ContributionConfigMode.TEAM);
+        course.setCodeContributionWeight(70.0);
+        course.setDocumentContributionWeight(30.0);
+        Project project = new Project();
+        project.setId(projectId);
         Team team = new Team();
         team.setId(UUID.randomUUID());
         team.setCourse(course);
-        Team otherTeam = new Team();
-        otherTeam.setId(UUID.randomUUID());
-        when(repository.findByProjectId(projectId)).thenReturn(Optional.of(ProjectGroupWeightConfig.builder()
-                .team(otherTeam)
-                .codeWeight(new BigDecimal("0.4"))
-                .documentWeight(new BigDecimal("0.3"))
-                .designWeight(new BigDecimal("0.3"))
-                .build()));
+        team.setProject(project);
+        when(repository.findByProjectId(projectId)).thenReturn(Optional.empty());
 
-        ContributionSliceWeights weights = resolver.resolve(projectId, team);
-
-        assertThat(weights.code()).isEqualByComparingTo("60");
-        assertThat(weights.document()).isEqualByComparingTo("20");
-        assertThat(weights.design()).isEqualByComparingTo("20");
+        assertThatThrownBy(() -> resolver.resolve(team))
+                .isInstanceOf(IntegrationException.class)
+                .satisfies(exception -> assertThat(((IntegrationException) exception).getCode())
+                        .isEqualTo("TEAM_WEIGHT_CONFIG_INCOMPLETE"));
     }
 
     @Test
-    void repeatedResolveReflectsLatestPersistedConfigValue() {
+    void teamModeDoesNotLeakAnotherTeamsOverride() {
         ProjectGroupWeightConfigRepository repository = mock(ProjectGroupWeightConfigRepository.class);
         ContributionSliceWeightResolver resolver = new ContributionSliceWeightResolver(repository);
         UUID projectId = UUID.randomUUID();
+        Course course = new Course();
+        course.setContributionConfigMode(ContributionConfigMode.TEAM);
+        Project project = new Project();
+        project.setId(projectId);
         Team team = new Team();
         team.setId(UUID.randomUUID());
-        team.setCourse(new Course());
-        ProjectGroupWeightConfig first = ProjectGroupWeightConfig.builder()
-                .team(team)
-                .codeWeight(new BigDecimal("0.5"))
+        team.setCourse(course);
+        team.setProject(project);
+        Team otherTeam = new Team();
+        otherTeam.setId(UUID.randomUUID());
+        when(repository.findByProjectId(projectId)).thenReturn(Optional.of(ProjectGroupWeightConfig.builder()
+                .project(project)
+                .team(otherTeam)
+                .codeWeight(new BigDecimal("0.4"))
+                .testWeight(new BigDecimal("0.1"))
                 .documentWeight(new BigDecimal("0.3"))
-                .designWeight(new BigDecimal("0.2"))
-                .build();
-        ProjectGroupWeightConfig second = ProjectGroupWeightConfig.builder()
-                .team(team)
-                .codeWeight(new BigDecimal("0.2"))
-                .documentWeight(new BigDecimal("0.3"))
-                .designWeight(new BigDecimal("0.5"))
-                .build();
-        when(repository.findByProjectId(projectId)).thenReturn(Optional.of(first), Optional.of(second));
+                .researchWeight(new BigDecimal("0.2"))
+                .build()));
 
-        assertThat(resolver.resolve(projectId, team).code()).isEqualByComparingTo("50");
-        assertThat(resolver.resolve(projectId, team).code()).isEqualByComparingTo("20");
+        assertThatThrownBy(() -> resolver.resolve(team))
+                .isInstanceOf(IntegrationException.class);
     }
 }

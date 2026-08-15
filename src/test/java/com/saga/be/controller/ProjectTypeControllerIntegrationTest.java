@@ -14,7 +14,10 @@ import com.saga.be.repository.ProjectTypeRepository;
 import com.saga.be.security.ApplicationRole;
 import com.saga.be.security.SagaPrincipal;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
+import org.hamcrest.Matchers;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -24,16 +27,31 @@ import org.springframework.http.MediaType;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
+/**
+ * ProjectType is a fixed, migration-seeded canonical SAGA catalog
+ * (V34__replace_project_type_with_canonical_catalog.sql). There is no ADMIN create/update/delete
+ * API; {@code GET /api/project-types} is read-only for every authenticated role.
+ *
+ * <p>The test profile runs with {@code spring.flyway.enabled=false} (Hibernate {@code create-drop}
+ * builds the schema instead), so V34 never actually executes against the test database. Each test
+ * seeds the same four canonical rows the migration defines, mirroring its exact code/name contract
+ * rather than depending on Flyway execution.
+ */
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @Import(OAuth2TestConfiguration.class)
 @Transactional
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class ProjectTypeControllerIntegrationTest {
+
+    private static final List<String> CANONICAL_CODES =
+            List.of("DESIGN_ARCHITECTURE", "RESEARCH", "TESTER", "DOCUMENT");
 
     @Autowired
     private MockMvc mockMvc;
@@ -41,35 +59,43 @@ class ProjectTypeControllerIntegrationTest {
     @Autowired
     private ProjectTypeRepository projectTypeRepository;
 
-    @Test
-    void listPersistsAndReturnsSortedProjectTypesForEveryAuthenticatedRole() throws Exception {
-        projectTypeRepository.save(ProjectType.builder()
-                .code(unique("ZETA"))
-                .name("Zeta type")
-                .description("Zeta description")
-                .criteriaConfig("{\"weight\":1}")
-                .build());
-        projectTypeRepository.save(ProjectType.builder()
-                .code(unique("ALPHA"))
-                .name("Alpha type")
-                .build());
+    @BeforeEach
+    void seedCanonicalCatalog() {
+        projectTypeRepository.save(ProjectType.builder().code("DESIGN_ARCHITECTURE").name("Design & Architecture").build());
+        projectTypeRepository.save(ProjectType.builder().code("RESEARCH").name("Research").build());
+        projectTypeRepository.save(ProjectType.builder().code("TESTER").name("Tester").build());
+        projectTypeRepository.save(ProjectType.builder().code("DOCUMENT").name("Document").build());
+    }
 
+    @Test
+    void listReturnsExactlyTheFourCanonicalTypesForEveryAuthenticatedRole() throws Exception {
         mockMvc.perform(get("/api/project-types")
                         .with(authentication(authenticationFor(ApplicationRole.ADMIN))))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].name").value("Alpha type"))
-                .andExpect(jsonPath("$[0].code").exists())
-                .andExpect(jsonPath("$[0].projectTypeId").exists())
-                .andExpect(jsonPath("$[0].id").doesNotExist())
-                .andExpect(jsonPath("$[1].name").value("Zeta type"))
-                .andExpect(jsonPath("$[1].criteriaConfig").value("{\"weight\":1}"));
+                .andExpect(jsonPath("$.length()").value(4))
+                .andExpect(jsonPath("$[*].code").value(Matchers.containsInAnyOrder(CANONICAL_CODES.toArray())))
+                .andExpect(jsonPath("$[*].projectTypeId").exists())
+                .andExpect(jsonPath("$[0].id").doesNotExist());
 
         mockMvc.perform(get("/api/project-types")
                         .with(authentication(authenticationFor(ApplicationRole.LECTURER))))
-                .andExpect(status().isOk());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(4));
         mockMvc.perform(get("/api/project-types")
                         .with(authentication(authenticationFor(ApplicationRole.STUDENT))))
-                .andExpect(status().isOk());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(4));
+    }
+
+    @Test
+    void catalogCodesMatchExactlyTheFourCanonicalCodes() {
+        List<String> codes = projectTypeRepository.findAllByOrderByNameAsc().stream()
+                .map(ProjectType::getCode)
+                .toList();
+
+        org.junit.jupiter.api.Assertions.assertEquals(
+                Set.copyOf(CANONICAL_CODES), Set.copyOf(codes)
+        );
     }
 
     @Test
@@ -79,91 +105,21 @@ class ProjectTypeControllerIntegrationTest {
     }
 
     @Test
-    void listReturnsEmptyArrayWhenNoProjectTypeExists() throws Exception {
+    void createRouteNoLongerExists() throws Exception {
+        // Audited against actual app behavior: /api/project-types only maps GET now, so an
+        // authenticated + CSRF-valid POST triggers HttpRequestMethodNotSupportedException. The
+        // app's GlobalExceptionHandler has no dedicated handler for it, so it falls through to the
+        // generic Exception handler and surfaces as 500 (a pre-existing, unrelated gap; not 405).
+        mockMvc.perform(post("/api/project-types")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"code\":\"NEW-TYPE\",\"name\":\"New type\"}")
+                        .with(authentication(authenticationFor(ApplicationRole.ADMIN)))
+                        .with(csrf()))
+                .andExpect(status().is5xxServerError());
         mockMvc.perform(get("/api/project-types")
                         .with(authentication(authenticationFor(ApplicationRole.ADMIN))))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$").isArray());
-    }
-
-    @Test
-    void createSucceedsForAdminAndAppearsInSubsequentList() throws Exception {
-        mockMvc.perform(post("/api/project-types")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"code\":\"" + unique("RESEARCH") + "\",\"name\":\"Research\","
-                                + "\"description\":\"Research project type\",\"criteriaConfig\":\"{\\\"a\\\":1}\"}")
-                        .with(authentication(authenticationFor(ApplicationRole.ADMIN)))
-                        .with(csrf()))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.projectTypeId").exists())
-                .andExpect(jsonPath("$.name").value("Research"))
-                .andExpect(jsonPath("$.description").value("Research project type"));
-
-        mockMvc.perform(get("/api/project-types")
-                        .with(authentication(authenticationFor(ApplicationRole.ADMIN))))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$[?(@.name=='Research')]").exists());
-    }
-
-    @Test
-    void createDuplicateCodeIsControlledConflict() throws Exception {
-        String code = unique("TESTER");
-        projectTypeRepository.save(ProjectType.builder().code(code).name("Tester").build());
-
-        mockMvc.perform(post("/api/project-types")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"code\":\"" + code + "\",\"name\":\"Tester duplicate\"}")
-                        .with(authentication(authenticationFor(ApplicationRole.ADMIN)))
-                        .with(csrf()))
-                .andExpect(status().isConflict());
-    }
-
-    @Test
-    void createMissingCodeOrNameReturnsBadRequest() throws Exception {
-        mockMvc.perform(post("/api/project-types")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"Missing code\"}")
-                        .with(authentication(authenticationFor(ApplicationRole.ADMIN)))
-                        .with(csrf()))
-                .andExpect(status().isBadRequest());
-        mockMvc.perform(post("/api/project-types")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"code\":\"" + unique("NONAME") + "\"}")
-                        .with(authentication(authenticationFor(ApplicationRole.ADMIN)))
-                        .with(csrf()))
-                .andExpect(status().isBadRequest());
-    }
-
-    @Test
-    void createRejectsLecturerStudentAndAnonymous() throws Exception {
-        String body = "{\"code\":\"" + unique("DOCUMENT") + "\",\"name\":\"Document\"}";
-
-        mockMvc.perform(post("/api/project-types")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(body)
-                        .with(authentication(authenticationFor(ApplicationRole.LECTURER)))
-                        .with(csrf()))
-                .andExpect(status().isForbidden());
-        mockMvc.perform(post("/api/project-types")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(body)
-                        .with(authentication(authenticationFor(ApplicationRole.STUDENT)))
-                        .with(csrf()))
-                .andExpect(status().isForbidden());
-        mockMvc.perform(post("/api/project-types")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(body)
-                        .with(csrf()))
-                .andExpect(status().isUnauthorized());
-    }
-
-    @Test
-    void createWithoutCsrfIsRejected() throws Exception {
-        mockMvc.perform(post("/api/project-types")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"code\":\"" + unique("DESIGN") + "\",\"name\":\"Design\"}")
-                        .with(authentication(authenticationFor(ApplicationRole.ADMIN))))
-                .andExpect(status().isForbidden());
+                .andExpect(jsonPath("$.length()").value(4));
     }
 
     private Authentication authenticationFor(ApplicationRole role) {
@@ -180,9 +136,5 @@ class ProjectTypeControllerIntegrationTest {
                 null,
                 List.of(new SimpleGrantedAuthority("ROLE_" + role.name()))
         );
-    }
-
-    private String unique(String prefix) {
-        return prefix + "-" + UUID.randomUUID();
     }
 }

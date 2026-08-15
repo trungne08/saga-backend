@@ -15,7 +15,6 @@ import com.saga.be.entity.Student;
 import com.saga.be.entity.Task;
 import com.saga.be.entity.Team;
 import com.saga.be.entity.TeamMember;
-import com.saga.be.entity.enums.DocumentType;
 import com.saga.be.entity.enums.PolicyOverrideStatus;
 import com.saga.be.entity.enums.RoleInTeam;
 import com.saga.be.entity.enums.TaskStatus;
@@ -30,8 +29,11 @@ import com.saga.be.repository.TeamMemberRepository;
 import com.saga.be.repository.TeamRepository;
 import com.saga.be.security.ApplicationRole;
 import com.saga.be.security.SagaPrincipal;
+import com.saga.be.service.contribution.ContributionCriterion;
+import com.saga.be.service.contribution.ContributionMarkerClassification;
 import com.saga.be.service.contribution.ContributionSliceWeightResolver;
 import com.saga.be.service.contribution.ContributionSliceWeights;
+import com.saga.be.service.contribution.ReservedContributionMarkerClassifier;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -40,6 +42,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -55,10 +58,13 @@ public class TeamContributionService {
 
     private static final String TEAM_CONTRIBUTION_OVERRIDE_TYPE = "TEAM_CONTRIBUTION_OVERRIDE";
 
+    /**
+     * DESIGN is retired as an active Contribution criterion; design-classified evidence
+     * (keyword match, or {@code DocumentType.DESIGN}) is folded directly into DOCUMENT.
+     */
     private enum ContributionSlice {
         CODE,
-        DOCUMENT,
-        DESIGN
+        DOCUMENT
     }
  
     private final TeamRepository teamRepository;
@@ -125,8 +131,9 @@ public class TeamContributionService {
         }
 
         Map<UUID, Double> codeScoreByStudent = new HashMap<>();
+        Map<UUID, Double> testScoreByStudent = new HashMap<>();
         Map<UUID, Double> documentScoreByStudent = new HashMap<>();
-        Map<UUID, Double> designScoreByStudent = new HashMap<>();
+        Map<UUID, Double> researchScoreByStudent = new HashMap<>();
         Map<UUID, Double> adjustedSprintScoreByStudent = new HashMap<>();
         Map<UUID, List<TeamContributionMemberResponse.SprintContributionBreakdown>>
                 sprintBreakdownsByStudent = new HashMap<>();
@@ -144,37 +151,24 @@ public class TeamContributionService {
             }
             UUID studentId = student.getId();
 
+            // Product decision: when a commit is linked to a Task, the Task is the sole numeric
+            // Contribution authority — the commit is supporting/provenance evidence only and
+            // never mints additional score of its own (no CODE/TEST/DOCUMENT/RESEARCH bucket is
+            // incremented here). commitCountByStudent below still reflects task-linked commit
+            // evidence for evidenceCount/warnings purposes; only the scoring effect is removed.
             List<CommitData> studentCommits = commitDataRepository.findByAuthorIdAndProjectIdAndTaskIsNotNull(studentId, projectId);
             commitCountByStudent.put(studentId, studentCommits.size());
             codeScoreByStudent.put(studentId, 0.0);
+            testScoreByStudent.put(studentId, 0.0);
             documentScoreByStudent.put(studentId, 0.0);
-            designScoreByStudent.put(studentId, 0.0);
-            for (CommitData commit : studentCommits) {
-                if (commit.getTask() == null) {
-                    continue;
-                }
-                double commitWeight = commit.getTask().getStoryPoint() != null
-                        ? commit.getTask().getStoryPoint().doubleValue()
-                        : 1.0;
-                switch (classifyTaskSlice(commit.getTask())) {
-                    case CODE -> codeScoreByStudent.merge(studentId, commitWeight, Double::sum);
-                    case DOCUMENT -> documentScoreByStudent.merge(studentId, commitWeight, Double::sum);
-                    case DESIGN -> designScoreByStudent.merge(studentId, commitWeight, Double::sum);
-                    default -> {
-                    }
-                }
-            }
+            researchScoreByStudent.put(studentId, 0.0);
 
-            long documentCount = documents.stream()
+            // DESIGN is retired as an active criterion; DocumentType.DESIGN evidence is folded
+            // into DOCUMENT (deterministic remap of an existing structured field, not invented).
+            long documentAndDesignCount = documents.stream()
                     .filter(document -> studentId.equals(document.getAuthor() != null ? document.getAuthor().getId() : null))
-                    .filter(document -> document.getType() != DocumentType.DESIGN)
                     .count();
-            long designCount = documents.stream()
-                    .filter(document -> studentId.equals(document.getAuthor() != null ? document.getAuthor().getId() : null))
-                    .filter(document -> document.getType() == DocumentType.DESIGN)
-                    .count();
-            documentScoreByStudent.merge(studentId, (double) documentCount, Double::sum);
-            designScoreByStudent.merge(studentId, (double) designCount, Double::sum);
+            documentScoreByStudent.merge(studentId, (double) documentAndDesignCount, Double::sum);
 
             List<Task> completedTasks = tasks.stream()
                     .filter(task -> studentId.equals(task.getAssignee() != null ? task.getAssignee().getId() : null))
@@ -185,11 +179,16 @@ public class TeamContributionService {
             Map<UUID, Double> taskScoreBySprint = new HashMap<>();
             for (Task task : completedTasks) {
                 double taskWeight = task.getStoryPoint() != null ? task.getStoryPoint().doubleValue() : 1.0;
-                switch (classifyTaskSlice(task)) {
-                    case CODE -> codeScoreByStudent.merge(studentId, taskWeight, Double::sum);
-                    case DOCUMENT -> documentScoreByStudent.merge(studentId, taskWeight, Double::sum);
-                    case DESIGN -> designScoreByStudent.merge(studentId, taskWeight, Double::sum);
-                    default -> {
+                // taskWeight/taskScoreBySprint below stay unconditional regardless of criterion
+                // classification (the numeric task/sprint formula is unchanged); only the
+                // CODE/TEST/DOCUMENT/RESEARCH bucket routing is skipped when AMBIGUOUS.
+                Optional<ContributionCriterion> criterion = classifyTaskContribution(task);
+                if (criterion.isPresent()) {
+                    switch (criterion.get()) {
+                        case CODE -> codeScoreByStudent.merge(studentId, taskWeight, Double::sum);
+                        case TEST -> testScoreByStudent.merge(studentId, taskWeight, Double::sum);
+                        case DOCUMENT -> documentScoreByStudent.merge(studentId, taskWeight, Double::sum);
+                        case RESEARCH -> researchScoreByStudent.merge(studentId, taskWeight, Double::sum);
                     }
                 }
                 if (task.getSprint() == null || task.getSprint().getId() == null) {
@@ -219,17 +218,24 @@ public class TeamContributionService {
         }
 
         double totalCode = codeScoreByStudent.values().stream().mapToDouble(Double::doubleValue).sum();
+        double totalTest = testScoreByStudent.values().stream().mapToDouble(Double::doubleValue).sum();
         double totalDocument = documentScoreByStudent.values().stream().mapToDouble(Double::doubleValue).sum();
-        double totalDesign = designScoreByStudent.values().stream().mapToDouble(Double::doubleValue).sum();
+        double totalResearch = researchScoreByStudent.values().stream().mapToDouble(Double::doubleValue).sum();
         double totalAdjustedTaskScore = adjustedSprintScoreByStudent.values().stream()
                 .mapToDouble(Double::doubleValue)
                 .sum();
-        ContributionSliceWeights sliceWeights = sliceWeightResolver.resolve(projectId, team)
-                .normalizeForActiveSlices(totalCode > 0.0, totalDocument > 0.0, totalDesign > 0.0);
+        // TEST/RESEARCH now have a real evidence source: a DONE Task carrying the exact
+        // reserved marker saga:test / saga:research (see classifyTaskContribution). Tasks with
+        // no reserved marker still fall through to the unchanged legacy CODE/DOCUMENT keyword
+        // classifier. A Task with >1 conflicting reserved marker is excluded from all four
+        // buckets (AMBIGUOUS), not defaulted to CODE.
+        ContributionSliceWeights sliceWeights = sliceWeightResolver.resolve(team)
+                .normalizeForActiveSlices(totalCode > 0.0, totalTest > 0.0, totalDocument > 0.0, totalResearch > 0.0);
 
         Map<UUID, Double> codeContributionByStudent = new HashMap<>();
+        Map<UUID, Double> testContributionByStudent = new HashMap<>();
         Map<UUID, Double> documentContributionByStudent = new HashMap<>();
-        Map<UUID, Double> designContributionByStudent = new HashMap<>();
+        Map<UUID, Double> researchContributionByStudent = new HashMap<>();
         Map<UUID, Double> taskContributionByStudent = new HashMap<>();
         Map<UUID, Double> baseAdjustedContributionByStudent = new HashMap<>();
         List<UUID> memberStudentIds = new ArrayList<>();
@@ -242,23 +248,26 @@ public class TeamContributionService {
             memberStudentIds.add(studentId);
 
             double codeContribution = totalCode > 0 ? (codeScoreByStudent.getOrDefault(studentId, 0.0) / totalCode) * 100.0 : 0.0;
+            double testContribution = totalTest > 0 ? (testScoreByStudent.getOrDefault(studentId, 0.0) / totalTest) * 100.0 : 0.0;
             double documentContribution = totalDocument > 0
                     ? (documentScoreByStudent.getOrDefault(studentId, 0.0) / totalDocument) * 100.0
                     : 0.0;
-            double designContribution = totalDesign > 0
-                    ? (designScoreByStudent.getOrDefault(studentId, 0.0) / totalDesign) * 100.0
+            double researchContribution = totalResearch > 0
+                    ? (researchScoreByStudent.getOrDefault(studentId, 0.0) / totalResearch) * 100.0
                     : 0.0;
             double taskContribution = totalAdjustedTaskScore > 0.0
                     ? (adjustedSprintScoreByStudent.getOrDefault(studentId, 0.0) / totalAdjustedTaskScore) * 100.0
                     : 0.0;
             codeContributionByStudent.put(studentId, codeContribution);
+            testContributionByStudent.put(studentId, testContribution);
             documentContributionByStudent.put(studentId, documentContribution);
-            designContributionByStudent.put(studentId, designContribution);
+            researchContributionByStudent.put(studentId, researchContribution);
             taskContributionByStudent.put(studentId, taskContribution);
 
             double rawContribution = (codeContribution * sliceWeights.codeValue()
+                    + testContribution * sliceWeights.testValue()
                     + documentContribution * sliceWeights.documentValue()
-                    + designContribution * sliceWeights.designValue()) / 100.0;
+                    + researchContribution * sliceWeights.researchValue()) / 100.0;
             double peerCoefficient = totalPeerScore > 0.0
                     ? peerScoreByStudent.getOrDefault(studentId, 0.0) / totalPeerScore
                     : 1.0;
@@ -286,8 +295,7 @@ public class TeamContributionService {
             if (taskCountByStudent.getOrDefault(studentId, 0) > 0) {
                 evidenceCount++;
             }
-            if (documentScoreByStudent.getOrDefault(studentId, 0.0) > 0.0
-                    || designScoreByStudent.getOrDefault(studentId, 0.0) > 0.0) {
+            if (documentScoreByStudent.getOrDefault(studentId, 0.0) > 0.0) {
                 evidenceCount++;
             }
             if (peerReviewCountByStudent.getOrDefault(studentId, 0) > 0) {
@@ -301,7 +309,6 @@ public class TeamContributionService {
                     peerCoefficientByStudent.getOrDefault(studentId, 1.0),
                     commitCountByStudent.getOrDefault(studentId, 0),
                     documentScoreByStudent.getOrDefault(studentId, 0.0).intValue(),
-                    designScoreByStudent.getOrDefault(studentId, 0.0).intValue(),
                     peerReviewCountByStudent.getOrDefault(studentId, 0)
             );
 
@@ -311,10 +318,12 @@ public class TeamContributionService {
                     student.getStudentCode(),
                     codeContributionByStudent.getOrDefault(studentId, 0.0),
                     documentContributionByStudent.getOrDefault(studentId, 0.0),
-                    designContributionByStudent.getOrDefault(studentId, 0.0),
                     codeContributionByStudent.getOrDefault(studentId, 0.0),
                     documentContributionByStudent.getOrDefault(studentId, 0.0),
-                    designContributionByStudent.getOrDefault(studentId, 0.0),
+                    testContributionByStudent.getOrDefault(studentId, 0.0),
+                    testContributionByStudent.getOrDefault(studentId, 0.0),
+                    researchContributionByStudent.getOrDefault(studentId, 0.0),
+                    researchContributionByStudent.getOrDefault(studentId, 0.0),
                     peerCoefficientByStudent.getOrDefault(studentId, 1.0),
                     taskContributionByStudent.getOrDefault(studentId, 0.0),
                     taskContributionByStudent.getOrDefault(studentId, 0.0),
@@ -518,6 +527,27 @@ public class TeamContributionService {
         return equallySplit;
     }
 
+    /**
+     * Marker-first Contribution classification for a Task: an exact reserved marker
+     * (saga:code/saga:test/saga:document/saga:research) takes precedence over the legacy
+     * keyword classifier below. More than one conflicting reserved marker returns
+     * {@link Optional#empty()} (AMBIGUOUS) — the Task is not scored into any criterion until the
+     * conflict is fixed. No reserved marker falls through unchanged to {@link #classifyTaskSlice}.
+     */
+    private Optional<ContributionCriterion> classifyTaskContribution(Task task) {
+        ContributionMarkerClassification marker = ReservedContributionMarkerClassifier.classify(task.getLabels());
+        if (marker.ambiguous()) {
+            return Optional.empty();
+        }
+        if (marker.isResolved()) {
+            return Optional.of(marker.criterion());
+        }
+        return Optional.of(switch (classifyTaskSlice(task)) {
+            case CODE -> ContributionCriterion.CODE;
+            case DOCUMENT -> ContributionCriterion.DOCUMENT;
+        });
+    }
+
     private ContributionSlice classifyTaskSlice(Task task) {
         String combinedText = String.join(" ",
                 Objects.toString(task.getTitle(), ""),
@@ -532,7 +562,7 @@ public class TeamContributionService {
         ).trim();
         String normalized = combinedText.toLowerCase(Locale.ROOT);
         if (containsKeyword(normalized, List.of("figma", "mockup", "prototype", "wireframe", "design system", "visual design", "ui/ux", "design review", "design"))) {
-            return ContributionSlice.DESIGN;
+            return ContributionSlice.DOCUMENT;
         }
         if (containsKeyword(normalized, List.of("document", "documentation", "doc", "wiki", "readme", "guide", "spec", "manual", "requirement"))) {
             return ContributionSlice.DOCUMENT;
@@ -556,7 +586,6 @@ public class TeamContributionService {
             double peerCoefficient,
             int commitCount,
             int documentCount,
-            int designCount,
             int peerReviewCount
     ) {
         List<ContributionWarning> warnings = new ArrayList<>();
@@ -581,10 +610,10 @@ public class TeamContributionService {
                     "WARNING"
             ));
         }
-        if (commitCount == 0 && documentCount == 0 && designCount == 0 && peerReviewCount == 0) {
+        if (commitCount == 0 && documentCount == 0 && peerReviewCount == 0) {
             warnings.add(new ContributionWarning(
                     "NO_EVIDENCE",
-                    "No code, document, or design evidence was found for this student.",
+                    "No code or document evidence was found for this student.",
                     "WARNING"
             ));
         }

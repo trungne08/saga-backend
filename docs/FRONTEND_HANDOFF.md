@@ -1,5 +1,48 @@
 # SAGA Frontend Handoff
 
+## Task is sole numeric Contribution authority + reserved markers (foundation only) — 2026-08-15
+
+Current Backend contracts: OpenAPI **151** (unchanged), migration head **V37**.
+
+- New reserved Jira Task labels: `saga:code`, `saga:test`, `saga:document`, `saga:research` — exact match only (typos/case differences do nothing). A DONE Task carrying one of these routes its story points into that Contribution criterion, so `testContributionScore`/`researchContributionScore` can now be genuinely non-zero (previously always `0`). No Task with the marker → still `0`, unchanged.
+- A Task with more than one conflicting marker (e.g. `saga:test` + `saga:research`) is silently excluded from all four criteria — no error is surfaced to FE, it just won't show up in any criterion's score until the label conflict is fixed.
+- Internal-only change, no new FE-visible field: a commit linked to a Task no longer adds any score on top of that Task's own DONE contribution.
+- **Still foundation-only** — Jira attachment and GitHub Issue/comment attachment ingestion (the rest of the originally-planned milestone) are **not implemented**. Don't build UI expecting SAGA to auto-import external attachments yet.
+
+## Contribution weight: Course-default + optional exclusive Team override — 2026-08-15
+
+Current Backend contracts: OpenAPI **151**, migration head **V36**. Supersedes the "Course-wide 4-slice" section below (kept verbatim as history).
+
+- Each Course has exactly one active Contribution config mode: `COURSE` or `TEAM`. **No hybrid** — a Course is never "Team override if set, else Course." If TEAM mode is active and a Team has no override, that Team's Contribution is not computable (`TEAM_WEIGHT_CONFIG_INCOMPLETE`), not silently using Course weights.
+- Criteria are now **`CODE/TEST/DOCUMENT/RESEARCH`** — `DESIGN` is retired as a Contribution criterion (still exists as a ProjectType value only, see below; the two are unrelated).
+- COURSE mode: `GET/PUT /api/v1/courses/{courseId}/contribution-slice-weights` — same route, `{codeWeight, testWeight, documentWeight, researchWeight}`, sum 100.
+- TEAM mode: `PUT /api/projects/{projectId}/group-weights` is **revived** — `{groupId, codeWeight, testWeight, documentWeight, researchWeight}`, 0..1 scale, sum 1.0. ADMIN or exact Course-instructor LECTURER only — never Team leader/student.
+- Mode switch: `PUT /api/v1/courses/{courseId}/contribution-config-mode` `{"mode":"COURSE"|"TEAM"}`. Switching to `TEAM` requires every current Team already has a valid override (atomic; 409 if any is missing). Switching to `COURSE` never deletes Team overrides — they become inactive/historical.
+- New team-menu read: `GET /api/v1/courses/{courseId}/contribution-team-weights` (mode + effective weight + source per Team).
+- **Test/Research scoring now works for the Task-marker path (see the section above)** — no longer always `0`, but still not the full milestone (attachment/commit-traceability evidence remains unimplemented).
+- Existing Course/Team weight rows are **not reset** by these migrations — Code/Document values are untouched; only the new columns are added, defaulting to `0`/`COURSE`.
+
+## Course-wide 4-slice Contribution weights (superseded by the section above) — 2026-08-15
+
+Current Backend contracts: OpenAPI **148**, migration head **V35**.
+
+- Contribution weight authority is **Course-only** now: one Code/Test/Document/Design config per Course applies to every Team in it. No per-Team weight screen.
+- `GET/PUT /api/v1/courses/{courseId}/contribution-slice-weights` — same route, now four fields (`codeWeight`, `testWeight`, `documentWeight`, `designWeight`), sum 100.
+- `PUT /api/projects/{projectId}/group-weights` **removed** — drop any per-Team weight override UI/calls.
+- Contribution evaluation response gained `testContributionScore` / `testContributionPercentage`; existing fields unchanged.
+- **Test scoring is not confirmed/implemented yet.** `testWeight` is stored and echoed back, but it has zero effect on results right now — Backend has no deterministic testing/QA evidence source, so it's always normalized out and `testContributionScore`/`testContributionPercentage` are always `0`. Don't market it as working in UI copy yet.
+- Existing Course rows are **not reset** by this migration — their Code/Document/Design values are untouched; only `testWeight` is newly added (`0` for pre-existing Courses).
+
+## ProjectType fixed canonical catalog — 2026-08-15
+
+Current Backend contracts: OpenAPI **149**, migration head **V34**.
+
+- ProjectType is a **fixed canonical catalog** (`DESIGN_ARCHITECTURE`/`RESEARCH`/`TESTER`/`DOCUMENT`), seeded by Backend migration — not something ADMIN creates anymore. Does not decide Contribution weight (see section above).
+- `GET /api/project-types` unchanged; always returns exactly those 4 rows now.
+- `POST /api/project-types` **removed** — do not build/keep an Admin "create ProjectType" UI or call it.
+- Project create unchanged: still send the selected `projectTypeId` from the GET catalog; `PROJECT_TYPE_REQUIRED` / `PROJECT_TYPE_NOT_FOUND` unchanged.
+- Projects created before this migration now read `projectType: null` — render that as "no type" rather than an error.
+
 ## Avatar / progress / Course weights — 2026-08-15
 
 Current Backend contracts: OpenAPI **150**, migration head **V33**. Browser `JSESSIONID` + `credentials: "include"`; CSRF on unsafe mutations; GET no CSRF; **never Bearer**.

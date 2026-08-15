@@ -94,8 +94,9 @@ class GeneratedOpenApiDocumentationIntegrationTest {
             }
         }
 
-        assertEquals(150, operationCount,
-                "Merged main plus Lecturer direct Course slice-weight PUT");
+        assertEquals(151, operationCount,
+                "Course/Team dual-mode Contribution weights: revived PUT /api/projects/{projectId}/group-weights, "
+                        + "added PUT .../contribution-config-mode and GET .../contribution-team-weights");
         System.out.println("Generated OpenAPI operation count: " + operationCount);
         assertEquals(usedTags, documentedTags, "Global tags phải đúng bằng tập tag thực sự có operation");
         assertEquals(documentedTags.size(), root.path("tags").size(), "Global tags không được trùng tên");
@@ -113,6 +114,8 @@ class GeneratedOpenApiDocumentationIntegrationTest {
         assertTrue(root.path("paths").has("/api/admin/reports/graph-processing"));
         assertTrue(root.path("paths").has("/api/project-types"));
         assertTrue(root.at("/paths/~1api~1projects~1{projectId}~1group-weights/put").isObject());
+        assertTrue(root.at("/paths/~1api~1v1~1courses~1{courseId}~1contribution-config-mode/put").isObject());
+        assertTrue(root.at("/paths/~1api~1v1~1courses~1{courseId}~1contribution-team-weights/get").isObject());
         assertTrue(root.at("/paths/~1api~1teams~1{teamId}~1projects/post").isObject());
         assertTrue(root.at("/paths/~1api~1v1~1courses~1{courseId}~1contribution-slice-weights/put").isObject());
         assertTrue(root.at("/paths/~1api~1v1~1courses~1{courseId}~1dashboard~1teams-progress/get").isObject());

@@ -38,7 +38,7 @@ class LecturerAnalyticsAdapterAndWarningTest {
         LecturerAnalyticsAuthorizationService authorization = mock(LecturerAnalyticsAuthorizationService.class);
         TeamContributionService contribution = mock(TeamContributionService.class);
         TeamContributionMemberResponse aggregate = new TeamContributionMemberResponse(studentId, "Student", "SE001",
-                1, 2, 3, 4, 5, 6, 1, 7, 8, 9, 2, List.of(), List.of());
+                1, 2, 3, 4, 5, 6, 0, 0, 1, 7, 8, 9, 2, List.of(), List.of());
         when(authorization.requireStudentInCourse(any(), any(), any())).thenReturn(membership);
         when(contribution.evaluate(teamId)).thenReturn(new TeamContributionEvaluationResponse(
                 teamId, projectId, LocalDateTime.now(), List.of(aggregate)));

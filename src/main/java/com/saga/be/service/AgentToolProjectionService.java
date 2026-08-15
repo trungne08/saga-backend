@@ -500,7 +500,7 @@ public class AgentToolProjectionService {
         return new InternalAgentToolResponses.ContributionMemberSnapshot(
                 value.studentId(), value.fullName(), value.studentCode(),
                 value.codeContributionPercentage(), value.documentContributionPercentage(),
-                value.designContributionPercentage(), value.taskContributionPercentage(),
+                value.researchContributionPercentage(), value.taskContributionPercentage(),
                 value.finalContributionPercentage(), value.evidenceCount()
         );
     }

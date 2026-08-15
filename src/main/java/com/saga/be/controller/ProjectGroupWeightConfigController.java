@@ -14,7 +14,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@io.swagger.v3.oas.annotations.tags.Tag(name = "Dự án", description = "Cấu hình trọng số nhóm cho dự án.")
+@io.swagger.v3.oas.annotations.tags.Tag(name = "Dự án", description = "Cấu hình trọng số theo từng Team khi Course dùng TEAM mode.")
 @RequestMapping("/api/projects/{projectId}/group-weights")
 public class ProjectGroupWeightConfigController {
 

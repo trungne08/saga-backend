@@ -1,22 +1,36 @@
 package com.saga.be.service;
 
+import com.saga.be.dto.request.ContributionConfigModeRequest;
 import com.saga.be.dto.request.ContributionOverrideDecisionRequest;
 import com.saga.be.dto.request.CourseContributionSliceWeightRequest;
 import com.saga.be.dto.request.CourseContributionSliceWeightUpdateRequest;
+import com.saga.be.dto.response.ContributionConfigModeResponse;
 import com.saga.be.dto.response.CourseContributionSliceWeightRequestResponse;
 import com.saga.be.dto.response.CourseContributionSliceWeightResponse;
+import com.saga.be.dto.response.CourseTeamContributionWeightResponse;
+import com.saga.be.dto.response.CourseTeamContributionWeightsResponse;
 import com.saga.be.entity.Admin;
 import com.saga.be.entity.Course;
 import com.saga.be.entity.Lecturer;
 import com.saga.be.entity.PolicyOverrideRequest;
+import com.saga.be.entity.Project;
+import com.saga.be.entity.ProjectGroupWeightConfig;
+import com.saga.be.entity.ProjectType;
+import com.saga.be.entity.Team;
+import com.saga.be.entity.enums.ContributionConfigMode;
 import com.saga.be.entity.enums.PolicyOverrideStatus;
+import com.saga.be.exception.IntegrationException;
 import com.saga.be.repository.AdminRepository;
 import com.saga.be.repository.CourseRepository;
 import com.saga.be.repository.LecturerRepository;
 import com.saga.be.repository.PolicyOverrideRequestRepository;
+import com.saga.be.repository.ProjectGroupWeightConfigRepository;
+import com.saga.be.repository.TeamRepository;
 import com.saga.be.security.ApplicationRole;
 import com.saga.be.security.SagaPrincipal;
 import com.saga.be.service.contribution.ContributionSliceWeights;
+import java.math.BigDecimal;
+import java.math.MathContext;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Objects;
@@ -34,11 +48,14 @@ public class CourseContributionWeightService {
     private static final String COURSE_SLICE_WEIGHT_OVERRIDE_TYPE = "COURSE_SLICE_WEIGHT_OVERRIDE";
     private static final double EXPECTED_WEIGHT_TOTAL = 100.0;
     private static final double WEIGHT_TOLERANCE = 0.01;
+    private static final BigDecimal ONE_HUNDRED = BigDecimal.valueOf(100);
 
     private final CourseRepository courseRepository;
     private final PolicyOverrideRequestRepository policyOverrideRequestRepository;
     private final LecturerRepository lecturerRepository;
     private final AdminRepository adminRepository;
+    private final TeamRepository teamRepository;
+    private final ProjectGroupWeightConfigRepository projectGroupWeightConfigRepository;
 
     @Transactional(readOnly = true)
     public CourseContributionSliceWeightResponse getCurrentWeights(SagaPrincipal principal, UUID courseId) {
@@ -56,10 +73,120 @@ public class CourseContributionWeightService {
         Course course = requireLecturerOwnedCourse(principal, courseId);
         ContributionSliceWeights requestedWeights = validateDirectWeights(request);
         course.setCodeContributionWeight(requestedWeights.codeValue());
+        course.setTestContributionWeight(requestedWeights.testValue());
         course.setDocumentContributionWeight(requestedWeights.documentValue());
-        course.setDesignContributionWeight(requestedWeights.designValue());
+        course.setResearchContributionWeight(requestedWeights.researchValue());
         Course saved = courseRepository.save(course);
         return toCurrentWeightResponse(saved, ContributionSliceWeights.fromCourse(saved));
+    }
+
+    /**
+     * Switches the Course's active {@link ContributionConfigMode}. Activating {@code TEAM} mode
+     * requires every current Team in the Course to already have a valid exact Project+Team
+     * override ({@link ProjectGroupWeightConfig}); if any Team is missing one, the mode is not
+     * changed and the request fails closed (no partial/mixed activation).
+     */
+    @Transactional
+    public ContributionConfigModeResponse switchConfigMode(
+            SagaPrincipal principal,
+            UUID courseId,
+            ContributionConfigModeRequest request
+    ) {
+        Course course = requireLecturerOwnedCourse(principal, courseId);
+        if (request == null || request.mode() == null) {
+            throw IntegrationException.invalid("CONTRIBUTION_CONFIG_MODE_REQUIRED", "mode is required");
+        }
+        if (request.mode() == ContributionConfigMode.TEAM) {
+            requireAllCurrentTeamsHaveValidOverride(courseId);
+        }
+        course.setContributionConfigMode(request.mode());
+        Course saved = courseRepository.save(course);
+        return new ContributionConfigModeResponse(saved.getId(), saved.getContributionConfigMode());
+    }
+
+    @Transactional(readOnly = true)
+    public CourseTeamContributionWeightsResponse getTeamWeights(SagaPrincipal principal, UUID courseId) {
+        Course course = requireReadableCourse(principal, courseId);
+        List<Team> teams = teamRepository.findByCourseId(courseId);
+        List<CourseTeamContributionWeightResponse> teamRows = teams.stream()
+                .map(team -> teamWeightRow(course, team))
+                .toList();
+        return new CourseTeamContributionWeightsResponse(course.getId(), course.getContributionConfigMode(), teamRows);
+    }
+
+    private CourseTeamContributionWeightResponse teamWeightRow(Course course, Team team) {
+        Project project = team.getProject();
+        ProjectType projectType = project == null ? null : project.getProjectType();
+        if (course.getContributionConfigMode() == ContributionConfigMode.COURSE) {
+            ContributionSliceWeights courseWeights = ContributionSliceWeights.fromCourse(course);
+            return new CourseTeamContributionWeightResponse(
+                    team.getId(), team.getName(),
+                    project == null ? null : project.getId(), project == null ? null : project.getName(),
+                    projectType == null ? null : projectType.getId(),
+                    projectType == null ? null : projectType.getCode(),
+                    projectType == null ? null : projectType.getName(),
+                    "COURSE",
+                    courseWeights.codeValue(), courseWeights.testValue(),
+                    courseWeights.documentValue(), courseWeights.researchValue()
+            );
+        }
+        var override = project == null
+                ? java.util.Optional.<ProjectGroupWeightConfig>empty()
+                : projectGroupWeightConfigRepository.findByProjectId(project.getId())
+                        .filter(candidate -> candidate.getTeam() != null && team.getId().equals(candidate.getTeam().getId()));
+        if (override.isEmpty()) {
+            return new CourseTeamContributionWeightResponse(
+                    team.getId(), team.getName(),
+                    project == null ? null : project.getId(), project == null ? null : project.getName(),
+                    projectType == null ? null : projectType.getId(),
+                    projectType == null ? null : projectType.getCode(),
+                    projectType == null ? null : projectType.getName(),
+                    "TEAM_INCOMPLETE",
+                    null, null, null, null
+            );
+        }
+        ProjectGroupWeightConfig config = override.get();
+        return new CourseTeamContributionWeightResponse(
+                team.getId(), team.getName(),
+                project.getId(), project.getName(),
+                projectType == null ? null : projectType.getId(),
+                projectType == null ? null : projectType.getCode(),
+                projectType == null ? null : projectType.getName(),
+                "TEAM",
+                toPercent(config.getCodeWeight()), toPercent(config.getTestWeight()),
+                toPercent(config.getDocumentWeight()), toPercent(config.getResearchWeight())
+        );
+    }
+
+    private Double toPercent(BigDecimal ratio) {
+        return ratio == null ? null : ratio.multiply(ONE_HUNDRED, MathContext.DECIMAL64).doubleValue();
+    }
+
+    private void requireAllCurrentTeamsHaveValidOverride(UUID courseId) {
+        List<Team> teams = teamRepository.findByCourseId(courseId);
+        for (Team team : teams) {
+            Project project = team.getProject();
+            if (project == null) {
+                throw IntegrationException.conflict(
+                        "TEAM_MODE_CONFIGURATION_INCOMPLETE",
+                        "Team " + team.getId() + " has no Project and cannot have a weight override"
+                );
+            }
+            ProjectGroupWeightConfig config = projectGroupWeightConfigRepository.findByProjectId(project.getId())
+                    .filter(candidate -> candidate.getTeam() != null && team.getId().equals(candidate.getTeam().getId()))
+                    .orElseThrow(() -> IntegrationException.conflict(
+                            "TEAM_MODE_CONFIGURATION_INCOMPLETE",
+                            "Team " + team.getId() + " has no weight override configured"
+                    ));
+            BigDecimal total = config.getCodeWeight().add(config.getTestWeight())
+                    .add(config.getDocumentWeight()).add(config.getResearchWeight());
+            if (total.compareTo(BigDecimal.ONE) != 0) {
+                throw IntegrationException.conflict(
+                        "TEAM_MODE_CONFIGURATION_INCOMPLETE",
+                        "Team " + team.getId() + " has an invalid weight override"
+                );
+            }
+        }
     }
 
     @Transactional
@@ -70,7 +197,7 @@ public class CourseContributionWeightService {
         if (request == null || request.lecturerId() == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Lecturer is required");
         }
-        ContributionSliceWeights requestedWeights = validateRequestedWeights(request);
+        LegacyTriad requestedWeights = validateRequestedWeights(request);
         Course course = requireCourse(courseId);
         Lecturer lecturer = lecturerRepository.findById(request.lecturerId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Lecturer not found"));
@@ -88,9 +215,9 @@ public class CourseContributionWeightService {
                         .lecturer(lecturer)
                         .targetConfigId(course.getId())
                         .type(COURSE_SLICE_WEIGHT_OVERRIDE_TYPE)
-                        .proposedCodeWeight((float) requestedWeights.codeValue())
-                        .proposedDocumentWeight((float) requestedWeights.documentValue())
-                        .proposedDesignWeight((float) requestedWeights.designValue())
+                        .proposedCodeWeight((float) requestedWeights.code())
+                        .proposedDocumentWeight((float) requestedWeights.document())
+                        .proposedDesignWeight((float) requestedWeights.design())
                         .reason(request.reason())
                         .status(PolicyOverrideStatus.PENDING)
                         .build()
@@ -195,14 +322,17 @@ public class CourseContributionWeightService {
                         .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Admin not found"));
         Course course = requireCourse(overrideRequest.getTargetConfigId());
         if (status == PolicyOverrideStatus.APPROVED) {
-            ContributionSliceWeights approvedWeights = ContributionSliceWeights.normalizeConfigured(
-                    floatValue(overrideRequest.getProposedCodeWeight()),
-                    floatValue(overrideRequest.getProposedDocumentWeight()),
-                    floatValue(overrideRequest.getProposedDesignWeight())
-            );
-            course.setCodeContributionWeight(approvedWeights.codeValue());
-            course.setDocumentContributionWeight(approvedWeights.documentValue());
-            course.setDesignContributionWeight(approvedWeights.designValue());
+            // Legacy flow only ever proposed Code/Document/Design (the retired triad) and is not
+            // extended with test/research (no consumer). Code/Document apply directly to the
+            // active columns; the legacy "design" proposal is preserved verbatim in the retained
+            // design_contribution_weight column (historical, inactive) rather than discarded or
+            // redistributed into the new criteria — no conversion formula is invented.
+            // ContributionSliceWeights.fromCourse always renormalizes whatever is stored, so a
+            // stored active sum below 100 here does not break Contribution calculation.
+            course.setCodeContributionWeight(floatValue(overrideRequest.getProposedCodeWeight()));
+            course.setDocumentContributionWeight(floatValue(overrideRequest.getProposedDocumentWeight()));
+            course.setDesignContributionWeight(floatValue(overrideRequest.getProposedDesignWeight()));
+            course.setTestContributionWeight(0.0);
             courseRepository.save(course);
         }
 
@@ -217,21 +347,21 @@ public class CourseContributionWeightService {
         if (request == null) {
             throw new ResponseStatusException(
                     HttpStatus.BAD_REQUEST,
-                    "Code, document, and design weights are all required"
+                    "Code, test, document, and research weights are all required"
             );
         }
-        return validateWeightValues(request.codeWeight(), request.documentWeight(), request.designWeight());
+        return validateWeightValues(
+                request.codeWeight(), request.testWeight(), request.documentWeight(), request.researchWeight()
+        );
     }
 
-    private ContributionSliceWeights validateRequestedWeights(CourseContributionSliceWeightRequest request) {
-        return validateWeightValues(request.codeWeight(), request.documentWeight(), request.designWeight());
-    }
-
-    private ContributionSliceWeights validateWeightValues(
-            Double codeWeight,
-            Double documentWeight,
-            Double designWeight
-    ) {
+    // Legacy request/decision flow is deprecated for new FE and intentionally not extended with
+    // test/research (no consumer); it keeps validating the original Code/Document/Design triad
+    // against PolicyOverrideRequest's fixed proposed* columns.
+    private LegacyTriad validateRequestedWeights(CourseContributionSliceWeightRequest request) {
+        Double codeWeight = request.codeWeight();
+        Double documentWeight = request.documentWeight();
+        Double designWeight = request.designWeight();
         if (codeWeight == null || documentWeight == null || designWeight == null) {
             throw new ResponseStatusException(
                     HttpStatus.BAD_REQUEST,
@@ -245,10 +375,36 @@ public class CourseContributionWeightService {
         if (Math.abs(total - EXPECTED_WEIGHT_TOTAL) > WEIGHT_TOLERANCE) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Slice weights must add up to 100");
         }
+        return new LegacyTriad(codeWeight, documentWeight, designWeight);
+    }
+
+    private record LegacyTriad(double code, double document, double design) {
+    }
+
+    private ContributionSliceWeights validateWeightValues(
+            Double codeWeight,
+            Double testWeight,
+            Double documentWeight,
+            Double researchWeight
+    ) {
+        if (codeWeight == null || testWeight == null || documentWeight == null || researchWeight == null) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Code, test, document, and research weights are all required"
+            );
+        }
+        if (codeWeight < 0.0 || testWeight < 0.0 || documentWeight < 0.0 || researchWeight < 0.0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Slice weights must be non-negative");
+        }
+        double total = codeWeight + testWeight + documentWeight + researchWeight;
+        if (Math.abs(total - EXPECTED_WEIGHT_TOTAL) > WEIGHT_TOLERANCE) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Slice weights must add up to 100");
+        }
         return ContributionSliceWeights.normalizeConfigured(
-                java.math.BigDecimal.valueOf(codeWeight),
-                java.math.BigDecimal.valueOf(documentWeight),
-                java.math.BigDecimal.valueOf(designWeight)
+                BigDecimal.valueOf(codeWeight),
+                BigDecimal.valueOf(testWeight),
+                BigDecimal.valueOf(documentWeight),
+                BigDecimal.valueOf(researchWeight)
         );
     }
 
@@ -300,8 +456,9 @@ public class CourseContributionWeightService {
                 course.getCourseCode(),
                 course.getName(),
                 weights.codeValue(),
+                weights.testValue(),
                 weights.documentValue(),
-                weights.designValue()
+                weights.researchValue()
         );
     }
 
@@ -326,7 +483,7 @@ public class CourseContributionWeightService {
         );
     }
 
-    private java.math.BigDecimal floatValue(Float value) {
-        return value == null ? java.math.BigDecimal.ZERO : java.math.BigDecimal.valueOf(value.doubleValue());
+    private double floatValue(Float value) {
+        return value == null ? 0.0 : value.doubleValue();
     }
 }
