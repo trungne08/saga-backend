@@ -11,6 +11,7 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.saga.be.OAuth2TestConfiguration;
@@ -33,6 +34,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -61,6 +63,9 @@ class AgentGatewaySecurityIntegrationTest {
     private AgentToolProjectionService projections;
 
     @MockitoBean
+    private com.saga.be.service.AgentRoleAwareProjectionService roleAware;
+
+    @MockitoBean
     private AgentDelegationService delegations;
 
     @MockitoBean
@@ -68,7 +73,7 @@ class AgentGatewaySecurityIntegrationTest {
 
     @BeforeEach
     void reset() {
-        clearInvocations(gateway, projections, delegations, accountStatuses);
+        clearInvocations(gateway, projections, roleAware, delegations, accountStatuses);
         when(accountStatuses.isAllowedForBusinessApi(any())).thenReturn(true);
         when(gateway.create(any(), any())).thenReturn(conversation());
         when(gateway.list(any())).thenReturn(new AgentApiResponses.ConversationList(List.of()));
@@ -99,6 +104,14 @@ class AgentGatewaySecurityIntegrationTest {
         mockMvc.perform(post("/api/v1/ai/conversations")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"actorId\":\"override\"}")
+                        .with(authentication(actor))
+                        .with(csrf()))
+                .andExpect(status().isBadRequest());
+
+        mockMvc.perform(post("/api/v1/ai/conversations/" + CONVERSATION_ID + "/messages")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"content\":\"hello\",\"actorId\":\"override\",\"applicationRole\":\"ADMIN\",\"studentId\":\""
+                                + UUID.randomUUID() + "\"}")
                         .with(authentication(actor))
                         .with(csrf()))
                 .andExpect(status().isBadRequest());
@@ -152,7 +165,7 @@ class AgentGatewaySecurityIntegrationTest {
         )).thenReturn(student);
         when(projections.resourceContext(student)).thenReturn(
                 new com.saga.be.dto.response.InternalAgentToolResponses.ResourceContext(
-                        "STUDENT", "ZERO_MATCH", 0, 0, 0, List.of(), List.of()
+                        "STUDENT", "ZERO_MATCH", 0, 0, 0, List.of(), List.of(), null
                 )
         );
 
@@ -196,6 +209,90 @@ class AgentGatewaySecurityIntegrationTest {
                 .andExpect(content().string(not(containsString("email"))))
                 .andExpect(content().string(not(containsString("cognito"))))
                 .andExpect(content().string(not(containsString("accountId"))));
+    }
+
+    @Test
+    void selfProgressRejectsBrowserIdentityFieldsAndUsesDelegatedActor() throws Exception {
+        SagaPrincipal student = (SagaPrincipal) authFor(ApplicationRole.STUDENT).getPrincipal();
+        String opaqueContext = "opaque-delegated-context-value-1234567890";
+        when(delegations.resolve(
+                opaqueContext, CONVERSATION_ID, AgentDelegationCapability.READ
+        )).thenReturn(student);
+        when(roleAware.selfProgress(student, null, null)).thenReturn(
+                new com.saga.be.dto.response.InternalAgentToolResponses.SelfProgress(
+                        "ZERO_MATCH", null, null, null, null, null, List.of(), List.of(), List.of(), List.of()
+                )
+        );
+
+        mockMvc.perform(post("/internal/ai/v1/agent/tools/self-progress")
+                        .header(InternalAiServiceAuthenticationFilter.HEADER_NAME, INTERNAL_TOKEN)
+                        .header(InternalAgentToolController.DELEGATED_CONTEXT_HEADER, opaqueContext)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"conversationId\":\"" + CONVERSATION_ID
+                                + "\",\"studentId\":\"" + UUID.randomUUID() + "\"}"))
+                .andExpect(status().isBadRequest());
+
+        mockMvc.perform(post("/internal/ai/v1/agent/tools/self-progress")
+                        .header(InternalAiServiceAuthenticationFilter.HEADER_NAME, INTERNAL_TOKEN)
+                        .header(InternalAgentToolController.DELEGATED_CONTEXT_HEADER, opaqueContext)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"conversationId\":\"" + CONVERSATION_ID + "\"}"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void publicAiUnauthenticatedUsesSessionExpiredMessage() throws Exception {
+        mockMvc.perform(get("/api/v1/ai/conversations"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.message").value("Phiên đăng nhập đã hết hạn."));
+    }
+
+    @Test
+    void internalAiMissingServiceTokenDoesNotLookLikeUserSessionExpiry() throws Exception {
+        mockMvc.perform(post("/internal/ai/v1/agent/tools/self-progress")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"conversationId\":\"" + CONVERSATION_ID + "\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error").value("INTERNAL_SERVICE_AUTHENTICATION_REQUIRED"))
+                .andExpect(content().string(not(containsString("Phiên đăng nhập đã hết hạn."))));
+    }
+
+    @Test
+    void memberLecturerReportIsForbiddenWithSafeDenial() throws Exception {
+        SagaPrincipal student = (SagaPrincipal) authFor(ApplicationRole.STUDENT).getPrincipal();
+        String opaqueContext = "opaque-delegated-context-value-1234567890";
+        when(delegations.resolve(
+                opaqueContext, CONVERSATION_ID, AgentDelegationCapability.READ
+        )).thenReturn(student);
+        when(roleAware.lecturerProgressReport(student, null))
+                .thenThrow(new AccessDeniedException("This tool is available only to the current Lecturer"));
+
+        mockMvc.perform(post("/internal/ai/v1/agent/tools/lecturer-progress-report")
+                        .header(InternalAiServiceAuthenticationFilter.HEADER_NAME, INTERNAL_TOKEN)
+                        .header(InternalAgentToolController.DELEGATED_CONTEXT_HEADER, opaqueContext)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"conversationId\":\"" + CONVERSATION_ID + "\"}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value("Bạn không có quyền truy cập hoặc thực hiện thao tác này."));
+    }
+
+    @Test
+    void nonAdminSystemReportIsForbiddenWithSafeDenial() throws Exception {
+        SagaPrincipal lecturer = (SagaPrincipal) authFor(ApplicationRole.LECTURER).getPrincipal();
+        String opaqueContext = "opaque-delegated-context-value-1234567890";
+        when(delegations.resolve(
+                opaqueContext, CONVERSATION_ID, AgentDelegationCapability.READ
+        )).thenReturn(lecturer);
+        when(roleAware.adminSystemReport(lecturer))
+                .thenThrow(new AccessDeniedException("Admin system report is available only to ADMIN"));
+
+        mockMvc.perform(post("/internal/ai/v1/agent/tools/admin-system-report")
+                        .header(InternalAiServiceAuthenticationFilter.HEADER_NAME, INTERNAL_TOKEN)
+                        .header(InternalAgentToolController.DELEGATED_CONTEXT_HEADER, opaqueContext)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"conversationId\":\"" + CONVERSATION_ID + "\"}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value("Bạn không có quyền truy cập hoặc thực hiện thao tác này."));
     }
 
     private AgentApiResponses.Conversation conversation() {

@@ -80,4 +80,17 @@ public interface CommitDataRepository extends JpaRepository<CommitData, UUID> {
             UUID projectId,
             Pageable pageable
     );
+
+    @org.springframework.data.jpa.repository.EntityGraph(attributePaths = {"repo", "repo.project"})
+    @Query("""
+            select commit from CommitData commit
+            where commit.author.id = :studentId
+               or commit.authorExternalId = :externalAccountId
+            order by commit.timestamp desc, commit.id desc
+            """)
+    List<CommitData> findRecentByAuthorIdentity(
+            @Param("studentId") UUID studentId,
+            @Param("externalAccountId") String externalAccountId,
+            Pageable pageable
+    );
 }

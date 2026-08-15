@@ -37,14 +37,12 @@ public class AgentAiClient {
         this.client = client;
     }
 
-    public AgentApiResponses.Conversation createConversation(SagaPrincipal actor, String title) {
+    public AgentApiResponses.Conversation createConversation(
+            SagaPrincipal actor, String title, String studentCode
+    ) {
         return post(
                 "/internal/backend/v1/agent/conversations",
-                Map.of(
-                        "ownerId", ownerId(actor),
-                        "applicationRole", actor.applicationRole().name(),
-                        "title", title == null ? "" : title
-                ),
+                conversationBody(actor, title == null ? "" : title, null, studentCode),
                 null,
                 AgentApiResponses.Conversation.class
         );
@@ -70,15 +68,12 @@ public class AgentAiClient {
             SagaPrincipal actor,
             UUID conversationId,
             String delegatedContext,
-            String content
+            String content,
+            String studentCode
     ) {
         return post(
                 "/internal/backend/v1/agent/conversations/" + conversationId + "/messages",
-                Map.of(
-                        "ownerId", ownerId(actor),
-                        "applicationRole", actor.applicationRole().name(),
-                        "content", content
-                ),
+                conversationBody(actor, null, content, studentCode),
                 delegatedContext,
                 AgentApiResponses.Chat.class
         );
@@ -136,6 +131,32 @@ public class AgentAiClient {
             throw IntegrationException.forbidden("An authenticated local profile is required");
         }
         return actor.applicationRole().name() + ":" + actor.localProfileId();
+    }
+
+    private Map<String, Object> conversationBody(
+            SagaPrincipal actor, String title, String content, String studentCode
+    ) {
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("ownerId", ownerId(actor));
+        body.put("applicationRole", actor.applicationRole().name());
+        body.put("currentActor", currentActor(actor, studentCode));
+        if (title != null) {
+            body.put("title", title);
+        }
+        if (content != null) {
+            body.put("content", content);
+        }
+        return body;
+    }
+
+    private Map<String, Object> currentActor(SagaPrincipal actor, String studentCode) {
+        Map<String, Object> value = new java.util.LinkedHashMap<>();
+        value.put("applicationRole", actor.applicationRole().name());
+        value.put("localProfileId", actor.localProfileId().toString());
+        value.put("displayName", actor.fullName());
+        value.put("studentCode", studentCode);
+        value.put("identitySource", "SAGA_PRINCIPAL_SESSION");
+        return value;
     }
 
     private <T> T post(String path, Object body, String delegatedContext, Class<T> type) {

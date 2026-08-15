@@ -25,6 +25,7 @@ import com.saga.be.repository.GitIssueRepository;
 import com.saga.be.repository.GitRepoRepository;
 import com.saga.be.repository.PrReviewRepository;
 import com.saga.be.repository.PullRequestRepository;
+import com.saga.be.service.CommitReviewIntentService;
 import com.saga.be.service.TeamContributionRefreshService;
 import java.util.Locale;
 import java.util.Objects;
@@ -49,6 +50,7 @@ public class GitHubDataUpsertService {
     private final CommentRepository commentRepository;
     private final IdentityMappingService identityMappingService;
     private final TeamContributionRefreshService teamContributionRefreshService;
+    private final CommitReviewIntentService commitReviewIntentService;
 
     public GitHubDataUpsertService(
             GitRepoRepository gitRepoRepository,
@@ -58,7 +60,8 @@ public class GitHubDataUpsertService {
             PrReviewRepository reviewRepository,
             CommentRepository commentRepository,
             IdentityMappingService identityMappingService,
-            TeamContributionRefreshService teamContributionRefreshService
+            TeamContributionRefreshService teamContributionRefreshService,
+            CommitReviewIntentService commitReviewIntentService
     ) {
         this.gitRepoRepository = gitRepoRepository;
         this.issueRepository = issueRepository;
@@ -68,6 +71,7 @@ public class GitHubDataUpsertService {
         this.commentRepository = commentRepository;
         this.identityMappingService = identityMappingService;
         this.teamContributionRefreshService = teamContributionRefreshService;
+        this.commitReviewIntentService = commitReviewIntentService;
     }
 
     @Transactional
@@ -121,6 +125,7 @@ public class GitHubDataUpsertService {
         CommitData commit = commitRepository
                 .findByRepoIdAndShaHash(repoId, snapshot.sha())
                 .orElseGet(CommitData::new);
+        boolean created = commit.getId() == null;
         if (
             commit.getExternalUpdatedAt() != null
             && snapshot.updatedAt() != null
@@ -145,6 +150,9 @@ public class GitHubDataUpsertService {
         ));
         commit.setAuthorExternalId(authorId);
         commitRepository.saveAndFlush(commit);
+        if (created) {
+            commitReviewIntentService.enqueueNewCanonicalCommit(repository, commit);
+        }
         teamContributionRefreshService.refreshFromRepo(repoId);
         return true;
     }

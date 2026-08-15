@@ -1,3 +1,28 @@
+## Capability matrix + warning-in-report + fail-closed AI (DEC-096) — 2026-08-16
+
+- Không mở rộng permission chỉ vì AI. Mọi tool reauthorize Backend. MEMBER không được Lecturer/Admin report. Leader chỉ exact led Team. Lecturer chỉ instructed Course (`ZERO_MATCH` nếu không dạy). ADMIN Course report cần `courseId` + `requireCourseAccess`.
+- Public AI 401 ≠ internal service-token 401. 403 AI dùng copy an toàn, không enumeration.
+- Report chỉ include warning khi có Backend signal. Không fabricate `MEMBER_NO_RECENT_ACTIVITY_3D` / `TEAM_NO_RECENT_ACTIVITY_3D` / `SPRINT_PROGRESS_BEHIND` / `REPEATED_COMMIT_ISSUES` / auto-review result warning. MSR/DEADLINE_PROCESS/SNA_ISOLATION giữ TBD/null.
+- Lecturer projection version `saga-lecturer-course-report-context-v1`. Admin `saga-admin-system-report-context-v1`. Artifact types `LECTURER_PROGRESS_REPORT` / `ADMIN_SYSTEM_REPORT`. SRS pipeline không rewrite. XLSX Course export không đổi.
+- OpenAPI **149**. Migration head **V41**.
+
+## Role-aware AI chat + report + auto-review constraints (DEC-095) — 2026-08-16
+
+- Browser không được gửi `actorId` / `studentId` (current self) / `lecturerId` (current actor) / `applicationRole`. Current actor = session `SagaPrincipal`. Delegation bound conversation+actor. Không hỏi lại tên/MSSV để biết người đang chat.
+- Internal AI tools không nhận studentId/lecturerId để bypass actor. MEMBER self-only. LEADER exact `roleInTeam=LEADER`. Lecturer exact instructed Course. Admin report ADMIN only. Không pick-first khi nhiều resource hợp lệ.
+- Recent commits: ACTIVE GitHub IdentityMap + canonical CommitData only; bounded; AI không gọi GitHub; không trả provider token/email.
+- Lecturer/Admin report projections source-backed only. Không fabricate grade/risk/graph history. Early Warning authority = OVERDUE_TASK only. MSR/DEADLINE_PROCESS/SNA_ISOLATION remain TBD/null.
+- SRS DOCX unchanged. Lecturer/Admin report DOCX reuse existing artifact download; reauthorize every download. Không expose AI filesystem path. Không public `/internal/backend/v1/commit-reviews**` hay `/internal/ai/**`.
+- Typed policies only: `commit-review-historical-v1`+LOW, `commit-review-live-task-aware-v1`+HIGH. Unknown enum fail closed. FAILED/CANCELLED ≠ NEEDS_CHANGES. Network/provider HTTP không nằm trong DB commit transaction.
+- Env names (values never documented): `SAGA_AI_AGENT_BASE_URL`, `SAGA_BACKEND_TO_AI_SERVICE_TOKEN`, `SAGA_COMMIT_REVIEW_EXECUTION_ENABLED` (test=false), `SAGA_COMMIT_REVIEW_POLL_DELAY`, `SAGA_COMMIT_REVIEW_INITIAL_DELAY`. Header Backend→AI: `X-SAGA-Backend-Service-Token`.
+- OpenAPI **149**. Migration head **V41**.
+
+## Auto commit-review intent constraints (DEC-094) — 2026-08-16
+
+- Trigger chỉ sau canonical `CommitData` persist. Dedup `(git_repo_id, sha_hash)`. Không parse raw webhook thành review.
+- `review_cutover_at` là cutover authority; không dùng `lastSyncedAt`. DEC-095 mới gọi typed AI start URL đã publish. Không ship inactivity/sprint-behind/repeated-issue warning khi grace/threshold TBD.
+- OpenAPI **149**. Migration head **V40** (job tracking **V41** in DEC-095).
+
 ## Jira task evidence from SAGA (DEC-093) — 2026-08-15
 
 - Attach endpoint is **STUDENT team member only**. Files and/or an `http`/`https` link. DOCUMENT/RESEARCH count when ≥1 `TaskAttachment` or ≥1 `TaskWebLink`.

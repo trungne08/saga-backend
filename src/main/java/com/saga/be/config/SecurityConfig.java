@@ -88,22 +88,7 @@ public class SecurityConfig {
                                         HttpMethod.POST,
                                         "/api/webhooks/jira"
                                 ),
-                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/project-summary"),
-                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/resource-context"),
-                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/project-tasks"),
-                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/task-detail"),
-                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/student-progress"),
-                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/team-progress"),
-                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/team-contribution"),
-                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/student-contribution"),
-                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/team-sprints"),
-                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/course-warnings"),
-                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/project-traceability"),
-                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/validate-commit-review"),
-                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/srs-context"),
-                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/resolve-assignee"),
-                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/validate-task-create"),
-                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/validate-task-update")
+                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/**")
                         )
                 )
                 .addFilterBefore(

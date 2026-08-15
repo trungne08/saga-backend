@@ -790,6 +790,9 @@ public class ProjectIntegrationService {
                     repository.setConsecutiveFailures(0);
                 }
             }
+            if (repository.getReviewCutoverAt() == null) {
+                repository.setReviewCutoverAt(LocalDateTime.now());
+            }
             GitRepo saved = gitRepoRepository.saveAndFlush(repository);
             if (!alreadySynced) {
                 eventPublisher.publishEvent(

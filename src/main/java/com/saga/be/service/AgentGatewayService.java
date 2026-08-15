@@ -6,9 +6,12 @@ import com.saga.be.dto.request.JiraTaskCreateRequest;
 import com.saga.be.dto.request.JiraTaskUpdateRequest;
 import com.saga.be.dto.response.AgentApiResponses;
 import com.saga.be.dto.response.TaskReadResponse;
+import com.saga.be.entity.Student;
 import com.saga.be.entity.enums.Priority;
 import com.saga.be.entity.enums.TaskType;
 import com.saga.be.exception.IntegrationException;
+import com.saga.be.repository.StudentRepository;
+import com.saga.be.security.ApplicationRole;
 import com.saga.be.security.SagaPrincipal;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
@@ -16,7 +19,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import org.springframework.http.HttpStatus;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class AgentGatewayService {
@@ -34,23 +40,29 @@ public class AgentGatewayService {
     private final AgentDelegationService delegations;
     private final JiraTaskWriteService taskWrites;
     private final ProjectDetailService projects;
+    private final StudentRepository students;
+    private final LecturerAnalyticsAuthorizationService courseAccess;
 
     public AgentGatewayService(
             AgentAiClient ai,
             AgentDelegationService delegations,
             JiraTaskWriteService taskWrites,
-            ProjectDetailService projects
+            ProjectDetailService projects,
+            StudentRepository students,
+            LecturerAnalyticsAuthorizationService courseAccess
     ) {
         this.ai = ai;
         this.delegations = delegations;
         this.taskWrites = taskWrites;
         this.projects = projects;
+        this.students = students;
+        this.courseAccess = courseAccess;
     }
 
     public AgentApiResponses.Conversation create(
             SagaPrincipal actor, AgentConversationCreateRequest request
     ) {
-        return ai.createConversation(actor, request == null ? null : request.title());
+        return ai.createConversation(actor, request == null ? null : request.title(), studentCode(actor));
     }
 
     public AgentApiResponses.ConversationList list(SagaPrincipal actor) {
@@ -67,7 +79,7 @@ public class AgentGatewayService {
             AgentMessageSendRequest request
     ) {
         String context = delegations.issue(actor, conversationId);
-        return ai.sendMessage(actor, conversationId, context, request.content().trim());
+        return ai.sendMessage(actor, conversationId, context, request.content().trim(), studentCode(actor));
     }
 
     public AgentApiResponses.ActionExecution confirm(SagaPrincipal actor, UUID actionId) {
@@ -97,13 +109,7 @@ public class AgentGatewayService {
 
     public DownloadedArtifact download(SagaPrincipal actor, UUID artifactId) {
         AgentApiResponses.GeneratedArtifact metadata = ai.artifact(actor, artifactId);
-        if (!"PROJECT".equals(metadata.scopeType())) {
-            throw IntegrationException.invalid(
-                    "AI_ARTIFACT_SCOPE_INVALID", "The generated artifact scope is invalid"
-            );
-        }
-        UUID projectId = uuid(metadata.scopeId(), "scopeId");
-        projects.get(actor, projectId);
+        reauthorizeArtifact(actor, metadata);
         if (metadata.filename() == null
                 || !metadata.filename().matches("[A-Za-z0-9._-]{1,180}\\.docx")) {
             throw IntegrationException.unavailable("AI_ARTIFACT_FILENAME_INVALID");
@@ -113,6 +119,51 @@ public class AgentGatewayService {
             throw IntegrationException.unavailable("AI_ARTIFACT_CONTENT_INVALID");
         }
         return new DownloadedArtifact(metadata.filename(), metadata.mediaType(), content);
+    }
+
+    private void reauthorizeArtifact(SagaPrincipal actor, AgentApiResponses.GeneratedArtifact metadata) {
+        String artifactType = metadata.artifactType();
+        String scopeType = metadata.scopeType();
+        if ("SRS_DOCX".equals(artifactType) && "PROJECT".equals(scopeType)) {
+            projects.get(actor, uuid(metadata.scopeId(), "scopeId"));
+            return;
+        }
+        if ("LECTURER_PROGRESS_REPORT".equals(artifactType) && "COURSE".equals(scopeType)) {
+            requireCourseReportAccess(actor, uuid(metadata.scopeId(), "scopeId"));
+            return;
+        }
+        if ("ADMIN_SYSTEM_REPORT".equals(artifactType) && "SYSTEM".equals(scopeType)) {
+            if (actor == null || actor.applicationRole() != ApplicationRole.ADMIN) {
+                throw IntegrationException.forbidden("The generated artifact is not available to the current actor");
+            }
+            return;
+        }
+        throw IntegrationException.invalid(
+                "AI_ARTIFACT_SCOPE_INVALID", "The generated artifact scope is invalid"
+        );
+    }
+
+    private void requireCourseReportAccess(SagaPrincipal actor, UUID courseId) {
+        try {
+            courseAccess.requireCourseAccess(actor, courseId);
+        } catch (AccessDeniedException ignored) {
+            throw IntegrationException.forbidden("The generated artifact is not available to the current actor");
+        } catch (ResponseStatusException exception) {
+            if (exception.getStatusCode() == HttpStatus.NOT_FOUND) {
+                throw IntegrationException.invalid(
+                        "AI_ARTIFACT_SCOPE_INVALID", "The generated artifact scope is invalid"
+                );
+            }
+            throw exception;
+        }
+    }
+
+    private String studentCode(SagaPrincipal actor) {
+        if (actor == null || actor.applicationRole() != ApplicationRole.STUDENT
+                || actor.localProfileId() == null) {
+            return null;
+        }
+        return students.findById(actor.localProfileId()).map(Student::getStudentCode).orElse(null);
     }
 
     private TaskReadResponse createTask(

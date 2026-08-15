@@ -82,6 +82,9 @@ public class GitRepo extends BaseEntity {
     @Column(name = "last_synced_at")
     private LocalDateTime lastSyncedAt;
 
+    @Column(name = "review_cutover_at")
+    private LocalDateTime reviewCutoverAt;
+
     @Version
     @Column(name = "version", nullable = false)
     private long version;

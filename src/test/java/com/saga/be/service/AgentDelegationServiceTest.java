@@ -51,6 +51,20 @@ class AgentDelegationServiceTest {
     }
 
     @Test
+    void issueFailsClosedWhenAccountIsNotAllowed() {
+        AiAgentDelegationContextRepository repository = mock(AiAgentDelegationContextRepository.class);
+        DelegatedActorResolver resolver = mock(DelegatedActorResolver.class);
+        CurrentAccountStatusService statuses = mock(CurrentAccountStatusService.class);
+        AgentDelegationService service = service(repository, resolver, statuses);
+        SagaPrincipal actor = actor();
+        when(statuses.isAllowedForBusinessApi(actor)).thenReturn(false);
+
+        assertThrows(org.springframework.security.access.AccessDeniedException.class,
+                () -> service.issue(actor, UUID.randomUUID()));
+        verify(repository, org.mockito.Mockito.never()).saveAndFlush(any());
+    }
+
+    @Test
     void resolveRejectsExpiredAndConversationMismatchAndUsesCurrentActorResolver() {
         AiAgentDelegationContextRepository repository = mock(AiAgentDelegationContextRepository.class);
         DelegatedActorResolver resolver = mock(DelegatedActorResolver.class);

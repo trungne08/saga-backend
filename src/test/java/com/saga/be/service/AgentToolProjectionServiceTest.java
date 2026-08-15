@@ -51,6 +51,8 @@ class AgentToolProjectionServiceTest {
         assertEquals("ZERO_MATCH", result.selectionState());
         assertEquals(1, result.totalTeams());
         assertEquals(0, result.totalProjects());
+        assertEquals("SAGA_PRINCIPAL_SESSION", result.currentActor().identitySource());
+        assertEquals(student.localProfileId(), result.currentActor().localProfileId());
         assertEquals(null, result.courses().get(0).teams().get(0).project());
     }
 
@@ -427,6 +429,7 @@ class AgentToolProjectionServiceTest {
                 mock(TeamRepository.class),
                 mock(TeamMemberRepository.class),
                 mock(CourseRepository.class),
+                mock(com.saga.be.repository.StudentRepository.class),
                 mock(GitRepoRepository.class),
                 mock(DocumentRepository.class),
                 reviews,
@@ -451,6 +454,7 @@ class AgentToolProjectionServiceTest {
                 teams,
                 memberships,
                 courses,
+                mock(com.saga.be.repository.StudentRepository.class),
                 mock(GitRepoRepository.class),
                 mock(DocumentRepository.class),
                 mock(CommitReviewContextReader.class),
@@ -474,6 +478,7 @@ class AgentToolProjectionServiceTest {
                 teams,
                 memberships,
                 mock(CourseRepository.class),
+                mock(com.saga.be.repository.StudentRepository.class),
                 mock(GitRepoRepository.class),
                 mock(DocumentRepository.class),
                 mock(CommitReviewContextReader.class),

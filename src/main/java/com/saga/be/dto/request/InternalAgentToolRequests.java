@@ -53,6 +53,19 @@ public final class InternalAgentToolRequests {
     public record Course(@NotNull UUID conversationId, @NotNull UUID courseId) {
     }
 
+    public record OptionalCourse(@NotNull UUID conversationId, UUID courseId) {
+    }
+
+    public record OptionalTeam(@NotNull UUID conversationId, UUID teamId) {
+    }
+
+    public record OptionalProject(
+            @NotNull UUID conversationId,
+            UUID projectId,
+            UUID courseId
+    ) {
+    }
+
     public record CommitReview(
             @NotNull UUID conversationId,
             @NotNull UUID projectId,

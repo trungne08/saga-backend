@@ -19,7 +19,19 @@ public final class InternalAgentToolResponses {
             long totalTeams,
             long totalProjects,
             List<CourseContext> courses,
-            List<String> dataLimitations
+            List<String> dataLimitations,
+            CurrentActor currentActor
+    ) {
+    }
+
+    public record CurrentActor(
+            String applicationRole,
+            UUID localProfileId,
+            String displayName,
+            String studentCode,
+            String identitySource,
+            String teamRoleSelectionState,
+            long ledTeamCount
     ) {
     }
 
@@ -174,6 +186,172 @@ public final class InternalAgentToolResponses {
             boolean valid,
             Map<String, Object> normalizedPayload,
             String summary
+    ) {
+    }
+
+    public record SelfProgress(
+            String selectionState,
+            UUID courseId,
+            UUID teamId,
+            UUID projectId,
+            LecturerAnalyticsResponses.StudentProgress progress,
+            StudentProgress assignedTasks,
+            List<ConfirmedWarning> confirmedWarnings,
+            List<String> unsupportedSignals,
+            List<ResourceTeamContext> candidates,
+            List<String> dataLimitations
+    ) {
+    }
+
+    public record RecentCommits(
+            String mappingState,
+            String selectionState,
+            List<RecentCommit> commits,
+            List<String> dataLimitations
+    ) {
+    }
+
+    public record RecentCommit(
+            UUID projectId,
+            Long providerRepositoryId,
+            String commitSha,
+            String shortSha,
+            String message,
+            java.time.LocalDateTime timestamp
+    ) {
+    }
+
+    public record LeaderTeamContext(
+            String selectionState,
+            UUID teamId,
+            TeamProgress progress,
+            List<OverdueTaskEvidence> overdueTasks,
+            List<ConfirmedWarning> confirmedWarnings,
+            List<String> unsupportedSignals,
+            List<String> reviewAdvisories,
+            List<ResourceTeamContext> candidates,
+            List<String> dataLimitations
+    ) {
+    }
+
+    public record OverdueTaskEvidence(
+            UUID taskId,
+            String title,
+            UUID assigneeId,
+            String assigneeDisplayName,
+            String evidenceType,
+            String evidenceNote,
+            java.time.LocalDateTime dueDate
+    ) {
+    }
+
+    public record ConfirmedWarning(
+            String signal,
+            UUID teamId,
+            UUID taskId,
+            UUID assigneeId,
+            String assigneeDisplayName,
+            String evidenceNote,
+            java.time.LocalDateTime dueDate
+    ) {
+    }
+
+    public record TraceabilitySummary(
+            UUID projectId,
+            int eventCount,
+            boolean truncated,
+            List<String> dataLimitations
+    ) {
+    }
+
+    public record CommitReviewOperationalAggregate(
+            boolean resultWarningIntegrationConfirmed,
+            long pending,
+            long starting,
+            long started,
+            long running,
+            long waitingRetry,
+            long completed,
+            long failed,
+            long cancelled
+    ) {
+    }
+
+    public record TeamReportSection(
+            UUID teamId,
+            String teamName,
+            UUID projectId,
+            LecturerCourseDashboardResponses.TeamProgress progress,
+            ContributionSnapshot contribution,
+            LecturerAnalyticsResponses.SprintVelocity velocity,
+            LecturerAnalyticsResponses.ActivityOverview activities,
+            LecturerAnalyticsResponses.BurndownChart burndown,
+            TraceabilitySummary traceability,
+            List<ConfirmedWarning> confirmedWarnings
+    ) {
+    }
+
+    public record LecturerCourseContext(
+            String selectionState,
+            UUID courseId,
+            LecturerCourseDashboardResponses.TeamsProgress teamsProgress,
+            LecturerCourseDashboardResponses.ContributionSummary contributionSummary,
+            LecturerCourseDashboardResponses.Trends trends,
+            LecturerCourseDashboardResponses.AtRiskSummary atRiskSummary,
+            LecturerAnalyticsResponses.EarlyWarnings earlyWarnings,
+            List<CourseContext> candidates,
+            List<String> dataLimitations
+    ) {
+    }
+
+    public record LecturerProgressReport(
+            String projectionVersion,
+            String artifactType,
+            String selectionState,
+            java.time.OffsetDateTime generatedAt,
+            UUID courseId,
+            CourseReportMetadata course,
+            List<TeamReportSection> teamSections,
+            LecturerCourseDashboardResponses.TeamsProgress teamsProgress,
+            LecturerCourseDashboardResponses.ContributionSummary contributionSummary,
+            LecturerCourseDashboardResponses.Trends trends,
+            LecturerCourseDashboardResponses.AtRiskSummary atRiskSummary,
+            LecturerAnalyticsResponses.EarlyWarnings earlyWarnings,
+            List<LecturerAnalyticsResponses.SprintVelocity> velocities,
+            CommitReviewOperationalAggregate commitReviewOperational,
+            List<ConfirmedWarning> confirmedWarnings,
+            List<String> unsupportedSignals,
+            List<String> reviewAdvisories,
+            List<CourseContext> candidates,
+            List<String> unsupportedFields,
+            List<String> dataLimitations
+    ) {
+    }
+
+    public record CourseReportMetadata(
+            UUID courseId,
+            String courseCode,
+            String courseName,
+            UUID instructorId,
+            String instructorDisplayName
+    ) {
+    }
+
+    public record AdminSystemReport(
+            String projectionVersion,
+            String artifactType,
+            java.time.OffsetDateTime generatedAt,
+            AdminSystemStatsResponse systemStats,
+            AdminIntegrationHealthResponse integrationHealth,
+            org.springframework.data.domain.Page<AdminCourseProgressOverviewResponse> courseProgressOverview,
+            AdminAnomaliesReportResponse anomalies,
+            AdminGraphProcessingReportResponse graphProcessing,
+            CommitReviewOperationalAggregate commitReviewOperational,
+            List<ConfirmedWarning> confirmedWarnings,
+            List<String> unsupportedSignals,
+            List<String> reviewAdvisories,
+            List<String> unsupportedFields,
+            List<String> dataLimitations
     ) {
     }
 }

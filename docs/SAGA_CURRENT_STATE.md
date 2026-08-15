@@ -1,3 +1,19 @@
+## Capability matrix + warning-in-report + fail-closed AI permissions (DEC-096) — 2026-08-16
+
+- **Đã hoàn thành / CONFIRMED_SOURCE_TEST:** Role-aware capability matrix theo authorization source. Safe AI 401/403. Lecturer Course report context v1 + Admin system report context v1 với warning split. ADMIN Course report chỉ khi `courseId` + `requireCourseAccess`. SRS auth không phải LEADER-only. Không fabricate unsupported warning.
+- Targeted Agent/report/OpenAPI **PASS**. Full Backend **1158 tests / 1 failure / 0 errors**: DEC-023 Course roster baseline (`courseRosterHasTeamContractIsExplicitAndDoesNotTreatOutboxAsEnrollment`). Notification newest-first flake **không** tái hiện lần này. **Không ghi FULL_SUITE=PASS.** Không regression mới của DEC-096. `git diff --check` clean.
+- **Contracts:** OpenAPI **149**. Migration head **V41**.
+
+## Role-aware AI chat + report projections + auto-review client (DEC-095) — 2026-08-16
+
+- **Đã hoàn thành / CONFIRMED_SOURCE_TEST:** AI nhận current actor từ session/delegation, không từ tên/MSSV. Internal role-aware tools + Lecturer/Admin source-backed report projections. SRS export không đổi. Artifact download reauth theo type. Typed auto-review client + after-commit orchestration (DEC-094 intent foundation). HF/runtime smoke **TBD**.
+- Targeted Agent/review/OpenAPI/migration **PASS**. Full Backend **1146 tests / 2 failures / 0 errors**: DEC-023 Course roster baseline + known notification newest-first flake. **Không ghi FULL_SUITE=PASS.** Không regression mới của DEC-095.
+- **Contracts:** OpenAPI **149**. Migration head **V41**.
+
+## Auto commit-review intent (DEC-094, foundation; start wired by DEC-095) — 2026-08-16
+
+- **Foundation giữ nguyên:** intent + `review_cutover_at` sau canonical persist; dedup; historical/live cutover. Early Warning V2 ngoài OVERDUE **không ship**. DEC-095 mới gọi AI start/poll/result. OpenAPI **149**. V40 + V41.
+
 ## Jira task attachments from SAGA (DEC-093) — 2026-08-15
 
 - **Đã hoàn thành / CONFIRMED_SOURCE_TEST:** Chỉ Student thành viên Team nộp file/ảnh hoặc link vào Jira Task qua SAGA. File metadata `task_attachment` sau canonical fetch. Link lưu `task_web_link` + Jira remote link.
@@ -806,3 +822,7 @@ BASE HEAD của snapshot cũ: `0bc30be`. HEAD audit hiện hành là `4f3dee9`; 
 - Backend Agent targeted suite passes **21/21**. Full clean runs **944 tests / 5 failures / 0 errors / 0 skipped**: four stable pre-milestone baselines (OpenAPI operation count, DEC-023 Course roster, and two Lecturer Analytics assertions) plus the already documented non-deterministic notification newest-first assertion; that exact notification method passes its immediate isolated rerun **1/1**. No Agent/M5/migration test fails.
 - No frontend application repository was discovered in the audited roots. Public API contract is ready; FE implementation and web product runtime are `NOT_IMPLEMENTED/TBD`.
 - Hugging Face source readiness is in the AI repository; actual Space deployment and runtime integration remain `TBD_DEPLOYMENT_SMOKE`.
+
+## SAGA AI Agent V2 identity/reports/auto-review (DEC-095) — 2026-08-16
+
+- Additive to V1: currentActor on Backend→AI payload; role-aware hidden tools; Lecturer/Admin source-backed report projections; artifact download reauth for Course/SYSTEM scopes; typed commit-review client + AFTER_COMMIT start. Public OpenAPI still **149**. HF/runtime smoke still TBD.

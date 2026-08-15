@@ -1,5 +1,6 @@
 package com.saga.be.security;
 
+import com.saga.be.service.AgentAiSafeErrors;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
@@ -23,12 +24,13 @@ public class JsonAuthenticationEntryPoint implements AuthenticationEntryPoint {
             HttpServletResponse response,
             AuthenticationException authException
     ) throws IOException {
+        boolean agentChat = AgentAiSafeErrors.isPublicAgentPath(request.getRequestURI());
         responseWriter.write(
                 request,
                 response,
                 HttpStatus.UNAUTHORIZED.value(),
-                "AUTHENTICATION_REQUIRED",
-                "Authentication is required"
+                AgentAiSafeErrors.AUTHENTICATION_REQUIRED_CODE,
+                agentChat ? AgentAiSafeErrors.SESSION_EXPIRED_MESSAGE : "Authentication is required"
         );
     }
 }

@@ -10,6 +10,7 @@ import com.saga.be.dto.response.TaskReadResponse;
 import com.saga.be.security.SagaPrincipal;
 import com.saga.be.service.AgentDelegationCapability;
 import com.saga.be.service.AgentDelegationService;
+import com.saga.be.service.AgentRoleAwareProjectionService;
 import com.saga.be.service.AgentTaskProposalValidationService;
 import com.saga.be.service.AgentToolProjectionService;
 import io.swagger.v3.oas.annotations.Hidden;
@@ -29,15 +30,18 @@ public class InternalAgentToolController {
 
     private final AgentDelegationService delegations;
     private final AgentToolProjectionService projections;
+    private final AgentRoleAwareProjectionService roleAware;
     private final AgentTaskProposalValidationService proposals;
 
     public InternalAgentToolController(
             AgentDelegationService delegations,
             AgentToolProjectionService projections,
+            AgentRoleAwareProjectionService roleAware,
             AgentTaskProposalValidationService proposals
     ) {
         this.delegations = delegations;
         this.projections = projections;
+        this.roleAware = roleAware;
         this.proposals = proposals;
     }
 
@@ -152,6 +156,56 @@ public class InternalAgentToolController {
             @Valid @RequestBody InternalAgentToolRequests.Project request
     ) {
         return projections.srsContext(actor(context, request.conversationId(), false), request.projectId());
+    }
+
+    @PostMapping("/self-progress")
+    public InternalAgentToolResponses.SelfProgress selfProgress(
+            @RequestHeader(DELEGATED_CONTEXT_HEADER) String context,
+            @Valid @RequestBody InternalAgentToolRequests.OptionalProject request
+    ) {
+        return roleAware.selfProgress(
+                actor(context, request.conversationId(), false), request.courseId(), request.projectId()
+        );
+    }
+
+    @PostMapping("/self-recent-commits")
+    public InternalAgentToolResponses.RecentCommits selfRecentCommits(
+            @RequestHeader(DELEGATED_CONTEXT_HEADER) String context,
+            @Valid @RequestBody InternalAgentToolRequests.Context request
+    ) {
+        return roleAware.recentCommits(actor(context, request.conversationId(), false));
+    }
+
+    @PostMapping("/leader-team-context")
+    public InternalAgentToolResponses.LeaderTeamContext leaderTeamContext(
+            @RequestHeader(DELEGATED_CONTEXT_HEADER) String context,
+            @Valid @RequestBody InternalAgentToolRequests.OptionalTeam request
+    ) {
+        return roleAware.leaderTeamContext(actor(context, request.conversationId(), false), request.teamId());
+    }
+
+    @PostMapping("/lecturer-course-context")
+    public InternalAgentToolResponses.LecturerCourseContext lecturerCourseContext(
+            @RequestHeader(DELEGATED_CONTEXT_HEADER) String context,
+            @Valid @RequestBody InternalAgentToolRequests.OptionalCourse request
+    ) {
+        return roleAware.lecturerCourseContext(actor(context, request.conversationId(), false), request.courseId());
+    }
+
+    @PostMapping("/lecturer-progress-report")
+    public InternalAgentToolResponses.LecturerProgressReport lecturerProgressReport(
+            @RequestHeader(DELEGATED_CONTEXT_HEADER) String context,
+            @Valid @RequestBody InternalAgentToolRequests.OptionalCourse request
+    ) {
+        return roleAware.lecturerProgressReport(actor(context, request.conversationId(), false), request.courseId());
+    }
+
+    @PostMapping("/admin-system-report")
+    public InternalAgentToolResponses.AdminSystemReport adminSystemReport(
+            @RequestHeader(DELEGATED_CONTEXT_HEADER) String context,
+            @Valid @RequestBody InternalAgentToolRequests.Context request
+    ) {
+        return roleAware.adminSystemReport(actor(context, request.conversationId(), false));
     }
 
     @PostMapping("/resolve-assignee")

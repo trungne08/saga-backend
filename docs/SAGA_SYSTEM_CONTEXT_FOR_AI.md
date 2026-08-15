@@ -1,3 +1,27 @@
+## Capability matrix, warning-in-report, fail-closed AI permissions (DEC-096) — 2026-08-16
+
+- **CONFIRMED_SOURCE_TEST:** Current actor remains `SagaPrincipal`/V30 delegation. Public `/api/v1/ai/**` 401 = `Phiên đăng nhập đã hết hạn.`; AI 403 = `Bạn không có quyền truy cập hoặc thực hiện thao tác này.` Internal service-token 401 stays `INTERNAL_SERVICE_AUTHENTICATION_REQUIRED` (not session-expired). Lecturer uninstructed Course and Leader/Member wrong Team stay `ZERO_MATCH` (anti-enumeration). MEMBER/non-Admin hitting Lecturer/Admin-only tools throw AccessDenied → safe 403. Artifact UUID of another actor reauthorizes current access and fail-closes.
+- **CONFIRMED — reports:** Lecturer projection `saga-lecturer-course-report-context-v1` / artifact `LECTURER_PROGRESS_REPORT`. Admin projection `saga-admin-system-report-context-v1` / artifact `ADMIN_SYSTEM_REPORT`. Per-Team sections; `confirmedWarnings[]` / `unsupportedSignals[]` / `reviewAdvisories[]`. ADMIN may read a Course report only with explicit `courseId` + existing `requireCourseAccess` (no pick-first). Course XLSX export unchanged.
+- **CONFIRMED warnings in report:** `TASK_DUE_TOMORROW` / `TASK_DUE_TODAY` / `TASK_OVERDUE` (date-only, Jira zone) and `OVERDUE_TASK` early-warning/anomaly. Auto-review **operational** intent counts only; `resultWarningIntegrationConfirmed=false`. Do not fabricate inactivity/sprint-behind/repeated-issue or review-result warnings.
+- **SRS:** unchanged. Effective auth = `ProjectDetailService.requireProjectReadAccess`: ADMIN, instructed LECTURER, **any Student team member** (MEMBER and LEADER). Not LEADER-only.
+- **NOT CLAIMED:** HF/runtime/browser AI product E2E; dedicated Leader team DOCX artifact type; Auto Review result/warning fan-out.
+- **VERIFICATION:** targeted Agent/report/OpenAPI PASS. Full Backend **1158 / 1 fail / 0 error** (DEC-023 roster baseline). No DEC-096 regression. `git diff --check` clean.
+- **Contracts:** OpenAPI **149**. Migration **V41**.
+
+## Role-aware AI chat + report projections + auto-review client (DEC-095) — 2026-08-16
+
+- **CONFIRMED_SOURCE_TEST:** AI tự nhận diện current actor từ `SagaPrincipal`/V30 delegation (`identitySource=SAGA_PRINCIPAL_SESSION`), không từ user-entered name/MSSV. Browser không gửi `actorId`/`studentId`/`lecturerId`/`applicationRole`. Self-reference resolve từ Backend; ambiguity = chọn Course/Team/Project/commit, không hỏi identity.
+- **CONFIRMED — role-aware tools (internal only):** MEMBER self progress/tasks/contribution/commits; LEADER exact led Team(s), no pick-first; Lecturer instructed Course only; Admin system report ADMIN only. Recent commits = canonical `CommitData` + ACTIVE GitHub IdentityMap, bounded, AI không gọi GitHub.
+- **CONFIRMED — reports:** Lecturer progress `saga-lecturer-progress-report-v1` và Admin system `saga-admin-system-report-v1` chỉ source-backed (reuse dashboard/analytics/admin services). Không final grade, không AI risk score, không fabricate graph history. Unsupported anomalies remain TBD/null. SRS existing DOCX pipeline unchanged. Download reauthorizes current actor (`SRS_DOCX`/`PROJECT`, `LECTURER_PROGRESS_REPORT`/`COURSE`, `ADMIN_SYSTEM_REPORT`/`SYSTEM`).
+- **CONFIRMED — auto review:** typed Backend→AI client for published `/internal/backend/v1/commit-reviews*` with `X-SAGA-Backend-Service-Token`. Historical LOW / live HIGH. Strict V2 parse; unknown enum fail closed; FAILED/CANCELLED ≠ NEEDS_CHANGES. Start after canonical persist + AFTER_COMMIT; HTTP not inside DB commit transaction. V41 job tracking.
+- **NOT CLAIMED:** Hugging Face / production runtime smoke, browser AI product E2E, Early Warning V2 besides OVERDUE.
+- **VERIFICATION:** targeted Agent/review/OpenAPI/migration PASS. Full Backend **1146 / 2 fail / 0 error** (DEC-023 roster + notification ordering flake). No DEC-095 regression. `git diff --check` clean.
+- **Contracts:** OpenAPI **149**. Migration **V41**.
+
+## Auto commit-review intent (DEC-094, foundation; start wired by DEC-095) — 2026-08-16
+
+- **CONFIRMED_SOURCE_TEST:** canonical `upsertCommit` enqueue unique `commit_review_intent`; `review_cutover_at` dedicated. DEC-095 wires AI start/result HTTP. Early Warning V2 besides OVERDUE **not shipped**. OpenAPI **149**. Migration **V40** + **V41**.
+
 ## Jira task attachments from SAGA (DEC-093) — 2026-08-15
 
 - **CONFIRMED_SOURCE_TEST:** `JiraProviderClient.addIssueAttachments` POSTs multipart to Jira; `addIssueRemoteLink` POSTs a web URL. `JiraTaskWriteService.attach` allows **student team members only**. Local file metadata via existing upsert; links in `task_web_link` (`V39`).
@@ -1065,3 +1089,9 @@ và reliability regression 20 tests đều pass.
 - SRS uses a bounded Backend projection and stores canonical evidence-mapped source in AI DB. Backend reauthorizes Project scope before each DOCX download. Container-local/Hugging Face disk is not durable truth.
 - **DEPLOYMENT STATUS:** AI Docker Space source is ready for port 7860/non-root execution, but no Hugging Face build/runtime, Backend-to-Space integration, frontend repository, or browser product smoke is claimed.
 - **VERIFICATION:** Backend Agent targeted **21/21 PASS**; full clean **944 tests / 5 failures / 0 errors**, comprising four stable unrelated baselines plus one known notification ordering flake that passes immediate isolated rerun **1/1**. AI default suite **194 PASS / 4 real deselected**. No real model call or deployment was performed for this milestone.
+
+## SAGA AI Agent V2 identity + reports (DEC-095 additive) — 2026-08-16
+
+- **CONFIRMED_SOURCE_TEST:** Backend→AI chat payload includes `currentActor` from session (`applicationRole`, `localProfileId`, `displayName`, `studentCode` from Student row, `identitySource=SAGA_PRINCIPAL_SESSION`). Resource-context also carries `currentActor`. ADMIN resource-context is `SYSTEM_SCOPE`.
+- Hidden tools: self-progress / self-recent-commits / leader-team-context / lecturer-course-context / lecturer-progress-report / admin-system-report. Artifact download reauth covers SRS + Lecturer Course report + Admin system report.
+- Auto-review typed client + AFTER_COMMIT orchestration. No HF/runtime smoke claim.

@@ -8,6 +8,7 @@ import com.saga.be.exception.IdentityServiceException;
 import com.saga.be.exception.IntegrationException;
 import com.saga.be.exception.InvalidIdentityException;
 import com.saga.be.exception.UnauthenticatedRequestException;
+import com.saga.be.service.AgentAiSafeErrors;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import java.util.Map;
@@ -35,6 +36,14 @@ public class GlobalExceptionHandler {
             UnauthenticatedRequestException exception,
             HttpServletRequest request
     ) {
+        if (AgentAiSafeErrors.isPublicAgentPath(request.getRequestURI())) {
+            return response(
+                    HttpStatus.UNAUTHORIZED,
+                    AgentAiSafeErrors.AUTHENTICATION_REQUIRED_CODE,
+                    AgentAiSafeErrors.SESSION_EXPIRED_MESSAGE,
+                    request
+            );
+        }
         return response(HttpStatus.UNAUTHORIZED, "AUTHENTICATION_REQUIRED", "Authentication is required", request);
     }
 
@@ -67,6 +76,23 @@ public class GlobalExceptionHandler {
             IntegrationException exception,
             HttpServletRequest request
     ) {
+        if (exception.getStatus() == HttpStatus.UNAUTHORIZED
+                && AgentAiSafeErrors.isPublicAgentPath(request.getRequestURI())) {
+            return response(
+                    HttpStatus.UNAUTHORIZED,
+                    AgentAiSafeErrors.AUTHENTICATION_REQUIRED_CODE,
+                    AgentAiSafeErrors.SESSION_EXPIRED_MESSAGE,
+                    request
+            );
+        }
+        if (exception.getStatus() == HttpStatus.FORBIDDEN && AgentAiSafeErrors.isAgentPath(request.getRequestURI())) {
+            return response(
+                    HttpStatus.FORBIDDEN,
+                    AgentAiSafeErrors.ACCESS_DENIED_CODE,
+                    AgentAiSafeErrors.FORBIDDEN_MESSAGE,
+                    request
+            );
+        }
         return ResponseEntity.status(exception.getStatus()).body(
                 ApiErrorResponse.of(
                 exception.getStatus().value(),
@@ -151,6 +177,14 @@ public class GlobalExceptionHandler {
             AccessDeniedException exception,
             HttpServletRequest request
     ) {
+        if (AgentAiSafeErrors.isAgentPath(request.getRequestURI())) {
+            return response(
+                    HttpStatus.FORBIDDEN,
+                    AgentAiSafeErrors.ACCESS_DENIED_CODE,
+                    AgentAiSafeErrors.FORBIDDEN_MESSAGE,
+                    request
+            );
+        }
         return response(HttpStatus.FORBIDDEN, "ACCESS_DENIED", "Access denied", request);
     }
 

@@ -14,16 +14,19 @@ import static org.mockito.Mockito.when;
 import com.saga.be.dto.request.JiraTaskCreateRequest;
 import com.saga.be.dto.request.JiraTaskUpdateRequest;
 import com.saga.be.dto.response.AgentApiResponses;
+import com.saga.be.entity.Course;
 import com.saga.be.entity.enums.AccountStatus;
 import com.saga.be.entity.enums.Priority;
 import com.saga.be.entity.enums.TaskType;
 import com.saga.be.exception.IntegrationException;
+import com.saga.be.repository.StudentRepository;
 import com.saga.be.security.ApplicationRole;
 import com.saga.be.security.SagaPrincipal;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.security.access.AccessDeniedException;
 
 class AgentGatewayServiceTest {
 
@@ -108,7 +111,9 @@ class AgentGatewayServiceTest {
         ProjectDetailService projects = mock(ProjectDetailService.class);
         AgentGatewayService service = new AgentGatewayService(
                 ai, mock(AgentDelegationService.class),
-                mock(JiraTaskWriteService.class), projects
+                mock(JiraTaskWriteService.class), projects,
+                mock(com.saga.be.repository.StudentRepository.class),
+                mock(LecturerAnalyticsAuthorizationService.class)
         );
         SagaPrincipal actor = actor(ApplicationRole.STUDENT);
         UUID artifactId = UUID.randomUUID();
@@ -133,7 +138,9 @@ class AgentGatewayServiceTest {
         ProjectDetailService projects = mock(ProjectDetailService.class);
         AgentGatewayService service = new AgentGatewayService(
                 ai, mock(AgentDelegationService.class),
-                mock(JiraTaskWriteService.class), projects
+                mock(JiraTaskWriteService.class), projects,
+                mock(com.saga.be.repository.StudentRepository.class),
+                mock(LecturerAnalyticsAuthorizationService.class)
         );
         SagaPrincipal actor = actor(ApplicationRole.STUDENT);
         UUID artifactId = UUID.randomUUID();
@@ -150,12 +157,106 @@ class AgentGatewayServiceTest {
         verify(ai, never()).artifactContent(any(), any());
     }
 
+    @Test
+    void lecturerReportDownloadReauthorizesCurrentCourseAccess() {
+        AgentAiClient ai = mock(AgentAiClient.class);
+        LecturerAnalyticsAuthorizationService authorization = mock(LecturerAnalyticsAuthorizationService.class);
+        AgentGatewayService service = new AgentGatewayService(
+                ai, mock(AgentDelegationService.class),
+                mock(JiraTaskWriteService.class), mock(ProjectDetailService.class),
+                mock(StudentRepository.class), authorization
+        );
+        UUID artifactId = UUID.randomUUID();
+        UUID courseId = UUID.randomUUID();
+        UUID lecturerId = UUID.randomUUID();
+        SagaPrincipal lecturer = new SagaPrincipal(
+                "lecturer-sub", "lecturer@example.test", "Lecturer",
+                ApplicationRole.LECTURER, lecturerId, AccountStatus.ACTIVE
+        );
+        Course course = Course.builder().courseCode("PRN231").name("PRN").build();
+        course.setId(courseId);
+        when(ai.artifact(lecturer, artifactId)).thenReturn(new AgentApiResponses.GeneratedArtifact(
+                artifactId, UUID.randomUUID().toString(), "LECTURER_PROGRESS_REPORT", "COURSE",
+                courseId.toString(), "course-progress.docx",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        ));
+        when(authorization.requireCourseAccess(lecturer, courseId)).thenReturn(course);
+        when(ai.artifactContent(lecturer, artifactId)).thenReturn(new byte[]{1, 2, 3});
+
+        assertEquals("course-progress.docx", service.download(lecturer, artifactId).filename());
+
+        SagaPrincipal admin = actor(ApplicationRole.ADMIN);
+        when(ai.artifact(admin, artifactId)).thenReturn(new AgentApiResponses.GeneratedArtifact(
+                artifactId, UUID.randomUUID().toString(), "LECTURER_PROGRESS_REPORT", "COURSE",
+                courseId.toString(), "course-progress.docx",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        ));
+        when(authorization.requireCourseAccess(admin, courseId)).thenReturn(course);
+        when(ai.artifactContent(admin, artifactId)).thenReturn(new byte[]{1, 2, 3});
+        assertEquals("course-progress.docx", service.download(admin, artifactId).filename());
+
+        UUID otherLecturerId = UUID.randomUUID();
+        SagaPrincipal otherLecturer = new SagaPrincipal(
+                "other-lecturer", "other@example.test", "Other",
+                ApplicationRole.LECTURER, otherLecturerId, AccountStatus.ACTIVE
+        );
+        when(ai.artifact(otherLecturer, artifactId)).thenReturn(new AgentApiResponses.GeneratedArtifact(
+                artifactId, UUID.randomUUID().toString(), "LECTURER_PROGRESS_REPORT", "COURSE",
+                courseId.toString(), "course-progress.docx",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        ));
+        when(authorization.requireCourseAccess(otherLecturer, courseId))
+                .thenThrow(new AccessDeniedException("denied"));
+        assertThrows(IntegrationException.class, () -> service.download(otherLecturer, artifactId));
+        verify(ai, never()).artifactContent(eq(otherLecturer), any());
+
+        SagaPrincipal student = actor(ApplicationRole.STUDENT);
+        when(ai.artifact(student, artifactId)).thenReturn(new AgentApiResponses.GeneratedArtifact(
+                artifactId, UUID.randomUUID().toString(), "LECTURER_PROGRESS_REPORT", "COURSE",
+                courseId.toString(), "course-progress.docx",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        ));
+        when(authorization.requireCourseAccess(student, courseId))
+                .thenThrow(new AccessDeniedException("denied"));
+        assertThrows(IntegrationException.class, () -> service.download(student, artifactId));
+        verify(ai, never()).artifactContent(eq(student), any());
+    }
+
+    @Test
+    void adminReportDownloadIsAdminOnly() {
+        AgentAiClient ai = mock(AgentAiClient.class);
+        AgentGatewayService service = new AgentGatewayService(
+                ai, mock(AgentDelegationService.class),
+                mock(JiraTaskWriteService.class), mock(ProjectDetailService.class),
+                mock(StudentRepository.class), mock(LecturerAnalyticsAuthorizationService.class)
+        );
+        UUID artifactId = UUID.randomUUID();
+        SagaPrincipal admin = actor(ApplicationRole.ADMIN);
+        when(ai.artifact(admin, artifactId)).thenReturn(new AgentApiResponses.GeneratedArtifact(
+                artifactId, UUID.randomUUID().toString(), "ADMIN_SYSTEM_REPORT", "SYSTEM",
+                "SYSTEM", "admin-system.docx",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        ));
+        when(ai.artifactContent(admin, artifactId)).thenReturn(new byte[]{9});
+        assertEquals("admin-system.docx", service.download(admin, artifactId).filename());
+
+        SagaPrincipal lecturer = actor(ApplicationRole.LECTURER);
+        when(ai.artifact(lecturer, artifactId)).thenReturn(new AgentApiResponses.GeneratedArtifact(
+                artifactId, UUID.randomUUID().toString(), "ADMIN_SYSTEM_REPORT", "SYSTEM",
+                "SYSTEM", "admin-system.docx",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        ));
+        assertThrows(IntegrationException.class, () -> service.download(lecturer, artifactId));
+    }
+
     private AgentGatewayService service(AgentAiClient ai, JiraTaskWriteService writes) {
         return new AgentGatewayService(
                 ai,
                 mock(AgentDelegationService.class),
                 writes,
-                mock(ProjectDetailService.class)
+                mock(ProjectDetailService.class),
+                mock(StudentRepository.class),
+                mock(LecturerAnalyticsAuthorizationService.class)
         );
     }
 

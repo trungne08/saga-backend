@@ -24,6 +24,7 @@ import com.saga.be.integration.security.ProjectIntegrationAuthorizationService;
 import com.saga.be.repository.DocumentRepository;
 import com.saga.be.repository.GitRepoRepository;
 import com.saga.be.repository.CourseRepository;
+import com.saga.be.repository.StudentRepository;
 import com.saga.be.repository.TeamMemberRepository;
 import com.saga.be.repository.TeamRepository;
 import com.saga.be.security.ApplicationRole;
@@ -58,6 +59,7 @@ public class AgentToolProjectionService {
     private final TeamRepository teams;
     private final TeamMemberRepository teamMembers;
     private final CourseRepository courses;
+    private final StudentRepository students;
     private final GitRepoRepository repositories;
     private final DocumentRepository documents;
     private final CommitReviewContextReader commitReviewContexts;
@@ -74,6 +76,7 @@ public class AgentToolProjectionService {
             TeamRepository teams,
             TeamMemberRepository teamMembers,
             CourseRepository courses,
+            StudentRepository students,
             GitRepoRepository repositories,
             DocumentRepository documents,
             CommitReviewContextReader commitReviewContexts,
@@ -89,6 +92,7 @@ public class AgentToolProjectionService {
         this.teams = teams;
         this.teamMembers = teamMembers;
         this.courses = courses;
+        this.students = students;
         this.repositories = repositories;
         this.documents = documents;
         this.commitReviewContexts = commitReviewContexts;
@@ -106,9 +110,16 @@ public class AgentToolProjectionService {
         if (actor.applicationRole() == ApplicationRole.LECTURER) {
             return lecturerResourceContext(actor);
         }
+        if (actor.applicationRole() == ApplicationRole.ADMIN) {
+            return new InternalAgentToolResponses.ResourceContext(
+                    actor.applicationRole().name(), "SYSTEM_SCOPE", 0, 0, 0,
+                    List.of(), List.of(), currentActor(actor, "ZERO_MATCH", 0)
+            );
+        }
         return new InternalAgentToolResponses.ResourceContext(
                 actor.applicationRole().name(), "ROLE_NOT_SUPPORTED", 0, 0, 0,
-                List.of(), List.of("ADMIN_CONTEXT_DISCOVERY_NOT_AVAILABLE")
+                List.of(), List.of("CONTEXT_DISCOVERY_NOT_AVAILABLE"),
+                currentActor(actor, "ZERO_MATCH", 0)
         );
     }
 
@@ -394,7 +405,7 @@ public class AgentToolProjectionService {
         }
         return resourceContext(
                 actor.applicationRole(), selectionState(projectIds.size()), coursesById,
-                teamsByCourse, teamIds.size(), projectIds.size()
+                teamsByCourse, teamIds.size(), projectIds.size(), currentActor(actor, ledState(memberships), ledCount(memberships))
         );
     }
 
@@ -420,7 +431,8 @@ public class AgentToolProjectionService {
         }
         return resourceContext(
                 actor.applicationRole(), selectionState(coursesById.size()), coursesById,
-                teamsByCourse, teamIds.size(), projectIds.size()
+                teamsByCourse, teamIds.size(), projectIds.size(),
+                currentActor(actor, "ZERO_MATCH", 0)
         );
     }
 
@@ -430,7 +442,8 @@ public class AgentToolProjectionService {
             Map<UUID, Course> coursesById,
             Map<UUID, List<InternalAgentToolResponses.ResourceTeamContext>> teamsByCourse,
             long totalTeams,
-            long totalProjects
+            long totalProjects,
+            InternalAgentToolResponses.CurrentActor currentActor
     ) {
         List<String> limitations = new ArrayList<>();
         if (coursesById.size() > MAX_CONTEXT_COURSES) {
@@ -461,7 +474,7 @@ public class AgentToolProjectionService {
         }
         return new InternalAgentToolResponses.ResourceContext(
                 role.name(), selectionState, coursesById.size(), totalTeams, totalProjects,
-                List.copyOf(result), List.copyOf(limitations)
+                List.copyOf(result), List.copyOf(limitations), currentActor
         );
     }
 
@@ -483,6 +496,36 @@ public class AgentToolProjectionService {
             return "ZERO_MATCH";
         }
         return matches == 1 ? "SINGLE_MATCH" : "MULTIPLE_MATCH";
+    }
+
+    private InternalAgentToolResponses.CurrentActor currentActor(
+            SagaPrincipal actor, String teamRoleSelectionState, long ledTeamCount
+    ) {
+        String studentCode = null;
+        if (actor.applicationRole() == ApplicationRole.STUDENT) {
+            studentCode = students.findById(actor.localProfileId())
+                    .map(com.saga.be.entity.Student::getStudentCode)
+                    .orElse(null);
+        }
+        return new InternalAgentToolResponses.CurrentActor(
+                actor.applicationRole().name(),
+                actor.localProfileId(),
+                actor.fullName(),
+                studentCode,
+                "SAGA_PRINCIPAL_SESSION",
+                teamRoleSelectionState,
+                ledTeamCount
+        );
+    }
+
+    private long ledCount(List<TeamMember> memberships) {
+        return memberships.stream()
+                .filter(membership -> membership.getRoleInTeam() == com.saga.be.entity.enums.RoleInTeam.LEADER)
+                .count();
+    }
+
+    private String ledState(List<TeamMember> memberships) {
+        return selectionState(ledCount(memberships));
     }
 
     private InternalAgentToolResponses.ContributionSnapshot contributionSnapshot(

@@ -11,11 +11,13 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import com.saga.be.entity.CommitData;
 import com.saga.be.entity.GitIssue;
 import com.saga.be.entity.GitRepo;
 import com.saga.be.entity.Student;
 import com.saga.be.entity.enums.IssueState;
 import com.saga.be.integration.identity.IdentityMappingService;
+import com.saga.be.integration.provider.GitHubCommitSnapshot;
 import com.saga.be.integration.provider.GitHubIssueSnapshot;
 import com.saga.be.repository.CommentRepository;
 import com.saga.be.repository.CommitDataRepository;
@@ -23,6 +25,7 @@ import com.saga.be.repository.GitIssueRepository;
 import com.saga.be.repository.GitRepoRepository;
 import com.saga.be.repository.PrReviewRepository;
 import com.saga.be.repository.PullRequestRepository;
+import com.saga.be.service.CommitReviewIntentService;
 import com.saga.be.service.TeamContributionRefreshService;
 import java.time.LocalDateTime;
 import java.util.Optional;
@@ -30,6 +33,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.test.util.ReflectionTestUtils;
 
 class GitHubDataUpsertServiceTest {
 
@@ -37,6 +41,8 @@ class GitHubDataUpsertServiceTest {
     private GitIssueRepository issueRepository;
     private IdentityMappingService mappingService;
     private TeamContributionRefreshService teamContributionRefreshService;
+    private CommitDataRepository commitRepository;
+    private CommitReviewIntentService commitReviewIntentService;
     private GitHubDataUpsertService service;
 
     @BeforeEach
@@ -45,15 +51,18 @@ class GitHubDataUpsertServiceTest {
         issueRepository = mock(GitIssueRepository.class);
         mappingService = mock(IdentityMappingService.class);
         teamContributionRefreshService = mock(TeamContributionRefreshService.class);
+        commitRepository = mock(CommitDataRepository.class);
+        commitReviewIntentService = mock(CommitReviewIntentService.class);
         service = new GitHubDataUpsertService(
                 repoRepository,
                 issueRepository,
-                mock(CommitDataRepository.class),
+                commitRepository,
                 mock(PullRequestRepository.class),
                 mock(PrReviewRepository.class),
                 mock(CommentRepository.class),
                 mappingService,
-                teamContributionRefreshService
+                teamContributionRefreshService,
+                commitReviewIntentService
         );
     }
 
@@ -155,6 +164,42 @@ class GitHubDataUpsertServiceTest {
         assertSame(mapped, captor.getValue().getAuthor());
         assertEquals("55", captor.getValue().getAuthorExternalId());
         assertEquals(IssueState.OPEN, captor.getValue().getState());
+    }
+
+    @Test
+    void newCanonicalCommitEnqueuesExactlyOneReviewIntent() {
+        UUID repoId = UUID.randomUUID();
+        GitRepo repository = new GitRepo();
+        ReflectionTestUtils.setField(repository, "id", repoId);
+        repository.setReviewCutoverAt(LocalDateTime.parse("2026-08-01T00:00:00"));
+        when(repoRepository.findById(repoId)).thenReturn(Optional.of(repository));
+        when(commitRepository.findByRepoIdAndShaHash(repoId, "deadbeef".repeat(5))).thenReturn(Optional.empty());
+        when(commitRepository.saveAndFlush(any(CommitData.class))).thenAnswer(invocation -> {
+            CommitData commit = invocation.getArgument(0);
+            if (commit.getId() == null) {
+                ReflectionTestUtils.setField(commit, "id", UUID.randomUUID());
+            }
+            return commit;
+        });
+
+        boolean first = service.upsertCommit(repoId, commitSnapshot("deadbeef".repeat(5),
+                LocalDateTime.parse("2026-08-02T00:00:00")));
+        CommitData persisted = new CommitData();
+        ReflectionTestUtils.setField(persisted, "id", UUID.randomUUID());
+        persisted.setShaHash("deadbeef".repeat(5));
+        when(commitRepository.findByRepoIdAndShaHash(repoId, "deadbeef".repeat(5)))
+                .thenReturn(Optional.of(persisted));
+        boolean second = service.upsertCommit(repoId, commitSnapshot("deadbeef".repeat(5),
+                LocalDateTime.parse("2026-08-02T00:00:00")));
+
+        assertTrue(first);
+        assertTrue(second);
+        verify(commitReviewIntentService).enqueueNewCanonicalCommit(any(GitRepo.class), any(CommitData.class));
+    }
+
+    private GitHubCommitSnapshot commitSnapshot(String sha, LocalDateTime committedAt) {
+        return new GitHubCommitSnapshot(sha, 55L, "SAGA-1 message only is not traceability", committedAt,
+                1, 0, 1, committedAt);
     }
 
     private GitHubIssueSnapshot snapshot(

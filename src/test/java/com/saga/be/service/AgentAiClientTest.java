@@ -44,6 +44,9 @@ class AgentAiClientTest {
                 .andExpect(header(AgentAiClient.DELEGATED_CONTEXT_HEADER, "opaque-context"))
                 .andExpect(jsonPath("$.ownerId").value("STUDENT:" + actor.localProfileId()))
                 .andExpect(jsonPath("$.applicationRole").value("STUDENT"))
+                .andExpect(jsonPath("$.currentActor.displayName").value("Student"))
+                .andExpect(jsonPath("$.currentActor.studentCode").value("SE123456"))
+                .andExpect(jsonPath("$.currentActor.identitySource").value("SAGA_PRINCIPAL_SESSION"))
                 .andRespond(withSuccess(
                         """
                         {
@@ -74,7 +77,7 @@ class AgentAiClientTest {
                 ));
 
         AgentApiResponses.Chat result = client.sendMessage(
-                actor, conversationId, "opaque-context", "Review this commit"
+                actor, conversationId, "opaque-context", "Review this commit", "SE123456"
         );
 
         assertEquals(jobId, result.jobReference().jobId());

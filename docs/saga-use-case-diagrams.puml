@@ -1,0 +1,88 @@
+@startuml saga-use-case-overview
+title SAGA - Sơ đồ ca sử dụng tổng quan
+
+top to bottom direction
+
+' Đường nối vuông góc, không dùng đường cong.
+skinparam linetype ortho
+skinparam shadowing false
+skinparam packageStyle folder
+skinparam nodesep 35
+skinparam ranksep 40
+skinparam ArrowColor #222222
+skinparam ArrowThickness 1
+
+skinparam rectangle {
+  BackgroundColor #FFF3C4
+  BorderColor #222222
+}
+skinparam package {
+  BackgroundColor #DCE7F7
+  BorderColor #334155
+  FontColor #111111
+}
+skinparam usecase {
+  BackgroundColor #F6CACA
+  BorderColor #333333
+  FontColor #111111
+}
+skinparam actor {
+  BackgroundColor #D9EFD2
+  BorderColor #333333
+  FontColor #111111
+}
+
+' Chỉ có ba actor chính của hệ thống.
+actor "Sinh viên" as Student
+together {
+  actor "Giảng viên" as Lecturer
+  actor "Quản trị viên" as Admin
+}
+
+rectangle "HỆ THỐNG SAGA" as SAGA {
+
+  package "Học tập và hỗ trợ" as Learning {
+    usecase "Theo dõi dự án\nvà tiến độ" as UC_StudentProgress
+    usecase "Đánh giá đồng cấp" as UC_PeerReview
+    usecase "Sử dụng trợ lý AI\nvà tạo báo cáo" as UC_AI
+  }
+
+  package "Dự án và đánh giá" as Project {
+    usecase "Quản lý dự án\nvà tích hợp" as UC_Project
+    usecase "Quản lý Sprint\nvà công việc" as UC_Work
+    usecase "Phân tích tiến độ\nvà đóng góp" as UC_Analytics
+
+    UC_Project -[hidden]down-> UC_Work
+    UC_Work -[hidden]down-> UC_Analytics
+  }
+
+  package "Học vụ và quản trị" as Academic {
+    usecase "Quản lý môn học\nvà sinh viên" as UC_Course
+    usecase "Quản lý học vụ\nvà người dùng" as UC_Academic
+    usecase "Giám sát hệ thống\nvà báo cáo" as UC_System
+
+    UC_Course -[hidden]down-> UC_Academic
+    UC_Academic -[hidden]down-> UC_System
+  }
+
+  ' Khóa module thành bố cục hai cột, tránh sơ đồ quá rộng.
+  UC_Academic -[hidden]right-> UC_Project
+  UC_Academic -[hidden]down-> UC_StudentProgress
+}
+
+' Actor bên trái.
+UC_StudentProgress -left- Student
+UC_PeerReview -left- Student
+UC_AI -left- Student
+
+' Actor bên phải.
+UC_Course -right- Lecturer
+UC_Project -right- Lecturer
+UC_Work -right- Lecturer
+UC_Analytics -right- Lecturer
+UC_AI -right- Lecturer
+
+UC_Academic -right- Admin
+UC_System -right- Admin
+
+@enduml

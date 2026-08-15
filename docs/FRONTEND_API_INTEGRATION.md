@@ -1,3 +1,20 @@
+## Capability matrix + warning-in-report + fail-closed AI (DEC-096) — 2026-08-16
+
+OpenAPI **149** (unchanged). Migration head **V41**. Public AI routes unchanged.
+
+- `/api/v1/ai/**` unauthenticated → 401 `Phiên đăng nhập đã hết hạn.` Forbidden AI tool/artifact → 403 `Bạn không có quyền truy cập hoặc thực hiện thao tác này.`
+- Artifact download still `GET /api/v1/ai/artifacts/{artifactId}/download`. `LECTURER_PROGRESS_REPORT` + `COURSE` reauthorizes via existing Course analytics access (LECTURER instructor or ADMIN). `ADMIN_SYSTEM_REPORT` + `SYSTEM` remains ADMIN-only. `SRS_DOCX` + `PROJECT` unchanged (any authorized project reader, including Student team members).
+- Do not display fabricated warnings. Supported report signals: `TASK_DUE_TOMORROW`, `TASK_DUE_TODAY`, `TASK_OVERDUE`, `OVERDUE_TASK`. Auto-review result warnings are **not** a frontend contract yet.
+
+## Role-aware AI chat + report artifacts (DEC-095) — 2026-08-16
+
+OpenAPI **149** (unchanged). Migration head **V41**. Public AI routes unchanged.
+
+- Create/send still `{ title? }` / `{ content }`. Unknown identity fields (`actorId`, `applicationRole`, `studentId`, `lecturerId`) → **400**. Current actor comes from session. Do not prompt for name/MSSV to identify the logged-in user.
+- Starter prompts may be role-aware on FE (`/api/auth/me.applicationRole` + Team role from existing membership APIs), but answers must come from chat/tools, not hardcoded FE copy.
+- Artifact download: existing `GET /api/v1/ai/artifacts/{artifactId}/download`. SRS export unchanged. Lecturer Course progress report and Admin system report are additional `generatedArtifact` types served through the same route after Backend reauthorization. Cross-Course / cross-role download is forbidden.
+- Internal AI tools and Backend→AI commit-review routes are **not** a frontend contract.
+
 ## Jira task attachments from SAGA (DEC-093) — 2026-08-15
 
 OpenAPI **149**. Migration head **V39**.
@@ -1863,7 +1880,7 @@ Anomalies: `OVERDUE_TASK` supported with real `count`; `MSR` / `DEADLINE_PROCESS
 
 ## AI Agent V1 (public only)
 
-Safe GETs: conversations list/detail, artifact download. Unsafe POSTs: create conversation, send message, confirm/reject pending action. Internal `/internal/ai/**` is **not** a frontend contract. AI does not accept browser `JSESSIONID`, does not read SAGA business DB, and does not call Jira/GitHub. Confirm/reject runs through Backend mutation path; no automatic Task mutation.
+Safe GETs: conversations list/detail, artifact download. Unsafe POSTs: create conversation, send message, confirm/reject pending action. Internal `/internal/ai/**` and Backend→AI `/internal/backend/v1/commit-reviews**` are **not** a frontend contract. AI does not accept browser `JSESSIONID`, does not read SAGA business DB, and does not call Jira/GitHub. Confirm/reject runs through Backend mutation path; no automatic Task mutation. Current actor identity is session/delegation only — FE must not send identity fields and must not ask name/MSSV to identify the logged-in user (DEC-095).
 
 ## Verification note for FE
 
@@ -1901,7 +1918,7 @@ Unsafe calls (session plus the existing CSRF header/cookie contract):
 - `POST /api/v1/ai/pending-actions/{actionId}/confirm` with no mutable action body
 - `POST /api/v1/ai/pending-actions/{actionId}/reject` with no mutable action body
 
-Do not send `actorId`, `ownerId`, `applicationRole`, provider, model, Backend path, or tool name. Backend derives the current local owner and role.
+Do not send `actorId`, `ownerId`, `applicationRole`, `studentId`, `lecturerId`, provider, model, Backend path, or tool name. Backend derives the current local owner and role from the session. Do not ask the user for name/MSSV to identify who is chatting; resource-selection questions (which Course/Team/commit) are allowed when the actor has more than one valid resource.
 
 A chat response includes `conversationId`, `messageId`, `text`, `status`, citations, optional `pendingAction`, optional `generatedArtifact`, optional `jobReference`, suggested follow-ups, and safe provider/model metadata. Render factual errors as unavailable/forbidden/not found; do not convert a failed tool or mutation into success text.
 

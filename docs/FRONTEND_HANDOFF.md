@@ -1,5 +1,28 @@
 # SAGA Frontend Handoff
 
+## Capability matrix + warning-in-report + fail-closed AI (DEC-096) — 2026-08-16
+
+- Public AI 401/403 messages are fixed Vietnamese copy for `/api/v1/ai/**`. Do not treat internal `/internal/ai/**` 401 as user session expiry.
+- Do not send identity fields. Do not ask name/MSSV for the logged-in user. If chat asks to pick a Course/Team, that is resource disambiguation.
+- Lecturer Course progress DOCX and Admin system DOCX stay on `GET /api/v1/ai/artifacts/{id}/download`. ADMIN may download a Lecturer Course report only when Backend `requireCourseAccess` allows that Course. Cross-actor artifact UUID fail-closes.
+- Reports may show only Backend-confirmed warnings (`TASK_DUE_*`, `OVERDUE_TASK`). Do not invent inactivity/sprint-behind/repeated-commit or auto-review result warnings in UI copy.
+- Course progress XLSX admin export is unchanged and is not replaced by the Admin DOCX.
+- OpenAPI **149**. Migration **V41**.
+
+## Role-aware AI chat + report artifacts (DEC-095) — 2026-08-16
+
+Current Backend contracts: OpenAPI **149**, migration head **V41**. Public `/api/v1/ai/**` unchanged (7 routes). **Do not call** `/internal/ai/**` or `/internal/backend/v1/commit-reviews**`.
+
+- Browser payload still only `title` / `content`. **Never send** `actorId`, `studentId`, `lecturerId`, `applicationRole`. Session `JSESSIONID` + `credentials: include`; CSRF on POST. **No Bearer.**
+- AI already knows who is chatting from Backend session/delegation. Do **not** ask the user for name/MSSV to identify the current actor. Optional starter prompts by role are UX-only; Backend remains authority; do not hardcode answers.
+  - STUDENT MEMBER: tiến độ của tôi / việc chưa xong / contribution của tôi / review commit gần nhất của tôi.
+  - STUDENT LEADER: tiến độ nhóm tôi / task gấp / ai quá hạn / contribution nhóm.
+  - LECTURER: tiến độ Course tôi đang dạy / nhóm cần chú ý / xuất báo cáo tiến độ Course này.
+  - ADMIN: tình hình hệ thống / anomaly / xuất báo cáo hệ thống.
+- If the actor has multiple valid Course/Team/Project/commits, the chat may ask them to **choose a resource**. That is not an identity prompt.
+- Artifact download stays `GET /api/v1/ai/artifacts/{artifactId}/download` (session, no CSRF). SRS DOCX unchanged. Lecturer progress / Admin system reports are AI-generated DOCX from Backend source-backed projections; download reauthorizes the current actor. Do not construct AI filesystem URLs.
+- HF/runtime/browser AI product smoke **not claimed**.
+
 ## Jira task attachments from SAGA (DEC-093) — 2026-08-15
 
 Current Backend contracts: OpenAPI **149**, migration head **V39**.
