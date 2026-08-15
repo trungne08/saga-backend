@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.when;
 
 import com.saga.be.dto.response.TeamContributionEvaluationResponse;
+import com.saga.be.dto.response.TeamContributionGraphResponse;
 import com.saga.be.entity.CommitData;
 import com.saga.be.entity.Course;
 import com.saga.be.entity.Lecturer;
@@ -21,6 +22,7 @@ import com.saga.be.entity.ProjectGroupWeightConfig;
 import com.saga.be.entity.Team;
 import com.saga.be.entity.TeamMember;
 import com.saga.be.entity.enums.PolicyOverrideStatus;
+import com.saga.be.entity.enums.RoleInTeam;
 import com.saga.be.entity.enums.TaskStatus;
 import com.saga.be.repository.CommitDataRepository;
 import com.saga.be.repository.LecturerRepository;
@@ -135,10 +137,12 @@ class TeamContributionServiceTest {
         TeamMember memberOne = entityWithId(new TeamMember(), UUID.randomUUID());
         memberOne.setTeam(team);
         memberOne.setStudent(studentOne);
+        memberOne.setRoleInTeam(RoleInTeam.LEADER);
 
         TeamMember memberTwo = entityWithId(new TeamMember(), UUID.randomUUID());
         memberTwo.setTeam(team);
         memberTwo.setStudent(studentTwo);
+        memberTwo.setRoleInTeam(RoleInTeam.MEMBER);
 
         Sprint sprint = entityWithId(new Sprint(), sprintId);
         sprint.setName("Sprint 1");
@@ -149,6 +153,8 @@ class TeamContributionServiceTest {
         taskOne.setAssignee(studentOne);
         taskOne.setStatus(TaskStatus.DONE);
         taskOne.setStoryPoint(3);
+        taskOne.setTitle("Implement login");
+        taskOne.setExternalKey("SAGA-1");
         taskOne.setLabels(List.of("saga:code"));
 
         Task taskTwo = entityWithId(new Task(), UUID.randomUUID());
@@ -157,6 +163,8 @@ class TeamContributionServiceTest {
         taskTwo.setAssignee(studentTwo);
         taskTwo.setStatus(TaskStatus.DONE);
         taskTwo.setStoryPoint(5);
+        taskTwo.setTitle("Implement signup");
+        taskTwo.setExternalKey("SAGA-2");
         taskTwo.setLabels(List.of("saga:code"));
 
         PeerReview review = new PeerReview();
@@ -195,10 +203,7 @@ class TeamContributionServiceTest {
                 .thenReturn(List.of(review, reviewTwo));
         when(sprintRepository.findByBoardProjectIdOrderByStartDateAsc(projectId)).thenReturn(List.of(sprint));
 
-        TeamContributionEvaluationResponse response = service.evaluate(
-                principal(ApplicationRole.ADMIN, UUID.randomUUID()),
-                teamId
-        );
+        TeamContributionEvaluationResponse response = service.evaluate(teamId);
 
         assertEquals(teamId, response.teamId());
         assertEquals(2, response.members().size());
@@ -239,9 +244,45 @@ class TeamContributionServiceTest {
         assertEquals(0.75, alice.sprintBreakdowns().get(0).sliceScore(), 0.0001);
         assertEquals(37.5, alice.sprintBreakdowns().get(0).sliceContributionPercentage(), 0.0001);
         assertEquals(70.5882, alice.sprintBreakdowns().get(0).contributionPercentage(), 0.001);
+        assertEquals(3.0, alice.sprintBreakdowns().get(0).codeStoryPoints(), 0.0001);
+        assertEquals(0.0, alice.sprintBreakdowns().get(0).testStoryPoints(), 0.0001);
+        assertEquals(0.0, alice.sprintBreakdowns().get(0).documentStoryPoints(), 0.0001);
+        assertEquals(0.0, alice.sprintBreakdowns().get(0).researchStoryPoints(), 0.0001);
         assertEquals(1.25, bob.sprintBreakdowns().get(0).sliceScore(), 0.0001);
         assertEquals(62.5, bob.sprintBreakdowns().get(0).sliceContributionPercentage(), 0.0001);
         assertEquals(29.4118, bob.sprintBreakdowns().get(0).contributionPercentage(), 0.001);
+        assertEquals(5.0, bob.sprintBreakdowns().get(0).codeStoryPoints(), 0.0001);
+
+        TeamContributionGraphResponse graph = service.graph(teamId);
+        assertEquals(TeamContributionGraphResponse.FORMULA, graph.formula());
+        assertEquals(0.25, graph.weights().codeWeightRatio(), 0.0001);
+        assertEquals(25.0, graph.weights().codeWeightPercent(), 0.0001);
+        assertEquals(6, graph.nodes().size());
+        assertEquals(2, graph.edges().size());
+        assertTrue(graph.nodes().stream().noneMatch(node -> "DESIGN".equals(node.criterion())));
+
+        var aliceNode = graph.nodes().stream()
+                .filter(node -> studentOneId.equals(node.studentId()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("STUDENT", aliceNode.kind());
+        assertEquals("LEADER", aliceNode.roleInTeam());
+        assertEquals(0.75, aliceNode.sliceScore(), 0.0001);
+        assertEquals(0.8, aliceNode.peerCoefficient(), 0.0001);
+        assertEquals(0.6, aliceNode.adjustedScore(), 0.0001);
+        assertEquals(70.5882, aliceNode.finalContributionPercentage(), 0.001);
+
+        var aliceCodeEdge = graph.edges().stream()
+                .filter(edge -> ("edge:CODE:" + studentOneId).equals(edge.id()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("criterion:CODE", aliceCodeEdge.source());
+        assertEquals("student:" + studentOneId, aliceCodeEdge.target());
+        assertEquals(3.0, aliceCodeEdge.storyPoints(), 0.0001);
+        assertEquals(0.75, aliceCodeEdge.weightedSlice(), 0.0001);
+        assertEquals(1, aliceCodeEdge.tasks().size());
+        assertEquals(taskOne.getId(), aliceCodeEdge.tasks().get(0).taskId());
+        assertEquals("SAGA-1", aliceCodeEdge.tasks().get(0).externalKey());
     }
 
     @Test
@@ -331,10 +372,7 @@ class TeamContributionServiceTest {
         when(sprintRepository.findByBoardProjectIdOrderByStartDateAsc(projectId))
                 .thenReturn(List.of(sprintOne, sprintTwo));
 
-        TeamContributionEvaluationResponse response = service.evaluate(
-                principal(ApplicationRole.ADMIN, UUID.randomUUID()),
-                teamId
-        );
+        TeamContributionEvaluationResponse response = service.evaluate(teamId);
         var alice = response.members().stream()
                 .filter(member -> member.studentId().equals(studentOneId))
                 .findFirst()
@@ -345,10 +383,15 @@ class TeamContributionServiceTest {
                 .orElseThrow();
 
         assertEquals(100.0, alice.sprintBreakdowns().get(0).contributionPercentage(), 0.001);
+        assertEquals(10.0, alice.sprintBreakdowns().get(0).codeStoryPoints(), 0.0001);
+        assertEquals(0.0, alice.sprintBreakdowns().get(0).researchStoryPoints(), 0.0001);
         assertEquals(50.0, alice.sprintBreakdowns().get(1).contributionPercentage(), 0.001);
+        assertEquals(1.0, alice.sprintBreakdowns().get(1).researchStoryPoints(), 0.0001);
         assertEquals(2, bob.sprintBreakdowns().size());
         assertEquals(0.0, bob.sprintBreakdowns().get(0).contributionPercentage(), 0.001);
+        assertEquals(0.0, bob.sprintBreakdowns().get(0).codeStoryPoints(), 0.0001);
         assertEquals(50.0, bob.sprintBreakdowns().get(1).contributionPercentage(), 0.001);
+        assertEquals(1.0, bob.sprintBreakdowns().get(1).researchStoryPoints(), 0.0001);
         // Σslice Alice = 10×0.40 + 1×0.35 = 4.35; Bob = 0.35; project P = 0.5 → 92.553 / 7.447.
         assertEquals(92.5532, alice.finalContributionPercentage(), 0.001);
         assertEquals(7.4468, bob.finalContributionPercentage(), 0.001);
@@ -419,10 +462,7 @@ class TeamContributionServiceTest {
                 ));
         when(sprintRepository.findByBoardProjectIdOrderByStartDateAsc(projectId)).thenReturn(List.of(sprint));
 
-        TeamContributionEvaluationResponse response = service.evaluate(
-                principal(ApplicationRole.ADMIN, UUID.randomUUID()),
-                teamId
-        );
+        TeamContributionEvaluationResponse response = service.evaluate(teamId);
 
         var alice = response.members().stream()
                 .filter(member -> member.studentId().equals(studentOneId))
@@ -453,10 +493,7 @@ class TeamContributionServiceTest {
                         .designWeight(new BigDecimal("0.5"))
                         .build()));
 
-        TeamContributionEvaluationResponse response = service.evaluate(
-                principal(ApplicationRole.ADMIN, UUID.randomUUID()),
-                fixture.teamId()
-        );
+        TeamContributionEvaluationResponse response = service.evaluate(fixture.teamId());
 
         var alice = response.members().stream()
                 .filter(member -> member.studentId().equals(fixture.studentOneId()))
@@ -527,10 +564,7 @@ class TeamContributionServiceTest {
         ));
         when(sprintRepository.findByBoardProjectIdOrderByStartDateAsc(otherProjectId)).thenReturn(List.of(sprint));
 
-        TeamContributionEvaluationResponse response = service.evaluate(
-                principal(ApplicationRole.ADMIN, UUID.randomUUID()),
-                otherTeamId
-        );
+        TeamContributionEvaluationResponse response = service.evaluate(otherTeamId);
 
         var studentOne = response.members().stream()
                 .filter(member -> member.studentId().equals(otherStudentOneId))
@@ -889,10 +923,7 @@ class TeamContributionServiceTest {
                 TaskAttachment.builder().task(aliceCode).externalId("a4").build()
         ));
 
-        TeamContributionEvaluationResponse response = service.evaluate(
-                principal(ApplicationRole.ADMIN, UUID.randomUUID()),
-                teamId
-        );
+        TeamContributionEvaluationResponse response = service.evaluate(teamId);
         var aliceResult = response.members().stream()
                 .filter(member -> member.studentId().equals(studentOneId))
                 .findFirst()
@@ -989,10 +1020,7 @@ class TeamContributionServiceTest {
     }
 
     private com.saga.be.dto.response.TeamContributionMemberResponse evaluateSingle(SingleStudentFixture fixture) {
-        TeamContributionEvaluationResponse response = service.evaluate(
-                principal(ApplicationRole.ADMIN, UUID.randomUUID()),
-                fixture.teamId()
-        );
+        TeamContributionEvaluationResponse response = service.evaluate(fixture.teamId());
         return response.members().stream()
                 .filter(item -> item.studentId().equals(fixture.studentId()))
                 .findFirst()

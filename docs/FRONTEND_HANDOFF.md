@@ -22,6 +22,35 @@ Current Backend contracts: OpenAPI **149**, migration head **V41**. Public `/api
 - If the actor has multiple valid Course/Team/Project/commits, the chat may ask them to **choose a resource**. That is not an identity prompt.
 - Artifact download stays `GET /api/v1/ai/artifacts/{artifactId}/download` (session, no CSRF). SRS DOCX unchanged. Lecturer progress / Admin system reports are AI-generated DOCX from Backend source-backed projections; download reauthorizes the current actor. Do not construct AI filesystem URLs.
 - HF/runtime/browser AI product smoke **not claimed**.
+## Contribution flowchart graph (DEC-096) — 2026-08-16
+
+Current Backend contracts: OpenAPI **150**. No migration.
+
+FE: khác nhau evaluation vs graph nằm ở `docs/CONTRIBUTION_EVALUATION_VS_GRAPH_API.md`.
+
+- `GET /api/v1/teams/{teamId}/contribution-graph` — flowchart (node/edge). **LECTURER** đúng Course và **STUDENT LEADER** đúng Team. **ADMIN 403.** MEMBER/MENTOR 403. GET, không CSRF, không Bearer.
+- Công thức **giữ SAGA** (`slice = Σ SP_criterion × weightRatio`; `P = stars_i / teamStars`; `% = (slice × P) / Σadjust × 100`). Không dùng hệ số mockup CODE×2.0 / DESIGN / DOCS. Không GHOSTING, không Chốt số/publish.
+- `nodes[]`: `kind` = `CRITERION` (bốn tiêu chí, luôn có) hoặc `STUDENT` (`sliceScore`, `peerCoefficient`, `adjustedScore` = slice×P, `finalContributionPercentage`, warnings hiện có).
+- `edges[]`: tiêu chí → sinh viên. `storyPoints` đã được công nhận; `weightedSlice` = SP × weightRatio. `tasks[]` để click cạnh (taskId, title, externalKey, sprint). Cạnh 0 SP không trả.
+- Radar / so sánh thành viên / line sprint vẫn dùng `GET .../contribution-evaluation` (DEC-094).
+
+## Contribution evaluation is Lecturer + Student Leader only (DEC-095) — 2026-08-15
+
+Current Backend contracts: OpenAPI **149**. No new route.
+
+- `GET /api/v1/teams/{teamId}/contribution-evaluation` — **LECTURER** đúng Course và **STUDENT LEADER** đúng Team. **ADMIN 403.** MEMBER/MENTOR vẫn 403.
+- Override `%` (`POST .../contribution-override`) vẫn ADMIN/LECTURER.
+
+## Contribution graphs reuse evaluation (DEC-094) — 2026-08-15
+
+Current Backend contracts: OpenAPI **149**. No new route. No migration.
+
+- Không gọi `/api/analytics/*`. Graph đóng góp lấy từ `GET /api/v1/teams/{teamId}/contribution-evaluation` (LECTURER đúng Course / STUDENT exact Team LEADER). **ADMIN không đọc được.**
+- **Radar:** `codeContributionPercentage`, `testContributionPercentage`, `documentContributionPercentage`, `researchContributionPercentage` — share cả dự án, chưa phải `%` cuối.
+- **So sánh thành viên (bar):** `finalContributionPercentage` — đã gồm peer. Không nhân `peerReviewScore` thêm.
+- **Line % theo sprint:** `sprintBreakdowns[].contributionPercentage`. Pre-peer: `sliceContributionPercentage` trên cùng row.
+- **Stacked bar tiêu chí theo sprint:** `codeStoryPoints` / `testStoryPoints` / `documentStoryPoints` / `researchStoryPoints` — story point được công nhận, không phải %.
+- Heatmap / overview / interactions / burndown giữ route cũ; đó là activity/progress, không phải % đóng góp.
 
 ## Jira task attachments from SAGA (DEC-093) — 2026-08-15
 
@@ -134,8 +163,8 @@ fetch(`/api/v1/teams/${teamId}/contribution-evaluation`, {
 });
 ```
 
-GET không cần CSRF và không dùng Bearer. ADMIN xem mọi Team; LECTURER chỉ Team thuộc Course mình
-phụ trách; Student chỉ LEADER của exact Team. MEMBER, MENTOR, Leader Team khác và Student không
+GET không cần CSRF và không dùng Bearer. LECTURER chỉ Team thuộc Course mình
+phụ trách; Student chỉ LEADER của exact Team. ADMIN, MEMBER, MENTOR, Leader Team khác và Student không
 membership nhận 403; backend là authority, UI ẩn/hiện không thay authorization.
 
 FE có thể render `member.fullName`, `member.studentCode`, `member.finalContributionPercentage`
@@ -204,7 +233,8 @@ Không đưa Firebase Admin service account, private key, Gmail App Password, Co
 |---|---|---|---|
 | Current user | `GET /api/auth/me` | Authenticated | App boot/sau login |
 | CSRF | `GET /api/auth/csrf` | Authenticated | Trước mutation |
-| Team contribution | `GET /api/v1/teams/{teamId}/contribution-evaluation` | ADMIN; LECTURER đúng Course; STUDENT exact Team LEADER | Xem current aggregate, không CSRF |
+| Team contribution | `GET /api/v1/teams/{teamId}/contribution-evaluation` | LECTURER đúng Course; STUDENT exact Team LEADER | Xem current aggregate, không CSRF. ADMIN 403 |
+| Team contribution flowchart | `GET /api/v1/teams/{teamId}/contribution-graph` | LECTURER đúng Course; STUDENT exact Team LEADER | Vẽ flowchart node/edge, không CSRF. ADMIN 403 |
 | Course grouping import | `POST /api/v1/courses/{courseId}/import-students` | ADMIN hoặc LECTURER phụ trách | Upload XLSX |
 | Admin Course import | `POST /api/v1/courses/{courseId}/admin-import-students-template` | ADMIN | Upload XLSX 5 cột |
 | Bell list | `GET /api/me/notifications?page=0&size=20` | ADMIN/LECTURER/STUDENT | App boot, refresh, sau FCM |

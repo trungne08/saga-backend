@@ -327,40 +327,28 @@ Theo dõi tiến độ sprint.
 
 ### 7.1 Goal
 
-Hiển thị đóng góp cá nhân theo nhiều chiều.
+Hiển thị đóng góp cá nhân theo bốn tiêu chí CODE / TEST / DOCUMENT / RESEARCH và % cuối (DEC-092).
 
 ### 7.2 Reuse from current code
 
-- [TeamContributionController](../src/main/java/com/saga/be/controller/TeamContributionController.java)
-- `TeamContributionService`
+- `GET /api/v1/teams/{teamId}/contribution-evaluation`
+- `TeamContributionController`, `TeamContributionService`, `SprintFirstContributionMixer`
+- Không tạo `/api/analytics/*`. Authorization: LECTURER đúng Course / STUDENT exact Team LEADER. ADMIN không đọc.
 
-### 7.3 Metrics
+### 7.3 Metrics (source of truth = evaluation)
 
-- Commits
-- Pull Requests
-- PR Reviews
-- Issue Activity
-- Comments
-- Task Completion %
+- Radar: `code/test/document/researchContributionPercentage` (share cả dự án)
+- `%` cuối: `finalContributionPercentage` (đã gồm peer)
+- Line theo sprint: `sprintBreakdowns[].contributionPercentage`
+- Stacked bar tiêu chí: `sprintBreakdowns[].codeStoryPoints` / `testStoryPoints` / `documentStoryPoints` / `researchStoryPoints`
 
-### 7.4 API
+Commit, PR, comment **không** là điểm Contribution.
 
-`GET /api/v1/teams/{teamId}/contribution-evaluation`
+### 7.4 UI
 
-### 7.5 Response extension
-
-- `totalScore`
-- `breakdown`
-- `sprintBreakdown`
-
-### 7.6 UI
-
-- Radar chart
-
-### 7.7 Use case
-
-- Xem ai đóng góp nhiều
-- Xem đóng góp theo loại activity
+- Radar chart bốn tiêu chí
+- Line % theo sprint
+- Stacked bar story point theo tiêu chí
 
 ---
 
@@ -368,62 +356,88 @@ Hiển thị đóng góp cá nhân theo nhiều chiều.
 
 ### 8.1 Goal
 
-So sánh đóng góp giữa các thành viên trong team.
+So sánh `%` đóng góp giữa thành viên trong team.
 
 ### 8.2 Data source
 
-- Same as contribution overview
+Cùng `GET /api/v1/teams/{teamId}/contribution-evaluation`. Không endpoint `team-comparison` riêng.
 
-### 8.3 API
-
-`GET /api/analytics/team-comparison?teamId=&from=&to=`
-
-### 8.4 Response shape
+### 8.3 Response mapping
 
 ```json
 {
-  "members": ["An", "Linh", "Minh"],
-  "scores": [82, 76, 68],
+  "members": ["An", "Bình"],
+  "scores": [43.16, 32.16],
   "breakdowns": [
-    { "commits": 20, "reviews": 5, "comments": 10, "tasks": 8 },
-    { "commits": 18, "reviews": 7, "comments": 8, "tasks": 6 }
+    { "codeStoryPoints": 12, "testStoryPoints": 5, "documentStoryPoints": 4, "researchStoryPoints": 3 },
+    { "codeStoryPoints": 6, "testStoryPoints": 3, "documentStoryPoints": 8, "researchStoryPoints": 7 }
   ]
 }
 ```
 
-### 8.5 UI
+`scores` = `finalContributionPercentage`. `breakdowns` cộng bốn `*StoryPoints` mọi sprint của member đó, hoặc vẽ per-sprint từ `sprintBreakdowns[]`.
 
-- Bar chart
-- Stacked bar chart
+### 8.4 UI
 
-### 8.6 Use case
-
-- Xếp hạng thành viên
-- So sánh theo từng loại đóng góp
+- Bar chart `%` cuối
+- Stacked bar theo tiêu chí
 
 ---
 
-## 9. Suggested Implementation Order
+## 9. Graph 7 - Contribution Flowchart (DEC-096)
 
-### Phase 1
+### 9.1 Goal
 
-- Contribution overview
-- Member comparison
-- Burndown chart
+Sơ đồ node/edge: tiêu chí → sinh viên → (P) → `%` cuối. Dùng để click cạnh xem task.
 
-### Phase 2
+### 9.2 Data source
 
-- Heatmap
-- Overview activity graph
-- Student interaction graph
+`GET /api/v1/teams/{teamId}/contribution-graph`
+
+Cùng auth evaluation (DEC-095). **Không** copy hệ số mockup. Công thức SAGA DEC-092:
+
+`slice = Σ(SP_criterion × weightRatio); P = stars_i / teamStars; pct = (slice × P) / Σadjust × 100`
+
+### 9.3 Payload
+
+- `weights`: ratio + percent bốn tiêu chí CODE / TEST / DOCUMENT / RESEARCH
+- `nodes`: `CRITERION` (luôn 4) và `STUDENT` (kể cả slice 0)
+- `edges`: tiêu chí → sinh viên khi Σ SP > 0; `weightedSlice` = SP × weightRatio; `tasks[]` drill-down
+- Warnings hiện có trên student node. Không GHOSTING, không publish/snapshot.
+
+Radar / bar / line **không** lấy từ endpoint này — vẫn evaluation (mục 7–8).
+
+### 9.4 UI
+
+- Flowchart: 4 node tiêu chí bên trái, sinh viên bên phải, cạnh có SP / slice
+- Click cạnh → danh sách task (`externalKey`, title, sprint)
+
+---
+
+## 10. Suggested Implementation Order
+
+### Phase 1 — Contribution graphs (đã có API)
+
+- Contribution overview (radar + line sprint) từ evaluation (DEC-094)
+- Member comparison từ `finalContributionPercentage` + `*StoryPoints`
+- Contribution flowchart từ `GET /api/v1/teams/{teamId}/contribution-graph` (DEC-096)
+
+### Phase 2 — Activity graphs (đã có API)
+
+- Burndown: `GET /api/v1/courses/{courseId}/teams/{teamId}/sprints/{sprintId}/burndown`
+- Heatmap: `GET /api/v1/courses/{courseId}/teams/{teamId}/heatmap`
+- Overview: `GET /api/v1/courses/{courseId}/teams/{teamId}/overview`
+- Interactions: `GET /api/v1/courses/{courseId}/teams/{teamId}/students/{studentId}/interactions`
+
+Các graph Phase 2 đo activity, không thay `%` đóng góp.
 
 ### Phase 3
 
-- Optional Neo4j graph traversal
+- Optional Neo4j graph traversal — chưa cần
 
 ---
 
-## 10. Recommended Stack
+## 11. Recommended Stack
 
 - **Backend:** Spring Boot
 - **Database:** MySQL/PostgreSQL
@@ -432,13 +446,13 @@ So sánh đóng góp giữa các thành viên trong team.
 
 ---
 
-## 10. Final Recommendation
+## 12. Final Recommendation
 
-Nên bắt đầu từ mô hình **relational projection + analytics API** vì:
+Giữ **relational projection + API hiện có**:
 
-- dễ tích hợp với SAGA hiện tại
-- tận dụng DB hiện có
-- dễ test
-- đủ cho report và demo
+- Radar / bar / line reuse evaluation (DEC-094)
+- Flowchart dùng `GET .../contribution-graph` (DEC-096), công thức SAGA
+- Activity graphs reuse heatmap / overview / interactions / burndown
+- Không invent `/api/analytics/*`
 
 Sau khi ổn định, nếu cần graph traversal sâu hơn thì mới chuyển sang Neo4j.

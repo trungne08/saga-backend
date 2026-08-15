@@ -13,6 +13,20 @@
 ## Auto commit-review intent (DEC-094, foundation; start wired by DEC-095) — 2026-08-16
 
 - **Foundation giữ nguyên:** intent + `review_cutover_at` sau canonical persist; dedup; historical/live cutover. Early Warning V2 ngoài OVERDUE **không ship**. DEC-095 mới gọi AI start/poll/result. OpenAPI **149**. V40 + V41.
+## Contribution flowchart graph (DEC-096) — 2026-08-16
+
+- **Đã hoàn thành / CONFIRMED_SOURCE_TEST:** `GET /api/v1/teams/{teamId}/contribution-graph` trả node/edge flowchart. Công thức SAGA (DEC-092), không hệ số mockup. Cùng auth evaluation (DEC-095).
+- **Contracts:** OpenAPI **150**. Không migration.
+
+## Contribution evaluation is Lecturer + Student Leader only (DEC-095) — 2026-08-15
+
+- **Đã hoàn thành / CONFIRMED_SOURCE_TEST:** GET contribution-evaluation không cho ADMIN. LECTURER instructor và STUDENT LEADER giữ. Override không đổi.
+- **Contracts:** OpenAPI **149**.
+
+## Contribution graphs reuse evaluation (DEC-094) — 2026-08-15
+
+- **Đã hoàn thành / CONFIRMED_SOURCE_TEST:** Graph đóng góp không thêm route. `sprintBreakdowns[]` có `codeStoryPoints` / `testStoryPoints` / `documentStoryPoints` / `researchStoryPoints`. Heatmap/overview/interactions/burndown giữ activity graphs.
+- **Contracts:** OpenAPI **149**. Không migration.
 
 ## Jira task attachments from SAGA (DEC-093) — 2026-08-15
 

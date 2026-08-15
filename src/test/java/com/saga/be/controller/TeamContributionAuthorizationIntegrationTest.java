@@ -48,6 +48,7 @@ import org.springframework.transaction.annotation.Transactional;
 class TeamContributionAuthorizationIntegrationTest {
 
     private static final String EVALUATION_PATH = "/api/v1/teams/{teamId}/contribution-evaluation";
+    private static final String GRAPH_PATH = "/api/v1/teams/{teamId}/contribution-graph";
     private static final String OVERRIDE_PATH = "/api/v1/teams/{teamId}/contribution-override";
 
     @Autowired private MockMvc mockMvc;
@@ -59,10 +60,18 @@ class TeamContributionAuthorizationIntegrationTest {
     @Autowired private TeamMemberRepository teamMemberRepository;
 
     @Test
-    void adminMayReadAnyTeamAndResponseContainsOnlyApprovedContributionFields() throws Exception {
+    void adminCannotReadContributionEvaluation() throws Exception {
         Fixture fixture = fixture();
 
         request(ApplicationRole.ADMIN, UUID.randomUUID(), fixture.team())
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void owningLecturerResponseContainsOnlyApprovedContributionFields() throws Exception {
+        Fixture fixture = fixture();
+
+        request(ApplicationRole.LECTURER, fixture.owner().getId(), fixture.team())
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.teamId").value(fixture.team().getId().toString()))
                 .andExpect(jsonPath("$.projectId").value(fixture.project().getId().toString()))
@@ -94,7 +103,7 @@ class TeamContributionAuthorizationIntegrationTest {
     void exactTeamLeaderMayReadWithoutChangingTheAggregate() throws Exception {
         Fixture fixture = fixture();
 
-        MvcResult adminResult = request(ApplicationRole.ADMIN, UUID.randomUUID(), fixture.team())
+        MvcResult lecturerResult = request(ApplicationRole.LECTURER, fixture.owner().getId(), fixture.team())
                 .andExpect(status().isOk())
                 .andReturn();
         request(ApplicationRole.STUDENT, fixture.leader().getId(), fixture.team())
@@ -102,7 +111,7 @@ class TeamContributionAuthorizationIntegrationTest {
                 .andExpect(jsonPath("$.members[0].finalContributionPercentage").value(50.0))
                 .andExpect(jsonPath("$.members[1].finalContributionPercentage").value(50.0))
                 .andExpect(result -> org.junit.jupiter.api.Assertions.assertEquals(
-                        contributionPercentages(adminResult),
+                        contributionPercentages(lecturerResult),
                         contributionPercentages(result)
                 ));
     }
@@ -148,7 +157,7 @@ class TeamContributionAuthorizationIntegrationTest {
         mockMvc.perform(get(EVALUATION_PATH, fixture.team().getId()))
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(get(EVALUATION_PATH, UUID.randomUUID())
-                        .with(authentication(authenticationFor(ApplicationRole.ADMIN, UUID.randomUUID()))))
+                        .with(authentication(authenticationFor(ApplicationRole.LECTURER, UUID.randomUUID()))))
                 .andExpect(status().isNotFound());
     }
 
@@ -174,14 +183,56 @@ class TeamContributionAuthorizationIntegrationTest {
     }
 
     @Test
+    void contributionGraphUsesTheSameReadAccessAsEvaluation() throws Exception {
+        Fixture fixture = fixture();
+
+        request(GRAPH_PATH, ApplicationRole.ADMIN, UUID.randomUUID(), fixture.team())
+                .andExpect(status().isForbidden());
+        request(GRAPH_PATH, ApplicationRole.LECTURER, fixture.owner().getId(), fixture.team())
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.formula").exists())
+                .andExpect(jsonPath("$.nodes").isArray())
+                .andExpect(jsonPath("$.edges").isArray())
+                .andExpect(jsonPath("$.members").doesNotExist())
+                .andExpect(jsonPath("$.email").doesNotExist());
+        request(GRAPH_PATH, ApplicationRole.STUDENT, fixture.leader().getId(), fixture.team())
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.teamId").value(fixture.team().getId().toString()));
+        request(GRAPH_PATH, ApplicationRole.STUDENT, fixture.member().getId(), fixture.team())
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
     void openApiDocumentsConditionalStudentLeaderAccess() throws Exception {
         String operation = "$.paths['/api/v1/teams/{teamId}/contribution-evaluation'].get";
 
         mockMvc.perform(get("/v3/api-docs"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath(operation + ".description").value(org.hamcrest.Matchers.allOf(
+                        org.hamcrest.Matchers.containsString("LECTURER"),
                         org.hamcrest.Matchers.containsString("STUDENT"),
                         org.hamcrest.Matchers.containsString("LEADER"),
+                        org.hamcrest.Matchers.containsString("ADMIN"),
+                        org.hamcrest.Matchers.containsString("MEMBER"),
+                        org.hamcrest.Matchers.containsString("MENTOR")
+                )))
+                .andExpect(jsonPath(operation + ".responses['200']").exists())
+                .andExpect(jsonPath(operation + ".responses['401']").exists())
+                .andExpect(jsonPath(operation + ".responses['403']").exists())
+                .andExpect(jsonPath(operation + ".responses['404']").exists());
+    }
+
+    @Test
+    void openApiDocumentsContributionGraph() throws Exception {
+        String operation = "$.paths['/api/v1/teams/{teamId}/contribution-graph'].get";
+
+        mockMvc.perform(get("/v3/api-docs"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath(operation + ".description").value(org.hamcrest.Matchers.allOf(
+                        org.hamcrest.Matchers.containsString("LECTURER"),
+                        org.hamcrest.Matchers.containsString("STUDENT"),
+                        org.hamcrest.Matchers.containsString("LEADER"),
+                        org.hamcrest.Matchers.containsString("ADMIN"),
                         org.hamcrest.Matchers.containsString("MEMBER"),
                         org.hamcrest.Matchers.containsString("MENTOR")
                 )))
@@ -196,7 +247,16 @@ class TeamContributionAuthorizationIntegrationTest {
             UUID profileId,
             Team team
     ) throws Exception {
-        return mockMvc.perform(get(EVALUATION_PATH, team.getId())
+        return request(EVALUATION_PATH, role, profileId, team);
+    }
+
+    private org.springframework.test.web.servlet.ResultActions request(
+            String path,
+            ApplicationRole role,
+            UUID profileId,
+            Team team
+    ) throws Exception {
+        return mockMvc.perform(get(path, team.getId())
                 .with(authentication(authenticationFor(role, profileId))));
     }
 

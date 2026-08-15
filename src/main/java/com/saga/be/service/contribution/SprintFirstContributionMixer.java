@@ -207,6 +207,15 @@ public final class SprintFirstContributionMixer {
         return totals;
     }
 
+    public static double[] copyRecognizedBucket(
+            Map<UUID, Map<UUID, double[]>> recognizedByStudentThenSprint,
+            UUID studentId,
+            UUID sprintId
+    ) {
+        double[] source = recognizedBucket(recognizedByStudentThenSprint, studentId, sprintId);
+        return new double[] {source[0], source[1], source[2], source[3]};
+    }
+
     private static double[] recognizedBucket(
             Map<UUID, Map<UUID, double[]>> recognizedByStudentThenSprint,
             UUID studentId,
