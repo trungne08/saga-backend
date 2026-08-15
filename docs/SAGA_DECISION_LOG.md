@@ -1,3 +1,11 @@
+## DEC-085 — Student progress LEADER auth uses exact Team relation, not Course uniqueness
+
+- Ngày: 2026-08-15; trạng thái: ACCEPTED / CONFIRMED_SOURCE_TEST; runtime smoke **TBD**.
+- Context: `GET /api/v1/courses/{courseId}/students/{studentId}/progress` trả 409 `BUSINESS_CONFLICT` khi STUDENT LEADER xem Student khác. Throw site: `LecturerAnalyticsAuthorizationService.requireUniqueCourseMembership` / `requireActorCourseMembership` (`size != 1`). Handler generic-hóa message. Runtime Course `61ce8420-bb6b-4e0f-b424-81d07d6cc404`: target `82c68f64-4277-4b07-84c5-e2de99d07bdc` vừa MEMBER Group 2 vừa LEADER SAGA Local Demo Team. Actor Group 2 LEADER chỉ có 1 membership. 409 vì **target** multi-membership, không phải duplicate row cùng Team.
+- Quyết định: STUDENT `/progress` không còn yêu cầu actor/target unique trong toàn Course. LEADER được đọc khi target có `TeamMember` thuộc **union các Team actor đang LEADER**. Trả đúng membership của exact Team đó. MEMBER vẫn chỉ self; MEMBER nhiều Team không LEADER → 409 (progress DTO cần đúng một Team). Target nằm trên nhiều Team actor cùng lead → 409. Cross-Team / cross-Course / MENTOR → 403. ADMIN/LECTURER `requireStudentInCourse` uniqueness **không đổi**. Không mở Course-wide Leader read. Không mở activities / contribution-detail / early-warnings / dashboard. Không migration, không xóa membership production.
+- **Class/Course scope (audit 2026-08-15):** `Class` entity tồn tại (`class` / `class_code`). Course create `CourseRequest.classId` → persist `Course.clazz` (`@JoinColumn(name = "class_id")`). Course HTTP response là entity nên JSON field `clazz`. Không có Student–Class enrollment. Student vào Course chỉ qua `TeamMember → Team → Course`. `/progress` chỉ `{courseId, studentId}` — **không** thêm `classId`. Auth = request `courseId` + exact `TeamMember` + `roleInTeam`. LEADER không global và không Class-wide. LEADER Course A không áp cho Course B trừ khi actor independently LEADER exact Team của Course B. Cùng Class, khác Course → 403.
+- Contracts: OpenAPI count vẫn **150**. Migration head vẫn **V33**. GET session, no CSRF, no Bearer.
+
 ## DEC-084 — Lecturer teams-progress supports parallel active Sprints
 
 - Ngày: 2026-08-15; trạng thái: ACCEPTED / CONFIRMED_SOURCE_TEST.

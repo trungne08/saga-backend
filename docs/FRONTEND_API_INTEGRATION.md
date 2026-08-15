@@ -32,7 +32,8 @@ type AuthMeResponse = {
 - ADMIN: retained
 - Anonymous → 401
 - Actor luôn từ session `SagaPrincipal.localProfileId`
-- Nhiều Team membership trong một Course → **409**
+- Target có thêm Team membership khác trong cùng Course **không** 409 nếu vẫn thuộc exact Team Leader (DEC-085). 409 chỉ khi MEMBER self ambiguous hoặc target thuộc nhiều Team actor cùng lead.
+- **Không** suy rộng Leader sang toàn Course hoặc toàn Class. `classId` không phải progress param; scope = path `courseId` + exact Team + `roleInTeam`. LEADER Course A không áp Course B trừ khi actor independently LEADER exact Team Course B.
 - **Không** suy rộng STUDENT sang activities, contribution-detail, early-warnings, Lecturer Dashboard. Graph routes overview/heatmap/interactions/burndown vẫn theo DEC-080 (LEADER/MEMBER exact Team).
 
 ### Course contribution slice weights (official new FE)

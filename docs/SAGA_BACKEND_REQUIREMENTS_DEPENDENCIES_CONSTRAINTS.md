@@ -1,3 +1,9 @@
+## Student progress LEADER exact-Team constraints (DEC-085) — 2026-08-15
+
+- STUDENT `/progress` authorize theo exact Team: actor LEADER Team X AND target `TeamMember` in Team X. Không dùng global Course uniqueness để chặn Leader read.
+- Nếu actor lead nhiều Team hợp lệ: scope = union các Team đó. Target thuộc nhiều Team trong union → 409. MEMBER nhiều Team không LEADER (self) → 409.
+- Không mở Leader xem Team khác trong Course. Không mở quyền theo toàn Class. Không thêm `classId` vào `/progress` — `courseId` đã đủ scope. LEADER Course A không mang sang Course B trừ independent exact-Team LEADER. Không mở activities / contribution-detail / early-warnings / dashboard. ADMIN/LECTURER uniqueness không đổi. Không migration / không xóa membership production.
+
 ## Lecturer teams-progress parallel Sprint constraints — 2026-08-15
 
 - Không assume tối đa 1 Sprint `active` / Project trên `teams-progress`. Không pick primary. Không aggregate nhiều Sprint vào `currentSprint*`.
@@ -10,7 +16,7 @@
 - Browser FE auth: `JSESSIONID` + `credentials: include`; CSRF cho unsafe; GET không CSRF; **không Bearer**.
 - Avatar chỉ từ OIDC `picture` lúc login; FE không POST avatar URL, không gọi Google image API, không gửi provider token. `avatarUrl` nullable.
 - Cognito Google `picture` mapping: **CONFIRMED_CONSOLE_CONFIGURATION**. Runtime claim on login: **TBD_DEPLOYMENT_SMOKE**.
-- Student progress STUDENT access chỉ `GET .../students/{studentId}/progress`. MEMBER self; LEADER exact Team; MENTOR forbidden. Ambiguous multi-membership trong Course = 409. Không mở activities / contribution-detail / early-warnings / dashboard.
+- Student progress STUDENT access chỉ `GET .../students/{studentId}/progress`. MEMBER self; LEADER exact Team (union nếu lead nhiều). MENTOR forbidden. DEC-085: target extra Course membership không 409 nếu exact Team deterministic. MEMBER self ambiguous / target in multiple led Teams = 409. Không mở activities / contribution-detail / early-warnings / dashboard.
 - Course slice weights: PUT direct chỉ LECTURER owner; scale 0–100 sum 100 ± 0.01. Không nhầm ProjectGroupWeight 0–1. Precedence GroupWeight rồi Course fallback. Legacy request/decision giữ backward-compatible; new FE dùng PUT. ADMIN không có direct PUT.
 - Contribution formula / Peer Review / Rubric / individual override / ProjectGroupWeightConfig **không đổi**.
 - Full suite **1019 / 23 fail / 8 error** — không ghi FULL_SUITE=PASS.

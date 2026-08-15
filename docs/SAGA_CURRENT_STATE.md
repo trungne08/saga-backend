@@ -1,3 +1,7 @@
+## Student progress LEADER exact-Team (DEC-085) — 2026-08-15
+
+- **Đã hoàn thành:** STUDENT LEADER `/progress` theo exact Team relation, không Course uniqueness. Target multi-membership ngoài Team Leader không 409. Cross-Team vẫn 403. LEADER không global / không Class-wide; `courseId` đủ scope, không thêm `classId`. Không mở dashboard/activities. OpenAPI **150**. V33. Runtime smoke **TBD**.
+
 ## Lecturer teams-progress parallel active Sprints — 2026-08-15
 
 - **Đã hoàn thành:** Model B trên `teams-progress`. Nhiều active Sprint → 200 + `activeSprints[]`, `currentSprint=null`, không aggregate. Một active giữ backward-compatible `currentSprint`. Không sửa Jira data/sync/write.
@@ -6,7 +10,7 @@
 
 - **Đã hoàn thành / CONFIRMED_SOURCE_TEST:** OIDC avatar sync, STUDENT MEMBER/LEADER progress access, Lecturer direct Course slice-weight PUT. OpenAPI **150** (PASS). Migration head **V33** (PASS). DEC-082 (149 / V32) là lịch sử.
 - **Avatar:** `picture` → `avatar_url` nullable; `/api/auth/me.avatarUrl`; Basic Info đọc Student. Cognito mapping console **CONFIRMED**; runtime login smoke **TBD**.
-- **Progress:** existing GET route; MEMBER self; LEADER exact Team; MENTOR/cross-Team forbidden; Lecturer owner / Admin retained. Không mở analytics khác cho STUDENT.
+- **Progress:** existing GET route; MEMBER self; LEADER exact Team (union nếu lead nhiều Team); MENTOR/cross-Team forbidden; Lecturer owner / Admin retained. DEC-085: không 409 chỉ vì target có membership khác trong Course. Không mở analytics khác cho STUDENT.
 - **Course weights:** official `PUT .../contribution-slice-weights` scale 100; actor từ principal; ADMIN direct PUT forbidden. Legacy approval flow còn tồn tại, deprecated for new FE. GroupWeight precedence unchanged.
 - **Full clean:** **1019 / 23 fail / 8 error**. Không ghi FULL_SUITE=PASS. 22 CSRF isolation + DEC-023 + 8 MyCourseTeamMembers cleanup order-dependent (isolated PASS). Feature A/B/C **NONE_PROVEN** regression.
 

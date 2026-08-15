@@ -1,10 +1,18 @@
+## Student progress LEADER exact-Team (DEC-085, 2026-08-15)
+
+| Method | Path | Success | Auth / CSRF | Semantics |
+| --- | --- | --- | --- | --- |
+| GET | `/api/v1/courses/{courseId}/students/{studentId}/progress` | 200 progress | ADMIN; Course LECTURER; STUDENT MEMBER self / LEADER exact Team (union). GET no CSRF | MENTOR/MEMBER-teammate/cross-Team 403; target extra Course membership **không** 409 nếu exact Team deterministic; MEMBER self ambiguous hoặc target trên nhiều led Team → 409; anonymous 401 |
+
+OpenAPI operation count baseline = **150**. Migration head = **V33**. Browser Bearer = **NO**. `AUTH_SCOPE_BROADENED_TO_COURSE = NO`. `PROGRESS_ROUTE_CLASS_ID_PARAM = NO`. `CLASS_ID_REQUIRED_FOR_AUTH = NO`. LEADER scope = request `courseId` + exact Team + `roleInTeam`.
+
 ## Avatar / Student progress / Lecturer Course weights (2026-08-15)
 
 | Method | Path | Success | Auth / CSRF | Semantics |
 | --- | --- | --- | --- | --- |
 | GET | `/api/auth/me` | 200 `AuthMeResponse` gồm `avatarUrl` nullable | Session; GET may set CSRF cookie | `avatarUrl` từ `SagaPrincipal`; không nhận URL từ browser |
 | GET | `/api/v1/courses/{courseId}/students/{studentId}` | 200 Basic Info; `avatarUrl` nullable | ADMIN / Course LECTURER; STUDENT 403 | Đọc `Student.avatarUrl` |
-| GET | `/api/v1/courses/{courseId}/students/{studentId}/progress` | 200 progress | ADMIN; Course LECTURER; STUDENT MEMBER self / LEADER exact Team. GET no CSRF | MENTOR/teammate-of-MEMBER/cross-Team 403; multi-membership 409; anonymous 401 |
+| GET | `/api/v1/courses/{courseId}/students/{studentId}/progress` | 200 progress | ADMIN; Course LECTURER; STUDENT MEMBER self / LEADER exact Team. GET no CSRF | MENTOR/teammate-of-MEMBER/cross-Team 403; DEC-085: extra target membership ngoài exact Team không 409; anonymous 401 |
 | GET | `/api/v1/courses/{courseId}/contribution-slice-weights` | 200 Course weights 0..100 | ADMIN all; LECTURER own Course; no CSRF | Course fallback config, không phải Project group weights |
 | PUT | `/api/v1/courses/{courseId}/contribution-slice-weights` | 200 updated Course weights | LECTURER exact instructor + CSRF | No `lecturerId`; ADMIN/STUDENT/other Course 403; sum 100 ± 0.01 |
 

@@ -11,7 +11,9 @@ import com.saga.be.security.ApplicationRole;
 import com.saga.be.security.SagaPrincipal;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.AccessDeniedException;
@@ -109,37 +111,67 @@ public class LecturerAnalyticsAuthorizationService {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Course not found");
         }
 
-        TeamMember actorMembership = requireActorCourseMembership(principal.localProfileId(), courseId);
-        if (actorMembership.getRoleInTeam() != RoleInTeam.LEADER
-                && actorMembership.getRoleInTeam() != RoleInTeam.MEMBER) {
+        List<TeamMember> actorMemberships = teamMemberRepository.findByStudentIdAndTeamCourseId(
+                principal.localProfileId(), courseId);
+        if (actorMemberships.isEmpty()) {
             throw new AccessDeniedException("You do not have access to this student progress");
         }
 
-        TeamMember targetMembership = requireUniqueCourseMembership(studentId, courseId);
-        Team actorTeam = actorMembership.getTeam();
-        Team targetTeam = targetMembership.getTeam();
-        if (actorTeam == null
-                || targetTeam == null
-                || actorTeam.getId() == null
-                || !actorTeam.getId().equals(targetTeam.getId())) {
+        List<TeamMember> leaderMemberships = actorMemberships.stream()
+                .filter(membership -> membership.getRoleInTeam() == RoleInTeam.LEADER)
+                .filter(membership -> teamId(membership) != null)
+                .toList();
+        if (!leaderMemberships.isEmpty()) {
+            return requireLeaderExactTeamProgress(principal.localProfileId(), studentId, courseId,
+                    actorMemberships, leaderMemberships);
+        }
+
+        List<TeamMember> memberMemberships = actorMemberships.stream()
+                .filter(membership -> membership.getRoleInTeam() == RoleInTeam.MEMBER)
+                .toList();
+        if (memberMemberships.isEmpty() || !principal.localProfileId().equals(studentId)) {
             throw new AccessDeniedException("You do not have access to this student progress");
         }
-        if (actorMembership.getRoleInTeam() == RoleInTeam.MEMBER
-                && !principal.localProfileId().equals(studentId)) {
-            throw new AccessDeniedException("You do not have access to this student progress");
+        if (memberMemberships.size() != 1) {
+            throw ambiguousCourseMembership();
         }
-        return targetMembership;
+        return memberMemberships.get(0);
     }
 
-    private TeamMember requireActorCourseMembership(UUID actorStudentId, UUID courseId) {
-        List<TeamMember> memberships = teamMemberRepository.findByStudentIdAndTeamCourseId(actorStudentId, courseId);
-        if (memberships.isEmpty()) {
+    private TeamMember requireLeaderExactTeamProgress(
+            UUID actorStudentId,
+            UUID studentId,
+            UUID courseId,
+            List<TeamMember> actorMemberships,
+            List<TeamMember> leaderMemberships
+    ) {
+        Set<UUID> ledTeamIds = leaderMemberships.stream()
+                .map(LecturerAnalyticsAuthorizationService::teamId)
+                .collect(Collectors.toSet());
+        List<TeamMember> targetMemberships = actorStudentId.equals(studentId)
+                ? actorMemberships
+                : teamMemberRepository.findByStudentIdAndTeamCourseId(studentId, courseId);
+        if (targetMemberships.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy Student trong Course");
+        }
+        List<TeamMember> exactTeamMemberships = targetMemberships.stream()
+                .filter(membership -> ledTeamIds.contains(teamId(membership)))
+                .toList();
+        if (exactTeamMemberships.isEmpty()) {
             throw new AccessDeniedException("You do not have access to this student progress");
         }
-        if (memberships.size() != 1) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Student có nhiều Team membership trong Course");
+        if (exactTeamMemberships.size() != 1) {
+            throw ambiguousCourseMembership();
         }
-        return memberships.get(0);
+        return exactTeamMemberships.get(0);
+    }
+
+    private static UUID teamId(TeamMember membership) {
+        return membership.getTeam() == null ? null : membership.getTeam().getId();
+    }
+
+    private static ResponseStatusException ambiguousCourseMembership() {
+        return new ResponseStatusException(HttpStatus.CONFLICT, "Student có nhiều Team membership trong Course");
     }
 
     private TeamMember requireUniqueCourseMembership(UUID studentId, UUID courseId) {

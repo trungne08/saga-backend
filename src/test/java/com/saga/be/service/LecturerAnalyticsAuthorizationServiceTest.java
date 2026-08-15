@@ -129,10 +129,8 @@ class LecturerAnalyticsAuthorizationServiceTest {
         Team team = id(new Team(), teamId);
         team.setCourse(course);
         TeamMember member = membership(team, memberId, RoleInTeam.MEMBER);
-        TeamMember teammate = membership(team, teammateId, RoleInTeam.MEMBER);
         when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
         when(teamMemberRepository.findByStudentIdAndTeamCourseId(memberId, courseId)).thenReturn(java.util.List.of(member));
-        when(teamMemberRepository.findByStudentIdAndTeamCourseId(teammateId, courseId)).thenReturn(java.util.List.of(teammate));
 
         assertSame(member, service.requireStudentProgressAccess(principal(ApplicationRole.STUDENT, memberId), courseId, memberId));
         assertThrows(AccessDeniedException.class,
@@ -170,6 +168,201 @@ class LecturerAnalyticsAuthorizationServiceTest {
                 () -> service.requireStudentProgressAccess(principal(ApplicationRole.STUDENT, leaderId), courseId, otherTeamMemberId));
         assertThrows(AccessDeniedException.class,
                 () -> service.requireStudentProgressAccess(principal(ApplicationRole.STUDENT, mentorId), courseId, memberId));
+    }
+
+    @Test
+    void leaderMayReadSameTeamMemberEvenWhenTargetHasAnotherCourseMembership() {
+        UUID courseId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
+        UUID otherTeamId = UUID.randomUUID();
+        UUID leaderId = UUID.randomUUID();
+        UUID memberId = UUID.randomUUID();
+        Course course = id(new Course(), courseId);
+        Team team = id(new Team(), teamId);
+        team.setCourse(course);
+        Team otherTeam = id(new Team(), otherTeamId);
+        otherTeam.setCourse(course);
+        TeamMember leader = membership(team, leaderId, RoleInTeam.LEADER);
+        TeamMember memberOnLedTeam = membership(team, memberId, RoleInTeam.MEMBER);
+        TeamMember memberOnOtherTeam = membership(otherTeam, memberId, RoleInTeam.MEMBER);
+        when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
+        when(teamMemberRepository.findByStudentIdAndTeamCourseId(leaderId, courseId)).thenReturn(java.util.List.of(leader));
+        when(teamMemberRepository.findByStudentIdAndTeamCourseId(memberId, courseId))
+                .thenReturn(java.util.List.of(memberOnLedTeam, memberOnOtherTeam));
+
+        assertSame(memberOnLedTeam, service.requireStudentProgressAccess(
+                principal(ApplicationRole.STUDENT, leaderId), courseId, memberId));
+    }
+
+    @Test
+    void leaderMayReadSameTeamCoLeader() {
+        UUID courseId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
+        UUID leaderId = UUID.randomUUID();
+        UUID coLeaderId = UUID.randomUUID();
+        Course course = id(new Course(), courseId);
+        Team team = id(new Team(), teamId);
+        team.setCourse(course);
+        TeamMember leader = membership(team, leaderId, RoleInTeam.LEADER);
+        TeamMember coLeader = membership(team, coLeaderId, RoleInTeam.LEADER);
+        when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
+        when(teamMemberRepository.findByStudentIdAndTeamCourseId(leaderId, courseId)).thenReturn(java.util.List.of(leader));
+        when(teamMemberRepository.findByStudentIdAndTeamCourseId(coLeaderId, courseId)).thenReturn(java.util.List.of(coLeader));
+
+        assertSame(coLeader, service.requireStudentProgressAccess(
+                principal(ApplicationRole.STUDENT, leaderId), courseId, coLeaderId));
+    }
+
+    @Test
+    void leaderWhoIsAlsoMemberOfAnotherTeamMayReadSelfButNotUnledTeammate() {
+        UUID courseId = UUID.randomUUID();
+        UUID ledTeamId = UUID.randomUUID();
+        UUID otherTeamId = UUID.randomUUID();
+        UUID actorId = UUID.randomUUID();
+        UUID otherTeamMemberId = UUID.randomUUID();
+        Course course = id(new Course(), courseId);
+        Team ledTeam = id(new Team(), ledTeamId);
+        ledTeam.setCourse(course);
+        Team otherTeam = id(new Team(), otherTeamId);
+        otherTeam.setCourse(course);
+        TeamMember actorLeader = membership(ledTeam, actorId, RoleInTeam.LEADER);
+        TeamMember actorOtherMember = membership(otherTeam, actorId, RoleInTeam.MEMBER);
+        TeamMember otherTeamMember = membership(otherTeam, otherTeamMemberId, RoleInTeam.MEMBER);
+        when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
+        when(teamMemberRepository.findByStudentIdAndTeamCourseId(actorId, courseId))
+                .thenReturn(java.util.List.of(actorLeader, actorOtherMember));
+        when(teamMemberRepository.findByStudentIdAndTeamCourseId(otherTeamMemberId, courseId))
+                .thenReturn(java.util.List.of(otherTeamMember));
+
+        assertSame(actorLeader, service.requireStudentProgressAccess(
+                principal(ApplicationRole.STUDENT, actorId), courseId, actorId));
+        assertThrows(AccessDeniedException.class,
+                () -> service.requireStudentProgressAccess(
+                        principal(ApplicationRole.STUDENT, actorId), courseId, otherTeamMemberId));
+    }
+
+    @Test
+    void leaderOfMultipleTeamsMayReadMembersOfEachLedTeam() {
+        UUID courseId = UUID.randomUUID();
+        UUID teamAId = UUID.randomUUID();
+        UUID teamBId = UUID.randomUUID();
+        UUID leaderId = UUID.randomUUID();
+        UUID memberAId = UUID.randomUUID();
+        UUID memberBId = UUID.randomUUID();
+        Course course = id(new Course(), courseId);
+        Team teamA = id(new Team(), teamAId);
+        teamA.setCourse(course);
+        Team teamB = id(new Team(), teamBId);
+        teamB.setCourse(course);
+        TeamMember leaderA = membership(teamA, leaderId, RoleInTeam.LEADER);
+        TeamMember leaderB = membership(teamB, leaderId, RoleInTeam.LEADER);
+        TeamMember memberA = membership(teamA, memberAId, RoleInTeam.MEMBER);
+        TeamMember memberB = membership(teamB, memberBId, RoleInTeam.MEMBER);
+        when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
+        when(teamMemberRepository.findByStudentIdAndTeamCourseId(leaderId, courseId))
+                .thenReturn(java.util.List.of(leaderA, leaderB));
+        when(teamMemberRepository.findByStudentIdAndTeamCourseId(memberAId, courseId)).thenReturn(java.util.List.of(memberA));
+        when(teamMemberRepository.findByStudentIdAndTeamCourseId(memberBId, courseId)).thenReturn(java.util.List.of(memberB));
+
+        assertSame(memberA, service.requireStudentProgressAccess(
+                principal(ApplicationRole.STUDENT, leaderId), courseId, memberAId));
+        assertSame(memberB, service.requireStudentProgressAccess(
+                principal(ApplicationRole.STUDENT, leaderId), courseId, memberBId));
+    }
+
+    @Test
+    void targetInMultipleLedTeamsRemainsConflict() {
+        UUID courseId = UUID.randomUUID();
+        UUID teamAId = UUID.randomUUID();
+        UUID teamBId = UUID.randomUUID();
+        UUID leaderId = UUID.randomUUID();
+        UUID memberId = UUID.randomUUID();
+        Course course = id(new Course(), courseId);
+        Team teamA = id(new Team(), teamAId);
+        teamA.setCourse(course);
+        Team teamB = id(new Team(), teamBId);
+        teamB.setCourse(course);
+        TeamMember leaderA = membership(teamA, leaderId, RoleInTeam.LEADER);
+        TeamMember leaderB = membership(teamB, leaderId, RoleInTeam.LEADER);
+        TeamMember memberA = membership(teamA, memberId, RoleInTeam.MEMBER);
+        TeamMember memberB = membership(teamB, memberId, RoleInTeam.MEMBER);
+        when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
+        when(teamMemberRepository.findByStudentIdAndTeamCourseId(leaderId, courseId))
+                .thenReturn(java.util.List.of(leaderA, leaderB));
+        when(teamMemberRepository.findByStudentIdAndTeamCourseId(memberId, courseId))
+                .thenReturn(java.util.List.of(memberA, memberB));
+
+        ResponseStatusException exception = assertThrows(ResponseStatusException.class,
+                () -> service.requireStudentProgressAccess(
+                        principal(ApplicationRole.STUDENT, leaderId), courseId, memberId));
+        org.junit.jupiter.api.Assertions.assertEquals(409, exception.getStatusCode().value());
+    }
+
+    @Test
+    void memberWithMultipleCourseMembershipsCannotReadOwnProgress() {
+        UUID courseId = UUID.randomUUID();
+        UUID teamAId = UUID.randomUUID();
+        UUID teamBId = UUID.randomUUID();
+        UUID memberId = UUID.randomUUID();
+        Course course = id(new Course(), courseId);
+        Team teamA = id(new Team(), teamAId);
+        teamA.setCourse(course);
+        Team teamB = id(new Team(), teamBId);
+        teamB.setCourse(course);
+        TeamMember memberA = membership(teamA, memberId, RoleInTeam.MEMBER);
+        TeamMember memberB = membership(teamB, memberId, RoleInTeam.MEMBER);
+        when(courseRepository.findById(courseId)).thenReturn(Optional.of(course));
+        when(teamMemberRepository.findByStudentIdAndTeamCourseId(memberId, courseId))
+                .thenReturn(java.util.List.of(memberA, memberB));
+
+        ResponseStatusException exception = assertThrows(ResponseStatusException.class,
+                () -> service.requireStudentProgressAccess(
+                        principal(ApplicationRole.STUDENT, memberId), courseId, memberId));
+        org.junit.jupiter.api.Assertions.assertEquals(409, exception.getStatusCode().value());
+    }
+
+    @Test
+    void leaderRoleInOneCourseDoesNotApplyWhereActorIsOnlyMember() {
+        UUID courseBId = UUID.randomUUID();
+        UUID actorId = UUID.randomUUID();
+        UUID teammateBId = UUID.randomUUID();
+        Course courseB = id(new Course(), courseBId);
+        Team teamB = id(new Team(), UUID.randomUUID());
+        teamB.setCourse(courseB);
+        TeamMember actorAsMemberB = membership(teamB, actorId, RoleInTeam.MEMBER);
+        when(courseRepository.findById(courseBId)).thenReturn(Optional.of(courseB));
+        when(teamMemberRepository.findByStudentIdAndTeamCourseId(actorId, courseBId))
+                .thenReturn(java.util.List.of(actorAsMemberB));
+
+        assertThrows(AccessDeniedException.class,
+                () -> service.requireStudentProgressAccess(
+                        principal(ApplicationRole.STUDENT, actorId), courseBId, teammateBId));
+    }
+
+    @Test
+    void leaderMayReadOtherCourseOnlyWhenIndependentlyLeaderOfThatExactTeam() {
+        UUID courseBId = UUID.randomUUID();
+        UUID actorId = UUID.randomUUID();
+        UUID targetBId = UUID.randomUUID();
+        Course courseB = id(new Course(), courseBId);
+        Team teamB = id(new Team(), UUID.randomUUID());
+        teamB.setCourse(courseB);
+        TeamMember targetB = membership(teamB, targetBId, RoleInTeam.MEMBER);
+        when(courseRepository.findById(courseBId)).thenReturn(Optional.of(courseB));
+        when(teamMemberRepository.findByStudentIdAndTeamCourseId(actorId, courseBId)).thenReturn(java.util.List.of());
+
+        assertThrows(AccessDeniedException.class,
+                () -> service.requireStudentProgressAccess(
+                        principal(ApplicationRole.STUDENT, actorId), courseBId, targetBId));
+
+        TeamMember actorLeaderB = membership(teamB, actorId, RoleInTeam.LEADER);
+        when(teamMemberRepository.findByStudentIdAndTeamCourseId(actorId, courseBId))
+                .thenReturn(java.util.List.of(actorLeaderB));
+        when(teamMemberRepository.findByStudentIdAndTeamCourseId(targetBId, courseBId))
+                .thenReturn(java.util.List.of(targetB));
+
+        assertSame(targetB, service.requireStudentProgressAccess(
+                principal(ApplicationRole.STUDENT, actorId), courseBId, targetBId));
     }
 
     @Test

@@ -5,7 +5,7 @@
 Current Backend contracts: OpenAPI **150**, migration head **V33**. Browser `JSESSIONID` + `credentials: "include"`; CSRF on unsafe mutations; GET no CSRF; **never Bearer**.
 
 - **Avatar:** render `avatarUrl` từ `GET /api/auth/me` (nullable). Fallback UI khi null. Không gọi Google image API, không gửi provider token/avatar URL.
-- **Progress:** `GET /api/v1/courses/{courseId}/students/{studentId}/progress`. MEMBER self only; LEADER own Team members; Lecturer Course owner; Admin retained; MENTOR forbidden.
+- **Progress:** `GET /api/v1/courses/{courseId}/students/{studentId}/progress`. MEMBER self only; LEADER own Team members (exact Team, kể cả khi target còn membership Team khác trong Course); Lecturer Course owner; Admin retained; MENTOR forbidden. Không Course-wide.
 - **Course weights:** `GET` + `PUT /api/v1/courses/{courseId}/contribution-slice-weights`. Lecturer direct edit exact Course only. Body `{codeWeight, documentWeight, designWeight}` scale 0–100. Mutation gửi CSRF. Normal FE **không** dùng old approval flow.
 - **teams-progress:** `activeSprints[]` is authority. One active → keep `currentSprint` UI. Multiple active → list/picker; burndown uses `activeSprints[i].sprintId`. Do not treat `currentSprint` as primary when the list has more than one.
 

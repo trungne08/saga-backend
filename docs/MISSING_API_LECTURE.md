@@ -12,7 +12,7 @@
 > **STUDENT progress supersession (DEC-083):** historical text dưới đây và Lecturer Dashboard vẫn **STUDENT forbidden**. Exception hiện hành **chỉ** cho existing `GET /api/v1/courses/{courseId}/students/{studentId}/progress`:
 >
 > - MEMBER: self 200; teammate 403
-> - LEADER: self + exact same Team 200; cross-Team/cross-Course 403
+> - LEADER: self + exact same Team 200 (DEC-085: target extra Course membership không 409); cross-Team/cross-Course 403
 > - MENTOR / no membership: 403
 >
 > Graph routes overview/heatmap/interactions/burndown đã được mở STUDENT LEADER/MEMBER từ DEC-080; không rewrite lịch sử đó. Không viết STUDENT có Lecturer Dashboard access. OpenAPI baseline hiện hành = **150**. File này không phải FE wishlist authority; ưu tiên `SAGA_SYSTEM_CONTEXT_FOR_AI.md` / `FRONTEND_API_INTEGRATION.md`.
