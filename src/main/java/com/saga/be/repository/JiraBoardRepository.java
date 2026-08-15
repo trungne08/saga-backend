@@ -18,10 +18,36 @@ public interface JiraBoardRepository extends JpaRepository<JiraBoard, UUID> {
     Optional<JiraBoard> findByProjectId(UUID projectId);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select board from JiraBoard board where board.project.id = :projectId")
+    Optional<JiraBoard> findForLinkByProjectId(@Param("projectId") UUID projectId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select board from JiraBoard board where board.cloudId = :cloudId "
+            + "and board.jiraProjectId = :jiraProjectId")
+    Optional<JiraBoard> findForLinkByCloudIdAndJiraProjectId(
+            @Param("cloudId") String cloudId,
+            @Param("jiraProjectId") String jiraProjectId
+    );
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select board from JiraBoard board where board.id = :id")
     Optional<JiraBoard> findForSyncClaimById(@Param("id") UUID id);
 
+    /** Serializes refresh-token rotation for every caller of a Jira connection. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select board from JiraBoard board where board.id = :id")
+    Optional<JiraBoard> findForCredentialRefreshById(@Param("id") UUID id);
+
     List<JiraBoard> findByConnectionStatusIn(List<IntegrationStatus> statuses);
+
+    List<JiraBoard> findByProjectIdIn(List<UUID> projectIds);
+
+    long countByConnectionStatus(IntegrationStatus connectionStatus);
+
+    long countByWebhookIdIsNotNull();
+
+    @Query("select max(board.lastSyncedAt) from JiraBoard board")
+    LocalDateTime findLatestLastSyncedAt();
 
     List<JiraBoard> findByWebhookExpiresAtBeforeAndConnectionStatusNot(
             LocalDateTime expiresBefore,

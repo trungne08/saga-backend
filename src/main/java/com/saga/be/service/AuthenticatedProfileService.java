@@ -16,12 +16,15 @@ import com.saga.be.repository.AdminRepository;
 import com.saga.be.repository.LecturerRepository;
 import com.saga.be.repository.StudentRepository;
 import com.saga.be.security.ApplicationRole;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,29 +35,39 @@ public class AuthenticatedProfileService {
     private final LecturerRepository lecturerRepository;
     private final StudentRepository studentRepository;
     private final StudentCodeExtractor studentCodeExtractor;
+    private final EntityManager entityManager;
 
     public AuthenticatedProfileService(
             AdminRepository adminRepository,
             LecturerRepository lecturerRepository,
             StudentRepository studentRepository,
-            StudentCodeExtractor studentCodeExtractor
+            StudentCodeExtractor studentCodeExtractor,
+            EntityManager entityManager
     ) {
         this.adminRepository = adminRepository;
         this.lecturerRepository = lecturerRepository;
         this.studentRepository = studentRepository;
         this.studentCodeExtractor = studentCodeExtractor;
+        this.entityManager = entityManager;
     }
 
     @Transactional
     public AuthenticatedProfile synchronize(AuthenticatedIdentity identity) {
         String extractedStudentCode = extractRequiredStudentCode(identity);
         try {
+            if (identity.role() == ApplicationRole.STUDENT) {
+                return synchronizeStudentIdentity(identity, extractedStudentCode);
+            }
             return synchronizeInternal(identity, extractedStudentCode);
         } catch (IdentityConflictException exception) {
             throw exception;
         } catch (DataIntegrityViolationException exception) {
             throw new IdentityConflictException(
                     "The Cognito identity conflicts with an existing local profile"
+            );
+        } catch (OptimisticLockingFailureException exception) {
+            throw new IdentityConflictException(
+                    "The imported Student identity was changed by another login"
             );
         } catch (DataAccessException exception) {
             throw new IdentityServiceException(
@@ -108,6 +121,133 @@ public class AuthenticatedProfileService {
         }
 
         return create(identity, extractedStudentCode);
+    }
+
+    /**
+     * Imported Students are identified by the pair (normalized email, student code).
+     * A partial match is deliberately not enough to bind a Cognito subject.
+     */
+    private AuthenticatedProfile synchronizeStudentIdentity(
+            AuthenticatedIdentity identity,
+            String extractedStudentCode
+    ) {
+        List<ProfileReference> subjectMatches = findBySubject(identity.cognitoSub());
+        requireAtMostOne(subjectMatches, "Cognito subject is linked to multiple profiles");
+        if (!subjectMatches.isEmpty()) {
+            ProfileReference match = subjectMatches.get(0);
+            requireExpectedRole(match, ApplicationRole.STUDENT);
+            return synchronizeLinkedStudent(
+                    (Student) match.entity(),
+                    identity,
+                    extractedStudentCode
+            );
+        }
+
+        List<ProfileReference> emailMatches = findByEmail(identity.email());
+        requireAtMostOne(emailMatches, "Email is linked to multiple profiles");
+        Student studentByCode = studentRepository.findByStudentCodeIgnoreCase(extractedStudentCode)
+                .orElse(null);
+
+        if (emailMatches.isEmpty() && studentByCode == null) {
+            return create(identity, extractedStudentCode);
+        }
+        if (emailMatches.isEmpty()) {
+            throw new IdentityConflictException(
+                    "Student code matches an existing Student but the email does not"
+            );
+        }
+
+        ProfileReference emailMatch = emailMatches.get(0);
+        requireExpectedRole(emailMatch, ApplicationRole.STUDENT);
+        Student studentByEmail = (Student) emailMatch.entity();
+        if (studentByCode == null) {
+            throw new IdentityConflictException(
+                    "Student email matches an existing Student but the student code does not"
+            );
+        }
+        if (!studentByEmail.getId().equals(studentByCode.getId())) {
+            throw new IdentityConflictException(
+                    "Student email and student code identify different local Students"
+            );
+        }
+        return bindImportedStudent(studentByEmail.getId(), identity, extractedStudentCode);
+    }
+
+    private AuthenticatedProfile synchronizeLinkedStudent(
+            Student subjectMatch,
+            AuthenticatedIdentity identity,
+            String extractedStudentCode
+    ) {
+        Student student = studentRepository.findForIdentityBindingById(subjectMatch.getId())
+                .orElseThrow(() -> new IdentityConflictException(
+                        "The linked Student profile no longer exists"
+                ));
+        if (!Objects.equals(student.getCognitoSub(), identity.cognitoSub())) {
+            throw new IdentityConflictException(
+                    "The Cognito subject is no longer linked to the expected Student"
+            );
+        }
+        if (student.getAccountStatus() == AccountStatus.PENDING) {
+            student.setAccountStatus(AccountStatus.ACTIVE);
+        }
+        return updateStudent(student, identity, extractedStudentCode);
+    }
+
+    private AuthenticatedProfile bindImportedStudent(
+            UUID studentId,
+            AuthenticatedIdentity identity,
+            String extractedStudentCode
+    ) {
+        Student student = studentRepository.findForIdentityBindingById(studentId)
+                .orElseThrow(() -> new IdentityConflictException(
+                        "The imported Student profile no longer exists"
+                ));
+        entityManager.refresh(student, LockModeType.PESSIMISTIC_WRITE);
+
+        List<ProfileReference> subjectMatches = findBySubject(identity.cognitoSub());
+        requireAtMostOne(subjectMatches, "Cognito subject is linked to multiple profiles");
+        if (!subjectMatches.isEmpty() && !sameStudent(subjectMatches.get(0), student)) {
+            throw new IdentityConflictException(
+                    "The Cognito subject is already linked to another local profile"
+            );
+        }
+
+        String existingSubject = student.getCognitoSub();
+        if (existingSubject != null && !existingSubject.isBlank()) {
+            if (!existingSubject.equals(identity.cognitoSub())) {
+                throw new IdentityConflictException(
+                        "The imported Student is already linked to another Cognito identity",
+                        IdentityConflictException.Reason.EMAIL_LINKED_TO_DIFFERENT_COGNITO_SUB
+                );
+            }
+            return toProfile(student);
+        }
+
+        if (!student.getEmail().equalsIgnoreCase(identity.email())
+                || !student.getStudentCode().equalsIgnoreCase(extractedStudentCode)) {
+            throw new IdentityConflictException(
+                    "The imported Student identity no longer matches the Cognito identity"
+            );
+        }
+        if (student.getAccountStatus() == AccountStatus.INACTIVE
+                || student.getAccountStatus() == AccountStatus.SUSPENDED) {
+            throw new IdentityConflictException(
+                    "The imported Student account cannot be activated"
+            );
+        }
+
+        student.setCognitoSub(identity.cognitoSub());
+        if (student.getAccountStatus() == AccountStatus.PENDING) {
+            student.setAccountStatus(AccountStatus.ACTIVE);
+        }
+        applyAvatarIfPresent(student, identity);
+        Student saved = studentRepository.saveAndFlush(student);
+        return toProfile(saved);
+    }
+
+    private boolean sameStudent(ProfileReference reference, Student student) {
+        return reference.role() == ApplicationRole.STUDENT
+                && Objects.equals(reference.entity().getId(), student.getId());
     }
 
     private List<ProfileReference> findBySubject(String subject) {
@@ -182,6 +322,7 @@ public class AuthenticatedProfileService {
         admin.setCognitoSub(identity.cognitoSub());
         admin.setEmail(identity.email());
         admin.setFullName(identity.fullName());
+        applyAvatarIfPresent(admin, identity);
         Admin saved = adminRepository.saveAndFlush(admin);
         return toProfile(saved);
     }
@@ -193,6 +334,10 @@ public class AuthenticatedProfileService {
         lecturer.setCognitoSub(identity.cognitoSub());
         lecturer.setEmail(identity.email());
         lecturer.setFullName(identity.fullName());
+        applyAvatarIfPresent(lecturer, identity);
+        if (lecturer.getAccountStatus() == null) {
+            lecturer.setAccountStatus(AccountStatus.ACTIVE);
+        }
         Lecturer saved = lecturerRepository.saveAndFlush(lecturer);
         return toProfile(saved);
     }
@@ -206,6 +351,7 @@ public class AuthenticatedProfileService {
         student.setCognitoSub(identity.cognitoSub());
         student.setEmail(identity.email());
         student.setFullName(identity.fullName());
+        applyAvatarIfPresent(student, identity);
         if (student.getAccountStatus() == null) {
             student.setAccountStatus(AccountStatus.PENDING);
         }
@@ -241,6 +387,7 @@ public class AuthenticatedProfileService {
                         .cognitoSub(identity.cognitoSub())
                         .email(identity.email())
                         .fullName(identity.fullName())
+                        .avatarUrl(identity.avatarUrl())
                         .build();
                 yield toProfile(adminRepository.saveAndFlush(admin));
             }
@@ -249,6 +396,8 @@ public class AuthenticatedProfileService {
                         .cognitoSub(identity.cognitoSub())
                         .email(identity.email())
                         .fullName(identity.fullName())
+                        .avatarUrl(identity.avatarUrl())
+                        .accountStatus(AccountStatus.ACTIVE)
                         .build();
                 yield toProfile(lecturerRepository.saveAndFlush(lecturer));
             }
@@ -257,8 +406,9 @@ public class AuthenticatedProfileService {
                         .cognitoSub(identity.cognitoSub())
                         .email(identity.email())
                         .fullName(identity.fullName())
+                        .avatarUrl(identity.avatarUrl())
                         .studentCode(extractedStudentCode)
-                        .accountStatus(AccountStatus.PENDING)
+                        .accountStatus(AccountStatus.ACTIVE)
                         .build();
                 yield toProfile(studentRepository.saveAndFlush(student));
             }
@@ -272,7 +422,8 @@ public class AuthenticatedProfileService {
                 admin.getFullName(),
                 ApplicationRole.ADMIN,
                 admin.getId(),
-                null
+                null,
+                admin.getAvatarUrl()
         );
     }
 
@@ -283,7 +434,8 @@ public class AuthenticatedProfileService {
                 lecturer.getFullName(),
                 ApplicationRole.LECTURER,
                 lecturer.getId(),
-                null
+                lecturer.getAccountStatus(),
+                lecturer.getAvatarUrl()
         );
     }
 
@@ -294,7 +446,8 @@ public class AuthenticatedProfileService {
                 student.getFullName(),
                 ApplicationRole.STUDENT,
                 student.getId(),
-                student.getAccountStatus()
+                student.getAccountStatus(),
+                student.getAvatarUrl()
         );
     }
 
@@ -304,9 +457,28 @@ public class AuthenticatedProfileService {
             String fullName,
             ApplicationRole role,
             UUID id,
-            AccountStatus status
+            AccountStatus status,
+            String avatarUrl
     ) {
-        return new AuthenticatedProfile(cognitoSub, email, fullName, role, id, status);
+        return new AuthenticatedProfile(cognitoSub, email, fullName, role, id, status, avatarUrl);
+    }
+
+    private void applyAvatarIfPresent(Admin admin, AuthenticatedIdentity identity) {
+        if (identity.avatarUrl() != null) {
+            admin.setAvatarUrl(identity.avatarUrl());
+        }
+    }
+
+    private void applyAvatarIfPresent(Lecturer lecturer, AuthenticatedIdentity identity) {
+        if (identity.avatarUrl() != null) {
+            lecturer.setAvatarUrl(identity.avatarUrl());
+        }
+    }
+
+    private void applyAvatarIfPresent(Student student, AuthenticatedIdentity identity) {
+        if (identity.avatarUrl() != null) {
+            student.setAvatarUrl(identity.avatarUrl());
+        }
     }
 
     private String cognitoSub(BaseEntity entity) {

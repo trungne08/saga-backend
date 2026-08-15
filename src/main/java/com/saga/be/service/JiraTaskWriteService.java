@@ -1,0 +1,1255 @@
+package com.saga.be.service;
+
+import com.saga.be.dto.request.JiraTaskCreateRequest;
+import com.saga.be.dto.request.JiraTaskUpdateRequest;
+import com.saga.be.dto.request.JiraTaskAssigneeRequest;
+import com.saga.be.dto.request.JiraTaskSprintRequest;
+import com.saga.be.dto.request.JiraTaskEstimationRequest;
+import com.saga.be.dto.response.TaskReadResponse;
+import com.saga.be.dto.response.JiraTaskTransitionResponse;
+import com.saga.be.entity.IdentityMap;
+import com.saga.be.entity.JiraBoard;
+import com.saga.be.entity.JiraWriteOperation;
+import com.saga.be.entity.Project;
+import com.saga.be.entity.Task;
+import com.saga.be.entity.Sprint;
+import com.saga.be.entity.value.TaskComponentSnapshot;
+import com.saga.be.entity.enums.IdentityMappingStatus;
+import com.saga.be.entity.enums.IntegrationProvider;
+import com.saga.be.entity.enums.IntegrationStatus;
+import com.saga.be.entity.enums.JiraWriteOperationStatus;
+import com.saga.be.entity.enums.JiraWriteOperationType;
+import com.saga.be.entity.enums.Priority;
+import com.saga.be.entity.enums.NotificationType;
+import com.saga.be.entity.enums.TaskType;
+import com.saga.be.exception.IntegrationException;
+import com.saga.be.integration.project.JiraCredentialService;
+import com.saga.be.integration.provider.JiraCreateField;
+import com.saga.be.integration.provider.JiraCreateFieldAllowedValue;
+import com.saga.be.integration.provider.JiraCreateIssueType;
+import com.saga.be.integration.provider.JiraIssueReference;
+import com.saga.be.integration.provider.JiraProviderClient;
+import com.saga.be.integration.provider.JiraWriteScope;
+import com.saga.be.integration.security.ProjectIntegrationAuthorizationService;
+import com.saga.be.integration.sync.JiraIssueUpsertService;
+import com.saga.be.integration.sync.JiraSprintUpsertService;
+import com.saga.be.integration.write.JiraWriteOperationService;
+import com.saga.be.integration.write.JiraCanonicalTaskReadService;
+import com.saga.be.integration.write.JiraTaskSprintFinalizationService;
+import com.saga.be.repository.IdentityMapRepository;
+import com.saga.be.repository.JiraBoardRepository;
+import com.saga.be.repository.TaskRepository;
+import com.saga.be.repository.SprintRepository;
+import com.saga.be.security.SagaPrincipal;
+import java.time.format.DateTimeFormatter;
+import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Locale;
+import java.util.Objects;
+import java.util.Set;
+import java.util.UUID;
+import java.util.function.Function;
+import org.springframework.http.HttpStatus;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.transaction.annotation.Transactional;
+
+@Service
+public class JiraTaskWriteService {
+
+    private static final Logger log = LoggerFactory.getLogger(JiraTaskWriteService.class);
+
+    private final ProjectIntegrationAuthorizationService authorization;
+    private final JiraBoardRepository boardRepository;
+    private final JiraCredentialService credentialService;
+    private final JiraProviderClient jiraClient;
+    private final JiraIssueUpsertService issueUpsertService;
+    private final JiraWriteOperationService operationService;
+    private final JiraCanonicalTaskReadService canonicalTaskReadService;
+    private final JiraTaskSprintFinalizationService sprintFinalizationService;
+    private final TaskRepository taskRepository;
+    private final IdentityMapRepository identityMapRepository;
+    private final SprintRepository sprintRepository;
+    private final JiraSprintUpsertService sprintUpsertService;
+    private final JiraMutationNotificationProducer notificationProducer;
+    private final com.saga.be.repository.TaskAttachmentRepository taskAttachmentRepository;
+    private final com.saga.be.repository.TaskWebLinkRepository taskWebLinkRepository;
+
+    private static final int MAX_ATTACHMENT_FILES = 5;
+    private static final long MAX_ATTACHMENT_BYTES = 10L * 1024 * 1024;
+    private static final int MAX_EVIDENCE_LINK_CHARS = 2048;
+    private static final java.util.Set<String> ALLOWED_ATTACHMENT_EXTENSIONS = java.util.Set.of(
+            "png", "jpg", "jpeg", "gif", "webp", "bmp",
+            "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
+            "txt", "md", "csv", "zip"
+    );
+
+    @Autowired
+    public JiraTaskWriteService(ProjectIntegrationAuthorizationService authorization, JiraBoardRepository boardRepository,
+            JiraCredentialService credentialService, JiraProviderClient jiraClient,
+            JiraIssueUpsertService issueUpsertService, JiraWriteOperationService operationService,
+            JiraCanonicalTaskReadService canonicalTaskReadService, JiraTaskSprintFinalizationService sprintFinalizationService,
+            TaskRepository taskRepository, IdentityMapRepository identityMapRepository,
+            SprintRepository sprintRepository, JiraSprintUpsertService sprintUpsertService,
+            JiraMutationNotificationProducer notificationProducer,
+            com.saga.be.repository.TaskAttachmentRepository taskAttachmentRepository,
+            com.saga.be.repository.TaskWebLinkRepository taskWebLinkRepository) {
+        this.authorization = authorization;
+        this.boardRepository = boardRepository;
+        this.credentialService = credentialService;
+        this.jiraClient = jiraClient;
+        this.issueUpsertService = issueUpsertService;
+        this.operationService = operationService;
+        this.canonicalTaskReadService = canonicalTaskReadService;
+        this.sprintFinalizationService = sprintFinalizationService;
+        this.taskRepository = taskRepository;
+        this.identityMapRepository = identityMapRepository;
+        this.sprintRepository = sprintRepository;
+        this.sprintUpsertService = sprintUpsertService;
+        this.notificationProducer = notificationProducer;
+        this.taskAttachmentRepository = taskAttachmentRepository;
+        this.taskWebLinkRepository = taskWebLinkRepository;
+    }
+
+    public JiraTaskWriteService(ProjectIntegrationAuthorizationService authorization, JiraBoardRepository boardRepository,
+            JiraCredentialService credentialService, JiraProviderClient jiraClient,
+            JiraIssueUpsertService issueUpsertService, JiraWriteOperationService operationService,
+            JiraCanonicalTaskReadService canonicalTaskReadService, JiraTaskSprintFinalizationService sprintFinalizationService,
+            TaskRepository taskRepository, IdentityMapRepository identityMapRepository,
+            SprintRepository sprintRepository, JiraSprintUpsertService sprintUpsertService) {
+        this(authorization, boardRepository, credentialService, jiraClient, issueUpsertService, operationService,
+                canonicalTaskReadService, sprintFinalizationService, taskRepository, identityMapRepository,
+                sprintRepository, sprintUpsertService, null, null, null);
+    }
+
+    public JiraTaskWriteService(ProjectIntegrationAuthorizationService authorization, JiraBoardRepository boardRepository,
+            JiraCredentialService credentialService, JiraProviderClient jiraClient,
+            JiraIssueUpsertService issueUpsertService, JiraWriteOperationService operationService,
+            JiraCanonicalTaskReadService canonicalTaskReadService, JiraTaskSprintFinalizationService sprintFinalizationService,
+            TaskRepository taskRepository, IdentityMapRepository identityMapRepository,
+            SprintRepository sprintRepository, JiraSprintUpsertService sprintUpsertService,
+            JiraMutationNotificationProducer notificationProducer) {
+        this(authorization, boardRepository, credentialService, jiraClient, issueUpsertService, operationService,
+                canonicalTaskReadService, sprintFinalizationService, taskRepository, identityMapRepository,
+                sprintRepository, sprintUpsertService, notificationProducer, null, null);
+    }
+
+    @Transactional(readOnly = true)
+    public List<JiraTaskTransitionResponse> transitions(
+            SagaPrincipal principal, UUID projectId, UUID taskId
+    ) {
+        authorization.requireProjectManager(principal, projectId);
+        Task task = task(projectId, taskId);
+        JiraBoard board = activeBoard(projectId);
+        String token = credentialService.validAccessToken(board);
+        return jiraClient.getTransitions(token, board.getCloudId(), external(task)).stream()
+                .map(value -> new JiraTaskTransitionResponse(value.id(), value.name(),
+                        value.targetStatusId(), value.targetStatusName())).toList();
+    }
+
+    @Transactional
+    public TaskReadResponse update(SagaPrincipal principal, UUID projectId, UUID taskId,
+            String key, JiraTaskUpdateRequest request) {
+        validatePriorityRequest(request);
+        return mutate(principal, projectId, taskId, key, JiraWriteOperationType.TASK_UPDATE,
+                updateFingerprint(request), JiraWriteScope.CLASSIC_WRITE_SCOPE, request.type(),
+                (token, board, task) -> {
+                    List<JiraCreateField> editMetadata = jiraClient.getEditMetadata(
+                            token, board.getCloudId(), external(task));
+                    Set<String> allowed = editMetadata.stream().map(JiraCreateField::key)
+                            .collect(java.util.stream.Collectors.toSet());
+                    Map<String, Object> fields = updateFields(task, request, editMetadata, allowed);
+                    if (fields.isEmpty()) throw IntegrationException.invalid("JIRA_TASK_UPDATE_EMPTY", "No editable task fields were supplied");
+                    jiraClient.updateIssue(token, board.getCloudId(), external(task), fields);
+                });
+    }
+
+    @Transactional
+    public TaskReadResponse transition(SagaPrincipal principal, UUID projectId, UUID taskId,
+            String key, String transitionId) {
+        return mutate(principal, projectId, taskId, key, JiraWriteOperationType.TASK_TRANSITION,
+                transitionId, JiraWriteScope.CLASSIC_WRITE_SCOPE,
+                (token, board, task) -> jiraClient.transitionIssue(token, board.getCloudId(), external(task), transitionId));
+    }
+
+    @Transactional
+    public TaskReadResponse assign(SagaPrincipal principal, UUID projectId, UUID taskId,
+            String key, JiraTaskAssigneeRequest request) {
+        if (request.unassign() == (request.assigneeId() != null)) throw IntegrationException.invalid(
+                "JIRA_ASSIGNEE_REQUEST_INVALID", "Provide either assigneeId or explicit unassign");
+        return mutate(principal, projectId, taskId, key, JiraWriteOperationType.TASK_ASSIGN,
+                String.valueOf(request.assigneeId()) + "|" + request.unassign(), JiraWriteScope.CLASSIC_WRITE_SCOPE,
+                (token, board, task) -> jiraClient.assignIssue(token, board.getCloudId(), external(task),
+                        request.unassign() ? null : assignee(request.assigneeId())));
+    }
+
+    @Transactional
+    public TaskReadResponse sprint(SagaPrincipal principal, UUID projectId, UUID taskId,
+            String key, JiraTaskSprintRequest request) {
+        if (request.backlog() == (request.sprintId() != null)) throw IntegrationException.invalid(
+                "JIRA_SPRINT_REQUEST_INVALID", "Provide either sprintId or explicit backlog");
+        Project project = authorization.requireProjectManager(principal, projectId);
+        Task task = task(projectId, taskId);
+        Sprint target = request.backlog() ? null : sprintRepository
+                .findByIdAndBoardProjectIdAndDeletedAtIsNull(request.sprintId(), projectId)
+                .orElseThrow(() -> notFound("Sprint not found"));
+        JiraWriteOperation operation = operationService.claim(project, principal, JiraWriteOperationType.TASK_SPRINT,
+                key, operationService.fingerprint(String.valueOf(request.sprintId()) + "|" + request.backlog()));
+        if (operation.getStatus() == JiraWriteOperationStatus.COMPLETED) return TaskReadResponse.from(task);
+        JiraBoard board = activeBoard(projectId);
+        String token = credentialService.validAccessToken(board);
+        if (request.backlog()) {
+            JiraWriteScope.requireGranted(board, JiraWriteScope.WRITE_BOARD_SCOPE);
+        } else {
+            JiraWriteScope.requireGranted(
+                    board,
+                    JiraWriteScope.WRITE_SPRINT_SCOPE,
+                    JiraWriteScope.READ_SPRINT_SCOPE
+            );
+        }
+        if (board.getJiraBoardId() == null || board.getJiraBoardId().isBlank()) {
+            throw IntegrationException.conflict("JIRA_BOARD_NOT_CONFIGURED", "The Jira board is not configured");
+        }
+        if (operation.getStatus() == JiraWriteOperationStatus.PENDING) {
+            try {
+                if (request.backlog()) {
+                    jiraClient.moveIssuesToBacklog(token, board.getCloudId(), board.getJiraBoardId(), List.of(external(task)));
+                } else {
+                    jiraClient.moveIssuesToSprint(token, board.getCloudId(), target.getExternalSprintId(), List.of(external(task)));
+                }
+                operationService.markRemoteSucceeded(operation.getId(), task.getExternalId(), task.getExternalKey());
+                operation.setRemoteResourceId(task.getExternalId());
+                operation.setRemoteResourceKey(task.getExternalKey());
+                operation.setStatus(JiraWriteOperationStatus.REMOTE_SUCCEEDED);
+            } catch (IntegrationException exception) {
+                operationService.failed(operation.getId(), exception.getCode());
+                throw exception;
+            } catch (RuntimeException exception) {
+                operationService.unknown(operation.getId(), "JIRA_WRITE_OUTCOME_UNKNOWN");
+                throw exception;
+            }
+        }
+        return reconcileSprint(operation, board, projectId, target == null ? null : target.getId(), principal);
+    }
+
+    @Transactional
+    public TaskReadResponse estimate(SagaPrincipal principal, UUID projectId, UUID taskId,
+            String key, JiraTaskEstimationRequest request) {
+        Project project = authorization.requireProjectManager(principal, projectId);
+        Task task = task(projectId, taskId);
+        JiraWriteOperation operation = operationService.claim(project, principal,
+                JiraWriteOperationType.TASK_ESTIMATION, key,
+                operationService.fingerprint(String.valueOf(request.value())));
+        if (operation.getStatus() == JiraWriteOperationStatus.COMPLETED) {
+            return TaskReadResponse.from(task);
+        }
+        JiraBoard board = activeBoard(projectId);
+        String token = credentialService.validAccessToken(board);
+        JiraWriteScope.requireGranted(
+                board,
+                JiraWriteScope.WRITE_ISSUE_SOFTWARE_SCOPE,
+                JiraWriteScope.READ_BOARD_ADMIN_SCOPE,
+                JiraWriteScope.READ_PROJECT_SCOPE
+        );
+        if (board.getJiraBoardId() == null || board.getJiraBoardId().isBlank()) {
+            throw IntegrationException.conflict("JIRA_BOARD_NOT_CONFIGURED", "The Jira board is not configured");
+        }
+        String estimationFieldId = jiraClient.estimationFieldId(token, board.getCloudId(), board.getJiraBoardId());
+        if (estimationFieldId == null) {
+            throw IntegrationException.conflict("JIRA_ESTIMATION_UNSUPPORTED", "The Jira board does not support estimation");
+        }
+        if (operation.getStatus() == JiraWriteOperationStatus.PENDING) {
+            try {
+                jiraClient.estimateIssue(token, board.getCloudId(), board.getJiraBoardId(), external(task), request.value());
+                operationService.markRemoteSucceeded(operation.getId(), task.getExternalId(), task.getExternalKey());
+                // markRemoteSucceeded runs in a separate transaction. Keep this request's
+                // object in the same state before the immediate canonical finalization.
+                operation.setRemoteResourceId(task.getExternalId());
+                operation.setRemoteResourceKey(task.getExternalKey());
+                operation.setStatus(JiraWriteOperationStatus.REMOTE_SUCCEEDED);
+            } catch (IntegrationException exception) {
+                operationService.failed(operation.getId(), exception.getCode());
+                throw exception;
+            } catch (RuntimeException exception) {
+                operationService.unknown(operation.getId(), "JIRA_WRITE_OUTCOME_UNKNOWN");
+                throw exception;
+            }
+        }
+        return reconcileEstimation(operation, board, projectId, estimationFieldId, request.value(), principal);
+    }
+
+    @Transactional
+    public void delete(SagaPrincipal principal, UUID projectId, UUID taskId, String key) {
+        Project project = authorization.requireProjectManager(principal, projectId);
+        Task task = task(projectId, taskId);
+        JiraWriteOperation operation = operationService.claim(project, principal, JiraWriteOperationType.TASK_DELETE,
+                key, operationService.fingerprint(task.getExternalId()));
+        if (operation.getStatus() == JiraWriteOperationStatus.COMPLETED) return;
+        JiraBoard board = activeBoard(projectId);
+        String token = credentialService.validAccessToken(board);
+        JiraWriteScope.requireGranted(board);
+        if (operation.getStatus() == JiraWriteOperationStatus.PENDING) {
+            try {
+                jiraClient.deleteIssue(token, board.getCloudId(), external(task));
+                operation.setRemoteResourceId(task.getExternalId());
+                operation.setRemoteResourceKey(task.getExternalKey());
+                operationService.markRemoteSucceeded(operation.getId(), task.getExternalId(), task.getExternalKey());
+            } catch (IntegrationException exception) {
+                operationService.failed(operation.getId(), exception.getCode());
+                throw exception;
+            } catch (RuntimeException exception) {
+                operationService.unknown(operation.getId(), "JIRA_WRITE_OUTCOME_UNKNOWN");
+                throw exception;
+            }
+        }
+        task.setDeletedAt(LocalDateTime.now());
+        taskRepository.saveAndFlush(task);
+        operationService.complete(operation.getId());
+        emitCompleted(operation, NotificationType.TASK_DELETED, principal);
+    }
+
+    @Transactional
+    public com.saga.be.dto.response.JiraTaskAttachmentsResponse attach(
+            SagaPrincipal principal,
+            UUID projectId,
+            UUID taskId,
+            String key,
+            List<org.springframework.web.multipart.MultipartFile> files,
+            String link
+    ) {
+        List<com.saga.be.integration.provider.JiraAttachmentUpload> uploads = optionalUploads(files);
+        String url = validatedEvidenceLink(link);
+        if (uploads.isEmpty() && url == null) {
+            throw IntegrationException.invalid(
+                    "JIRA_EVIDENCE_REQUIRED",
+                    "At least one file or a link is required"
+            );
+        }
+        boolean linkAlreadyStored = url != null
+                && taskWebLinkRepository != null
+                && taskWebLinkRepository.findByTaskIdAndUrl(taskId, url).isPresent();
+        java.util.concurrent.atomic.AtomicReference<String> remoteLinkId =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        TaskReadResponse task = mutate(
+                principal,
+                projectId,
+                taskId,
+                key,
+                JiraWriteOperationType.TASK_ATTACHMENT,
+                evidenceFingerprint(uploads, url),
+                JiraWriteScope.CLASSIC_WRITE_SCOPE,
+                null,
+                false,
+                (token, board, existing) -> {
+                    if (!uploads.isEmpty()) {
+                        jiraClient.addIssueAttachments(
+                                token,
+                                board.getCloudId(),
+                                external(existing),
+                                uploads
+                        );
+                    }
+                    if (url != null && !linkAlreadyStored) {
+                        remoteLinkId.set(jiraClient.addIssueRemoteLink(
+                                token,
+                                board.getCloudId(),
+                                external(existing),
+                                url,
+                                evidenceLinkTitle(url)
+                        ));
+                    }
+                }
+        );
+        persistWebLink(projectId, task.id(), url, remoteLinkId.get());
+        return attachmentsResponse(task.id());
+    }
+
+    private TaskReadResponse mutate(SagaPrincipal principal, UUID projectId, UUID taskId, String key,
+            JiraWriteOperationType type, String fingerprint, String requiredScope, TaskMutation remote) {
+        return mutate(principal, projectId, taskId, key, type, fingerprint, requiredScope, null, true, remote);
+    }
+
+    private TaskReadResponse mutate(SagaPrincipal principal, UUID projectId, UUID taskId, String key,
+            JiraWriteOperationType type, String fingerprint, String requiredScope,
+            TaskType expectedTaskType, TaskMutation remote) {
+        return mutate(principal, projectId, taskId, key, type, fingerprint, requiredScope, expectedTaskType, true, remote);
+    }
+
+    private TaskReadResponse mutate(SagaPrincipal principal, UUID projectId, UUID taskId, String key,
+            JiraWriteOperationType type, String fingerprint, String requiredScope,
+            TaskType expectedTaskType, boolean managerOnly, TaskMutation remote) {
+        Project project = managerOnly
+                ? authorization.requireProjectManager(principal, projectId)
+                : authorization.requireProjectContributor(principal, projectId);
+        Task task = task(projectId, taskId);
+        JiraWriteOperation operation = operationService.claim(project, principal, type, key, operationService.fingerprint(fingerprint));
+        if (operation.getStatus() == JiraWriteOperationStatus.COMPLETED) return TaskReadResponse.from(task);
+        JiraBoard board = activeBoard(projectId); String token = credentialService.validAccessToken(board);
+        JiraWriteScope.requireGranted(board, requiredScope);
+        if (operation.getStatus() == JiraWriteOperationStatus.REMOTE_SUCCEEDED) {
+            return reconcile(operation, board, projectId, null, null, expectedTaskType, principal);
+        }
+        try {
+            remote.apply(token, board, task);
+            operation.setRemoteResourceId(task.getExternalId()); operation.setRemoteResourceKey(task.getExternalKey());
+            operationService.markRemoteSucceeded(operation.getId(), task.getExternalId(), task.getExternalKey());
+        } catch (IntegrationException exception) { operationService.failed(operation.getId(), exception.getCode()); throw exception;
+        } catch (RuntimeException exception) { operationService.unknown(operation.getId(), "JIRA_WRITE_OUTCOME_UNKNOWN"); throw exception; }
+        return reconcile(operation, board, projectId, null, null, expectedTaskType, principal);
+    }
+
+    private Task task(UUID projectId, UUID taskId) {
+        return taskRepository.findByIdAndProjectId(taskId, projectId).orElseThrow(() -> notFound("Task not found"));
+    }
+
+    private IntegrationException notFound(String message) { return new IntegrationException(HttpStatus.NOT_FOUND, "JIRA_RESOURCE_NOT_FOUND", message); }
+
+    private String external(Task task) { if (task.getExternalId() == null || task.getExternalId().isBlank()) throw IntegrationException.conflict("JIRA_TASK_NOT_LINKED", "The task is not linked to Jira"); return task.getExternalId(); }
+
+    private List<com.saga.be.integration.provider.JiraAttachmentUpload> optionalUploads(
+            List<org.springframework.web.multipart.MultipartFile> files
+    ) {
+        if (files == null || files.isEmpty() || files.stream().allMatch(file -> file == null || file.isEmpty())) {
+            return List.of();
+        }
+        List<org.springframework.web.multipart.MultipartFile> present = files.stream()
+                .filter(file -> file != null && !file.isEmpty())
+                .toList();
+        if (present.size() > MAX_ATTACHMENT_FILES) {
+            throw IntegrationException.invalid(
+                    "JIRA_ATTACHMENT_LIMIT_EXCEEDED",
+                    "A task accepts at most 5 files in one upload"
+            );
+        }
+        List<com.saga.be.integration.provider.JiraAttachmentUpload> uploads = new java.util.ArrayList<>();
+        for (org.springframework.web.multipart.MultipartFile file : present) {
+            if (file.getSize() > MAX_ATTACHMENT_BYTES) {
+                throw IntegrationException.invalid(
+                        "JIRA_ATTACHMENT_TOO_LARGE",
+                        "Each attachment must be 10 MB or smaller"
+                );
+            }
+            String filename = safeAttachmentFilename(file.getOriginalFilename());
+            String extension = attachmentExtension(filename);
+            if (!ALLOWED_ATTACHMENT_EXTENSIONS.contains(extension)) {
+                throw IntegrationException.invalid(
+                        "JIRA_ATTACHMENT_TYPE_UNSUPPORTED",
+                        "Only images and common document files can be attached"
+                );
+            }
+            try {
+                uploads.add(new com.saga.be.integration.provider.JiraAttachmentUpload(
+                        filename,
+                        file.getContentType(),
+                        file.getBytes()
+                ));
+            } catch (java.io.IOException exception) {
+                throw IntegrationException.invalid(
+                        "JIRA_ATTACHMENT_UNREADABLE",
+                        "The uploaded file could not be read"
+                );
+            }
+        }
+        return List.copyOf(uploads);
+    }
+
+    private String safeAttachmentFilename(String original) {
+        if (original == null || original.isBlank()) {
+            throw IntegrationException.invalid(
+                    "JIRA_ATTACHMENT_FILENAME_INVALID",
+                    "Each attachment must have a file name"
+            );
+        }
+        String name = original.replace('\\', '/');
+        int slash = name.lastIndexOf('/');
+        if (slash >= 0) {
+            name = name.substring(slash + 1);
+        }
+        name = name.trim();
+        if (name.isBlank() || ".".equals(name) || "..".equals(name)) {
+            throw IntegrationException.invalid(
+                    "JIRA_ATTACHMENT_FILENAME_INVALID",
+                    "Each attachment must have a file name"
+            );
+        }
+        if (name.length() > 255) {
+            name = name.substring(name.length() - 255);
+        }
+        return name;
+    }
+
+    private String attachmentExtension(String filename) {
+        int dot = filename.lastIndexOf('.');
+        if (dot < 0 || dot == filename.length() - 1) {
+            return "";
+        }
+        return filename.substring(dot + 1).toLowerCase(Locale.ROOT);
+    }
+
+    private String evidenceFingerprint(
+            List<com.saga.be.integration.provider.JiraAttachmentUpload> uploads,
+            String url
+    ) {
+        StringBuilder builder = new StringBuilder();
+        for (com.saga.be.integration.provider.JiraAttachmentUpload upload : uploads) {
+            builder.append(upload.filename()).append('|')
+                    .append(upload.content().length).append('|')
+                    .append(java.util.Arrays.hashCode(upload.content()))
+                    .append(';');
+        }
+        builder.append("link=").append(url == null ? "" : url);
+        return builder.toString();
+    }
+
+    private String validatedEvidenceLink(String link) {
+        if (link == null || link.isBlank()) {
+            return null;
+        }
+        String trimmed = link.trim();
+        if (trimmed.length() > MAX_EVIDENCE_LINK_CHARS) {
+            throw IntegrationException.invalid(
+                    "JIRA_LINK_TOO_LONG",
+                    "A submitted link must be 2048 characters or shorter"
+            );
+        }
+        java.net.URI uri;
+        try {
+            uri = java.net.URI.create(trimmed);
+        } catch (IllegalArgumentException exception) {
+            throw IntegrationException.invalid("JIRA_LINK_INVALID", "The submitted link is not a valid URL");
+        }
+        String scheme = uri.getScheme();
+        if (
+            (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme))
+            || uri.getHost() == null
+            || uri.getHost().isBlank()
+        ) {
+            throw IntegrationException.invalid(
+                    "JIRA_LINK_INVALID",
+                    "A submitted link must be an http or https URL"
+            );
+        }
+        return trimmed;
+    }
+
+    private String evidenceLinkTitle(String url) {
+        try {
+            String host = java.net.URI.create(url).getHost();
+            if (host != null && !host.isBlank()) {
+                return host;
+            }
+        } catch (IllegalArgumentException ignored) {
+            // Fall through to the generic title.
+        }
+        return "Evidence link";
+    }
+
+    private void persistWebLink(UUID projectId, UUID taskId, String url, String remoteLinkId) {
+        if (url == null || taskWebLinkRepository == null) {
+            return;
+        }
+        if (taskWebLinkRepository.findByTaskIdAndUrl(taskId, url).isPresent()) {
+            return;
+        }
+        Task task = task(projectId, taskId);
+        taskWebLinkRepository.save(com.saga.be.entity.TaskWebLink.builder()
+                .task(task)
+                .url(url)
+                .title(evidenceLinkTitle(url))
+                .remoteLinkId(remoteLinkId)
+                .build());
+    }
+
+    private com.saga.be.dto.response.JiraTaskAttachmentsResponse attachmentsResponse(UUID taskId) {
+        List<com.saga.be.dto.response.JiraTaskAttachmentsResponse.Item> items = taskAttachmentRepository == null
+                ? List.of()
+                : taskAttachmentRepository.findByTaskId(taskId).stream()
+                        .map(attachment -> new com.saga.be.dto.response.JiraTaskAttachmentsResponse.Item(
+                                attachment.getId(),
+                                attachment.getExternalId(),
+                                attachment.getFilename(),
+                                attachment.getMimeType(),
+                                attachment.getSizeBytes()
+                        ))
+                        .toList();
+        List<com.saga.be.dto.response.JiraTaskAttachmentsResponse.LinkItem> links = taskWebLinkRepository == null
+                ? List.of()
+                : taskWebLinkRepository.findByTaskId(taskId).stream()
+                        .map(webLink -> new com.saga.be.dto.response.JiraTaskAttachmentsResponse.LinkItem(
+                                webLink.getId(),
+                                webLink.getUrl(),
+                                webLink.getRemoteLinkId()
+                        ))
+                        .toList();
+        return new com.saga.be.dto.response.JiraTaskAttachmentsResponse(taskId, items, links);
+    }
+
+    private Map<String, Object> updateFields(
+            Task task,
+            JiraTaskUpdateRequest request,
+            List<JiraCreateField> editMetadata,
+            Set<String> allowed
+    ) {
+        Map<String, Object> fields = new LinkedHashMap<>();
+        if (request.title() != null && !Objects.equals(request.title().trim(), task.getTitle())) {
+            fields.put("summary", requireEditable(allowed, "summary", "title", request.title().trim()));
+        }
+        // Jira canonicalization intentionally flattens ADF; it cannot prove formatting-equivalence.
+        if (request.description() != null) {
+            fields.put("description", requireEditable(allowed, "description", "description", adf(request.description())));
+        }
+        if (request.type() != null && request.type() != task.getType()) {
+            requireSafeIssueTypeHierarchy(task.getType(), request.type());
+            requireEditable(allowed, "issuetype", "type", null);
+            fields.put("issuetype", Map.of("id", resolveUpdateIssueType(request.type(), editMetadata)));
+        }
+        if ((request.priority() != null || request.priorityId() != null)
+                && !samePriority(task, request, editMetadata)) {
+            requireEditable(allowed, "priority",
+                    request.priority() == null ? "priorityId" : "priority", null);
+            fields.put("priority", Map.of("id", resolveUpdatePriority(request, editMetadata)));
+        }
+        if (request.dueDate() != null && (task.getDueDate() == null
+                || !request.dueDate().equals(task.getDueDate().toLocalDate()))) {
+            fields.put("duedate", requireEditable(allowed, "duedate", "dueDate", request.dueDate().toString()));
+        }
+        if (request.labels() != null && !request.labels().equals(task.getLabels())) {
+            fields.put("labels", requireEditable(allowed, "labels", "labels", List.copyOf(request.labels())));
+        }
+        if (request.componentIds() != null && !request.componentIds().equals(task.getComponents().stream()
+                .map(TaskComponentSnapshot::id).toList())) {
+            fields.put("components", requireEditable(allowed, "components", "componentIds",
+                    request.componentIds().stream().map(id -> Map.of("id", id)).toList()));
+        }
+        return fields;
+    }
+
+    private void requireSafeIssueTypeHierarchy(TaskType currentType, TaskType requestedType) {
+        if (currentType == TaskType.SUBTASK || requestedType == TaskType.SUBTASK
+                || currentType == TaskType.EPIC || requestedType == TaskType.EPIC) {
+            log.warn("jira_task_update_edit_metadata operation=TASK_UPDATE stage=HIERARCHY_VALIDATION "
+                    + "fieldKey=issuetype businessField=type "
+                    + "errorCategory=JIRA_EDIT_FIELD_NOT_ALLOWED writeOperationStatus=PENDING");
+            throw IntegrationException.invalid(
+                    "JIRA_EDIT_FIELD_NOT_ALLOWED",
+                    "The Jira issue type hierarchy cannot be changed by this operation");
+        }
+    }
+
+    private String resolveUpdateIssueType(TaskType requestedType, List<JiraCreateField> editMetadata) {
+        JiraCreateField issueTypeField = editMetadata.stream()
+                .filter(field -> "issuetype".equals(field.key()))
+                .findFirst()
+                .orElseThrow(() -> IntegrationException.invalid(
+                        "JIRA_EDIT_FIELD_NOT_ALLOWED",
+                        "The Jira edit metadata does not allow the requested field"));
+        return resolveSpecificCandidate(
+                issueTypeField.allowedValues().stream()
+                        .filter(value -> taskType(value.name()) == requestedType)
+                        .toList(),
+                JiraCreateFieldAllowedValue::id,
+                JiraCreateFieldAllowedValue::name,
+                requestedType.name(),
+                "JIRA_ISSUE_TYPE_RESOLUTION_NOT_FOUND",
+                "JIRA_ISSUE_TYPE_RESOLUTION_AMBIGUOUS",
+                "The Jira issue type could not be resolved uniquely for this task"
+        );
+    }
+
+    private boolean samePriority(Task task, JiraTaskUpdateRequest request, List<JiraCreateField> editMetadata) {
+        if (request.priority() != null) {
+            return request.priority() == task.getPriority();
+        }
+        return editMetadata.stream()
+                .filter(field -> "priority".equals(field.key()))
+                .flatMap(field -> field.allowedValues().stream())
+                .filter(value -> request.priorityId().equals(value.id()) && value.name() != null)
+                .map(JiraCreateFieldAllowedValue::name)
+                .map(this::priority)
+                .anyMatch(resolved -> resolved == task.getPriority());
+    }
+
+    private String resolveUpdatePriority(JiraTaskUpdateRequest request, List<JiraCreateField> editMetadata) {
+        JiraCreateField priorityField = editMetadata.stream()
+                .filter(field -> "priority".equals(field.key()))
+                .findFirst()
+                .orElseThrow(() -> IntegrationException.invalid(
+                        "JIRA_EDIT_FIELD_NOT_ALLOWED",
+                        "The Jira edit metadata does not allow the requested field"));
+        if (request.priorityId() != null) {
+            return allowedPriority(request.priorityId(), priorityField);
+        }
+        return resolveBusinessPriority(
+                priorityField.allowedValues(),
+                request.priority(),
+                "The Jira priority could not be resolved uniquely for this task"
+        );
+    }
+
+    private String allowedPriority(String requestedPriorityId, JiraCreateField priorityField) {
+        boolean allowed = priorityField.allowedValues().stream()
+                .anyMatch(value -> requestedPriorityId.equals(value.id()));
+        if (!allowed) {
+            log.warn("jira_task_update_edit_metadata operation=TASK_UPDATE stage=EDIT_METADATA_VALIDATION "
+                            + "fieldKey=priority businessField=priorityId upstreamHttpStatus=200 "
+                            + "errorCategory=JIRA_PRIORITY_INVALID writeOperationStatus=PENDING");
+            throw IntegrationException.invalid("JIRA_PRIORITY_INVALID",
+                    "The selected Jira priority is not available for this task");
+        }
+        return requestedPriorityId;
+    }
+
+    private void validatePriorityRequest(JiraTaskUpdateRequest request) {
+        if (request.priority() != null && request.priorityId() != null) {
+            throw IntegrationException.invalid(
+                    "JIRA_PRIORITY_INVALID",
+                    "Provide either priority or priorityId"
+            );
+        }
+    }
+
+    private Object requireEditable(Set<String> allowed, String field, String businessField, Object value) {
+        if (!allowed.contains(field)) {
+            log.warn("jira_task_update_edit_metadata operation=TASK_UPDATE stage=EDIT_METADATA_VALIDATION "
+                            + "fieldKey={} businessField={} upstreamHttpStatus=200 "
+                            + "errorCategory=JIRA_EDIT_FIELD_NOT_ALLOWED writeOperationStatus=PENDING",
+                    field, businessField);
+            throw IntegrationException.invalid("JIRA_EDIT_FIELD_NOT_ALLOWED",
+                    "The Jira edit metadata does not allow the requested field");
+        }
+        return value;
+    }
+
+    @FunctionalInterface private interface TaskMutation { void apply(String token, JiraBoard board, Task task); }
+
+    @Transactional
+    public TaskReadResponse create(SagaPrincipal principal, UUID projectId, String idempotencyKey, JiraTaskCreateRequest request) {
+        JiraWriteOperation operation = null;
+        JiraBoard board = null;
+        TaskCreateStage stage = TaskCreateStage.SCOPE_PREFLIGHT;
+        TaskCreateResourceType resourceType = TaskCreateResourceType.PROJECT;
+        TaskCreateResolutionMode resolutionMode = TaskCreateResolutionMode.NOT_APPLICABLE;
+        TaskCreateResolutionResult resolutionResult = TaskCreateResolutionResult.NOT_APPLICABLE;
+        try {
+            Project project = authorization.requireProjectManager(principal, projectId);
+            stage = TaskCreateStage.WRITE_OPERATION_CLAIM;
+            String fingerprint = operationService.fingerprint(fingerprint(request));
+            operation = operationService.claim(project, principal,
+                    JiraWriteOperationType.TASK_CREATE, idempotencyKey, fingerprint);
+            if (operation.getStatus() == JiraWriteOperationStatus.COMPLETED) {
+                stage = TaskCreateStage.LOCAL_UPSERT;
+                resourceType = TaskCreateResourceType.CREATED_ISSUE;
+                return completed(operation, projectId);
+            }
+
+            stage = TaskCreateStage.SCOPE_PREFLIGHT;
+            resourceType = TaskCreateResourceType.PROJECT;
+            board = activeBoard(projectId);
+            String accessToken = credentialService.validAccessToken(board);
+            JiraWriteScope.requireGranted(board);
+            if (operation.getStatus() == JiraWriteOperationStatus.REMOTE_SUCCEEDED) {
+                stage = TaskCreateStage.CANONICAL_ISSUE_FETCH;
+                resourceType = TaskCreateResourceType.CREATED_ISSUE;
+                return reconcile(operation, board, projectId, principal);
+            }
+
+            stage = TaskCreateStage.JIRA_METADATA_ISSUE_TYPES;
+            resourceType = TaskCreateResourceType.ISSUE_TYPE;
+            List<JiraCreateIssueType> issueTypes = jiraClient.getCreateIssueTypes(
+                    accessToken, board.getCloudId(), board.getJiraProjectId());
+            stage = TaskCreateStage.ISSUE_TYPE_RESOLUTION;
+            resolutionMode = request.issueTypeId() == null
+                    ? TaskCreateResolutionMode.AUTO
+                    : TaskCreateResolutionMode.EXPLICIT;
+            resolutionResult = TaskCreateResolutionResult.NOT_APPLICABLE;
+            String issueTypeId = resolveIssueType(issueTypes, request, resolutionMode);
+            resolutionResult = TaskCreateResolutionResult.RESOLVED;
+            stage = TaskCreateStage.JIRA_METADATA_CREATE_FIELDS;
+            List<JiraCreateField> createFields = jiraClient.getCreateFields(
+                    accessToken, board.getCloudId(), board.getJiraProjectId(), issueTypeId);
+            Set<String> allowed = allowedCreateFields(createFields);
+            requireCreateRequiredFields(allowed);
+            requireAllowed(allowed, "description", request.description());
+            stage = TaskCreateStage.PRIORITY_RESOLUTION;
+            resourceType = TaskCreateResourceType.PRIORITY;
+            resolutionMode = request.priorityId() == null
+                    ? TaskCreateResolutionMode.AUTO
+                    : TaskCreateResolutionMode.EXPLICIT;
+            resolutionResult = TaskCreateResolutionResult.NOT_APPLICABLE;
+            String priorityId = resolvePriority(createFields, request, allowed, resolutionMode);
+            resolutionResult = priorityId == null
+                    ? TaskCreateResolutionResult.NOT_APPLICABLE
+                    : TaskCreateResolutionResult.RESOLVED;
+            stage = TaskCreateStage.JIRA_METADATA_CREATE_FIELDS;
+            resourceType = TaskCreateResourceType.PROJECT;
+            requireAllowed(allowed, "duedate", request.dueDate());
+            requireAllowed(allowed, "labels", request.labels());
+            requireAllowed(allowed, "components", request.componentIds());
+            stage = TaskCreateStage.ASSIGNEE_RESOLUTION;
+            resourceType = TaskCreateResourceType.ASSIGNEE;
+            requireAllowed(allowed, "assignee", request.assigneeId());
+            String externalAssignee = request.assigneeId() == null ? null : assignee(request.assigneeId());
+            stage = TaskCreateStage.JIRA_PROVIDER_CREATE_ISSUE;
+            resourceType = TaskCreateResourceType.PROJECT;
+            resolutionMode = TaskCreateResolutionMode.NOT_APPLICABLE;
+            resolutionResult = TaskCreateResolutionResult.NOT_APPLICABLE;
+            JiraIssueReference remote = jiraClient.createIssue(
+                    accessToken, board.getCloudId(), fields(board, request, issueTypeId, priorityId, externalAssignee));
+            operation.setRemoteResourceId(remote.id());
+            operation.setRemoteResourceKey(remote.key());
+            operation.setStatus(JiraWriteOperationStatus.REMOTE_SUCCEEDED);
+            operationService.markRemoteSucceeded(operation.getId(), remote.id(), remote.key());
+        } catch (IntegrationException exception) {
+            if (operation != null && stage.isBeforeRemoteSuccess()) {
+                operationService.failed(operation.getId(), exception.getCode());
+            }
+            logCreateFailure(projectId, stage, resourceType, resolutionMode, resolutionResult(resolutionResult, exception), exception,
+                    operationStatus(operation, stage.isBeforeRemoteSuccess() ? JiraWriteOperationStatus.FAILED : null));
+            throw exception;
+        } catch (RuntimeException exception) {
+            if (operation != null && stage.isBeforeRemoteSuccess()) {
+                operationService.unknown(operation.getId(), "JIRA_WRITE_OUTCOME_UNKNOWN");
+            }
+            logCreateFailure(projectId, stage, resourceType, resolutionMode, resolutionResult, null,
+                    operationStatus(operation, stage.isBeforeRemoteSuccess() ? JiraWriteOperationStatus.UNKNOWN : null));
+            throw exception;
+        }
+        stage = TaskCreateStage.CANONICAL_ISSUE_FETCH;
+        resourceType = TaskCreateResourceType.CREATED_ISSUE;
+        try {
+            return reconcile(operation, board, projectId, principal);
+        } catch (IntegrationException exception) {
+            logCreateFailure(projectId, stage, resourceType, resolutionMode, resolutionResult, exception, operationStatus(operation, null));
+            throw exception;
+        } catch (RuntimeException exception) {
+            logCreateFailure(projectId, stage, resourceType, resolutionMode, resolutionResult, null, operationStatus(operation, null));
+            throw exception;
+        }
+    }
+
+    private TaskReadResponse reconcile(
+            JiraWriteOperation operation,
+            JiraBoard board,
+            UUID projectId,
+            SagaPrincipal actor
+    ) {
+        return reconcile(operation, board, projectId, null, null, null, actor);
+    }
+
+    private TaskReadResponse reconcileSprint(
+            JiraWriteOperation operation,
+            JiraBoard board,
+            UUID projectId,
+            UUID targetSprintId,
+            SagaPrincipal actor
+    ) {
+        if (operation.getRemoteResourceId() == null) throw IntegrationException.conflict(
+                "JIRA_WRITE_OPERATION_IN_PROGRESS", "The Jira write outcome is still being recovered");
+        String token = credentialService.validAccessToken(board);
+        issueUpsertService.upsert(board.getId(), jiraClient.getIssue(token, board.getCloudId(), operation.getRemoteResourceId()));
+        sprintFinalizationService.applyTarget(projectId, operation.getRemoteResourceId(), targetSprintId);
+        TaskReadResponse result = canonicalTaskReadService.findResponse(projectId, operation.getRemoteResourceId())
+                .orElseThrow(() -> IntegrationException.conflict(
+                        "JIRA_WRITE_RECOVERY_REQUIRED", "The Jira write is awaiting local recovery"));
+        UUID confirmedSprintId = result.sprint() == null ? null : result.sprint().id();
+        if (!Objects.equals(targetSprintId, confirmedSprintId)) {
+            throw IntegrationException.conflict("JIRA_WRITE_RECOVERY_REQUIRED", "The Jira write is awaiting local recovery");
+        }
+        operationService.complete(operation.getId());
+        operation.setStatus(JiraWriteOperationStatus.COMPLETED);
+        emitCompleted(operation, NotificationType.TASK_SPRINT_CHANGED, actor);
+        return result;
+    }
+
+    private TaskReadResponse reconcileEstimation(
+            JiraWriteOperation operation,
+            JiraBoard board,
+            UUID projectId,
+            String estimationFieldId,
+            Integer expectedStoryPoint,
+            SagaPrincipal actor
+    ) {
+        return reconcile(operation, board, projectId, estimationFieldId, expectedStoryPoint, null, actor);
+    }
+
+    private TaskReadResponse reconcile(
+            JiraWriteOperation operation,
+            JiraBoard board,
+            UUID projectId,
+            String estimationFieldId,
+            Integer expectedStoryPoint,
+            TaskType expectedTaskType,
+            SagaPrincipal actor
+    ) {
+        if (operation.getRemoteResourceId() == null) throw IntegrationException.conflict(
+                "JIRA_WRITE_OPERATION_IN_PROGRESS", "The Jira write outcome is still being recovered");
+        String token = credentialService.validAccessToken(board);
+        issueUpsertService.upsert(board.getId(), estimationFieldId == null
+                ? jiraClient.getIssue(token, board.getCloudId(), operation.getRemoteResourceId())
+                : jiraClient.getIssue(token, board.getCloudId(), operation.getRemoteResourceId(), estimationFieldId));
+        TaskReadResponse result = canonicalTaskReadService.findResponse(projectId, operation.getRemoteResourceId())
+                .orElseThrow(() -> IntegrationException.conflict(
+                        "JIRA_WRITE_RECOVERY_REQUIRED", "The Jira write is awaiting local recovery"));
+        if (expectedStoryPoint != null && !Objects.equals(expectedStoryPoint, result.storyPoint())) {
+            log.warn("jira_task_estimation_recovery_pending operation=TASK_ESTIMATION "
+                            + "stage=TARGET_VERIFICATION expectedStoryPoint={} observedStoryPoint={} "
+                            + "writeOperationStatus=REMOTE_SUCCEEDED",
+                    expectedStoryPoint, result.storyPoint());
+            throw IntegrationException.conflict(
+                    "JIRA_WRITE_RECOVERY_REQUIRED", "The Jira write is awaiting local recovery");
+        }
+        if (expectedTaskType != null && expectedTaskType != result.type()) {
+            log.warn("jira_task_update_recovery_pending operation=TASK_UPDATE "
+                            + "stage=TARGET_VERIFICATION businessField=type "
+                            + "writeOperationStatus=REMOTE_SUCCEEDED");
+            throw IntegrationException.conflict(
+                    "JIRA_WRITE_RECOVERY_REQUIRED", "The Jira write is awaiting local recovery");
+        }
+        operationService.complete(operation.getId());
+        operation.setStatus(JiraWriteOperationStatus.COMPLETED);
+        emitCompleted(operation, notificationType(operation.getOperationType()), actor);
+        return result;
+    }
+
+    private void emitCompleted(JiraWriteOperation operation, NotificationType type, SagaPrincipal actor) {
+        if (type == null || notificationProducer == null) return;
+        try {
+            notificationProducer.taskCompleted(operation.getId(), type, actor);
+        } catch (RuntimeException exception) {
+            log.warn("notification producer=JIRA_TASK operation={} stage=COMPLETED result=FAILED exceptionClass={}",
+                    operation.getOperationType(), exception.getClass().getSimpleName());
+        }
+    }
+
+    private NotificationType notificationType(JiraWriteOperationType type) {
+        if (type == null) return null;
+        return switch (type) {
+            case TASK_CREATE -> NotificationType.TASK_CREATED;
+            case TASK_UPDATE -> NotificationType.TASK_UPDATED;
+            case TASK_ASSIGN -> NotificationType.TASK_ASSIGNEE_CHANGED;
+            case TASK_SPRINT -> NotificationType.TASK_SPRINT_CHANGED;
+            case TASK_ESTIMATION -> NotificationType.TASK_ESTIMATION_CHANGED;
+            case TASK_TRANSITION -> NotificationType.TASK_STATUS_CHANGED;
+            default -> null;
+        };
+    }
+
+    private TaskReadResponse completed(JiraWriteOperation operation, UUID projectId) {
+        return taskRepository.findByProjectIdAndExternalId(projectId, operation.getRemoteResourceId())
+                .map(TaskReadResponse::from).orElseThrow(() -> IntegrationException.conflict(
+                        "JIRA_WRITE_RECOVERY_REQUIRED", "The Jira write is awaiting local recovery"));
+    }
+
+    private JiraBoard activeBoard(UUID projectId) {
+        JiraBoard board = boardRepository.findByProjectId(projectId).orElseThrow(() -> IntegrationException.conflict(
+                "JIRA_LINK_NOT_FOUND", "The project has no Jira connection"));
+        if (board.getConnectionStatus() != IntegrationStatus.ACTIVE) throw IntegrationException.conflict(
+                "JIRA_INTEGRATION_NOT_ACTIVE", "The Jira integration is not active");
+        return board;
+    }
+
+    private String resolveIssueType(
+            List<JiraCreateIssueType> issueTypes,
+            JiraTaskCreateRequest request,
+            TaskCreateResolutionMode resolutionMode
+    ) {
+        if (resolutionMode == TaskCreateResolutionMode.EXPLICIT) {
+            return issueTypes.stream()
+                    .filter(issueType -> issueType.id().equals(request.issueTypeId()))
+                    .map(JiraCreateIssueType::id)
+                    .findFirst()
+                    .orElseThrow(() -> IntegrationException.invalid(
+                            "JIRA_ISSUE_TYPE_INVALID", "The Jira issue type is not available for this project"));
+        }
+        if (request.type() == null) {
+            throw IntegrationException.invalid(
+                    "JIRA_TASK_TYPE_REQUIRED", "A business task type is required when no Jira issue type override is supplied");
+        }
+        return resolveSpecificCandidate(
+                issueTypes.stream().filter(issueType -> taskType(issueType.name()) == request.type()).toList(),
+                JiraCreateIssueType::id,
+                JiraCreateIssueType::name,
+                request.type().name(),
+                "JIRA_ISSUE_TYPE_RESOLUTION_NOT_FOUND",
+                "JIRA_ISSUE_TYPE_RESOLUTION_AMBIGUOUS",
+                "The Jira issue type could not be resolved uniquely for this project"
+        );
+    }
+
+    private Set<String> allowedCreateFields(List<JiraCreateField> fields) {
+        return fields.stream().map(JiraCreateField::key).collect(java.util.stream.Collectors.toSet());
+    }
+
+    private void requireCreateRequiredFields(Set<String> allowed) {
+        if (!allowed.contains("summary") || !allowed.contains("issuetype"))
+            throw IntegrationException.conflict("JIRA_CREATE_METADATA_INVALID", "Jira create metadata does not permit required issue fields");
+    }
+
+    private void requireAllowed(Set<String> allowed, String field, Object value) {
+        if (value != null && !allowed.contains(field)) {
+            throw IntegrationException.invalid(
+                    "JIRA_CREATE_FIELD_NOT_ALLOWED",
+                    "The Jira create metadata does not allow the requested field"
+            );
+        }
+    }
+
+    private String resolvePriority(
+            List<JiraCreateField> createFields,
+            JiraTaskCreateRequest request,
+            Set<String> allowed,
+            TaskCreateResolutionMode resolutionMode
+    ) {
+        if (request.priorityId() == null && request.priority() == null) return null;
+        requireAllowed(allowed, "priority", request.priorityId() != null ? request.priorityId() : request.priority());
+        JiraCreateField priority = createFields.stream()
+                .filter(field -> "priority".equals(field.key()))
+                .findFirst()
+                .orElseThrow(() -> IntegrationException.invalid(
+                        "JIRA_CREATE_FIELD_NOT_ALLOWED", "The Jira create metadata does not allow the requested field"));
+        if (resolutionMode == TaskCreateResolutionMode.EXPLICIT) {
+            return priority.allowedValues().stream()
+                    .filter(value -> request.priorityId().equals(value.id()))
+                    .map(JiraCreateFieldAllowedValue::id)
+                    .findFirst()
+                    .orElseThrow(() -> IntegrationException.invalid(
+                            "JIRA_PRIORITY_INVALID", "The Jira priority is not available for this project"));
+        }
+        if (request.priority() == null) return null;
+        return resolveBusinessPriority(
+                priority.allowedValues(),
+                request.priority(),
+                "The Jira priority could not be resolved uniquely for this project"
+        );
+    }
+
+    private String resolveBusinessPriority(
+            List<JiraCreateFieldAllowedValue> allowedValues,
+            Priority requestedPriority,
+            String message
+    ) {
+        return resolveSpecificCandidate(
+                allowedValues.stream()
+                        .filter(value -> priority(value.name()) == requestedPriority)
+                        .toList(),
+                JiraCreateFieldAllowedValue::id,
+                JiraCreateFieldAllowedValue::name,
+                requestedPriority.name(),
+                "JIRA_PRIORITY_RESOLUTION_NOT_FOUND",
+                "JIRA_PRIORITY_RESOLUTION_AMBIGUOUS",
+                message
+        );
+    }
+
+    /**
+     * Provider IDs are deduplicated before selection. An exact canonical provider
+     * name is more specific than a broad business-semantic fallback, but any
+     * remaining choice between distinct provider IDs still fails closed.
+     */
+    private <T> String resolveSpecificCandidate(
+            List<T> semanticCandidates,
+            Function<T, String> providerId,
+            Function<T, String> providerName,
+            String requestedName,
+            String notFoundCode,
+            String ambiguousCode,
+            String message
+    ) {
+        List<String> exactProviderIds = semanticCandidates.stream()
+                .filter(candidate -> normalize(providerName.apply(candidate)).equals(requestedName))
+                .map(providerId)
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .toList();
+        if (exactProviderIds.size() == 1) {
+            return exactProviderIds.get(0);
+        }
+        if (exactProviderIds.size() > 1) {
+            throw IntegrationException.conflict(ambiguousCode, message);
+        }
+        return exactlyOne(
+                semanticCandidates.stream().map(providerId).toList(),
+                notFoundCode,
+                ambiguousCode,
+                message
+        );
+    }
+
+    private String exactlyOne(List<String> candidates, String notFoundCode, String ambiguousCode, String message) {
+        List<String> distinctProviderIds = candidates.stream()
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .toList();
+        if (distinctProviderIds.size() == 1) return distinctProviderIds.get(0);
+        if (distinctProviderIds.isEmpty()) throw IntegrationException.conflict(notFoundCode, message);
+        throw IntegrationException.conflict(ambiguousCode, message);
+    }
+
+    private TaskType taskType(String value) {
+        return switch (normalize(value)) {
+            case "BUG" -> TaskType.BUG;
+            case "FEATURE", "NEW_FEATURE" -> TaskType.FEATURE;
+            case "REQUEST" -> TaskType.REQUEST;
+            case "STORY", "USER_STORY" -> TaskType.STORY;
+            case "EPIC" -> TaskType.EPIC;
+            case "SUBTASK", "SUB_TASK" -> TaskType.SUBTASK;
+            default -> TaskType.TASK;
+        };
+    }
+
+    private Priority priority(String value) {
+        String normalized = normalize(value);
+        if (normalized.contains("HIGHEST") || normalized.contains("CRITICAL")) return Priority.CRITICAL;
+        if (normalized.contains("HIGH")) return Priority.HIGH;
+        if (normalized.contains("LOW")) return Priority.LOW;
+        return Priority.MEDIUM;
+    }
+
+    private String normalize(String value) {
+        return value == null ? "" : value.trim().toUpperCase(Locale.ROOT).replaceAll("[^A-Z0-9]+", "_");
+    }
+
+    private Map<String, Object> fields(
+            JiraBoard board,
+            JiraTaskCreateRequest request,
+            String issueTypeId,
+            String priorityId,
+            String externalAssignee
+    ) {
+        Map<String, Object> fields = new LinkedHashMap<>();
+        fields.put("project", Map.of("id", board.getJiraProjectId()));
+        fields.put("summary", request.title().trim());
+        fields.put("issuetype", Map.of("id", issueTypeId));
+        if (request.description() != null) fields.put("description", adf(request.description()));
+        if (priorityId != null) fields.put("priority", Map.of("id", priorityId));
+        if (request.dueDate() != null) fields.put("duedate", request.dueDate().format(DateTimeFormatter.ISO_LOCAL_DATE));
+        if (request.labels() != null) fields.put("labels", List.copyOf(request.labels()));
+        if (request.componentIds() != null) fields.put("components", request.componentIds().stream().map(id -> Map.of("id", id)).toList());
+        if (externalAssignee != null) fields.put("assignee", Map.of("accountId", externalAssignee));
+        return fields;
+    }
+
+    private void logCreateFailure(
+            UUID projectId,
+            TaskCreateStage stage,
+            TaskCreateResourceType resourceType,
+            TaskCreateResolutionMode resolutionMode,
+            TaskCreateResolutionResult resolutionResult,
+            IntegrationException exception,
+            String writeOperationStatus
+    ) {
+        log.warn("Jira task create failed: projectId={}, operation=TASK_CREATE, stage={}, resourceType={}, "
+                        + "resolutionMode={}, resolutionResult={}, upstreamHttpStatus={}, errorCategory={}, writeOperationStatus={}",
+                projectId,
+                stage,
+                resourceType,
+                resolutionMode,
+                resolutionResult,
+                upstreamHttpStatus(exception),
+                exception == null ? "JIRA_WRITE_OUTCOME_UNKNOWN" : exception.getCode(),
+                writeOperationStatus);
+    }
+
+    private String upstreamHttpStatus(IntegrationException exception) {
+        if (exception == null) return "UNKNOWN";
+        return switch (exception.getCode()) {
+            case "JIRA_REQUEST_REJECTED" -> "400";
+            case "JIRA_ACCESS_REVOKED" -> "401";
+            case "JIRA_ACCESS_FORBIDDEN" -> "403";
+            case "JIRA_RESOURCE_NOT_FOUND" -> "404";
+            case "JIRA_RATE_LIMITED" -> "429";
+            default -> "NONE";
+        };
+    }
+
+    private TaskCreateResolutionResult resolutionResult(
+            TaskCreateResolutionResult current,
+            IntegrationException exception
+    ) {
+        if (exception == null) return current;
+        return switch (exception.getCode()) {
+            case "JIRA_ISSUE_TYPE_INVALID", "JIRA_PRIORITY_INVALID", "JIRA_TASK_TYPE_REQUIRED" ->
+                    TaskCreateResolutionResult.INVALID;
+            case "JIRA_ISSUE_TYPE_RESOLUTION_NOT_FOUND", "JIRA_PRIORITY_RESOLUTION_NOT_FOUND" ->
+                    TaskCreateResolutionResult.NOT_FOUND;
+            case "JIRA_ISSUE_TYPE_RESOLUTION_AMBIGUOUS", "JIRA_PRIORITY_RESOLUTION_AMBIGUOUS" ->
+                    TaskCreateResolutionResult.AMBIGUOUS;
+            default -> current;
+        };
+    }
+
+    private String operationStatus(JiraWriteOperation operation, JiraWriteOperationStatus replacement) {
+        if (replacement != null) return replacement.name();
+        return operation == null ? "NOT_CLAIMED" : operation.getStatus().name();
+    }
+
+    private enum TaskCreateStage {
+        SCOPE_PREFLIGHT,
+        WRITE_OPERATION_CLAIM,
+        JIRA_METADATA_ISSUE_TYPES,
+        JIRA_METADATA_CREATE_FIELDS,
+        ISSUE_TYPE_RESOLUTION,
+        PRIORITY_RESOLUTION,
+        ASSIGNEE_RESOLUTION,
+        JIRA_PROVIDER_CREATE_ISSUE,
+        CANONICAL_ISSUE_FETCH,
+        LOCAL_UPSERT;
+
+        private boolean isBeforeRemoteSuccess() {
+            return this != SCOPE_PREFLIGHT
+                    && this != WRITE_OPERATION_CLAIM
+                    && this != CANONICAL_ISSUE_FETCH
+                    && this != LOCAL_UPSERT;
+        }
+    }
+
+    private enum TaskCreateResourceType {
+        ISSUE_TYPE,
+        PRIORITY,
+        ASSIGNEE,
+        PROJECT,
+        CREATED_ISSUE
+    }
+
+    private enum TaskCreateResolutionMode {
+        AUTO,
+        EXPLICIT,
+        NOT_APPLICABLE
+    }
+
+    private enum TaskCreateResolutionResult {
+        RESOLVED,
+        NOT_FOUND,
+        AMBIGUOUS,
+        INVALID,
+        NOT_APPLICABLE
+    }
+
+    private String assignee(UUID studentId) {
+        IdentityMap mapping = identityMapRepository.findByStudentIdAndProvider(studentId, IntegrationProvider.JIRA)
+                .filter(value -> value.getMappingStatus() == IdentityMappingStatus.ACTIVE).orElseThrow(() ->
+                        IntegrationException.conflict("JIRA_IDENTITY_MAPPING_MISSING", "The assignee has no active Jira identity mapping"));
+        return mapping.getExternalAccountId();
+    }
+
+    private Map<String, Object> adf(String value) {
+        return Map.of("type", "doc", "version", 1, "content", List.of(Map.of("type", "paragraph",
+                "content", List.of(Map.of("type", "text", "text", value)))));
+    }
+
+    private String fingerprint(JiraTaskCreateRequest request) {
+        return String.join("|", request.title(), String.valueOf(request.type()), String.valueOf(request.issueTypeId()),
+                String.valueOf(request.priority()), String.valueOf(request.description()), String.valueOf(request.priorityId()), String.valueOf(request.dueDate()), String.valueOf(request.labels()),
+                String.valueOf(request.componentIds()), String.valueOf(request.assigneeId()));
+    }
+
+    static String updateFingerprint(JiraTaskUpdateRequest request) {
+        return String.join("|", String.valueOf(request.title()), String.valueOf(request.description()),
+                String.valueOf(request.type()), String.valueOf(request.priority()), String.valueOf(request.priorityId()), String.valueOf(request.dueDate()),
+                String.valueOf(request.labels()), String.valueOf(request.componentIds()));
+    }
+}

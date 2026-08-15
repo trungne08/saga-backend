@@ -55,6 +55,17 @@ public class OAuthStateService {
         Map<String, StateBinding> bindings = stateBindings(session);
         bindings.entrySet().removeIf(
                 entry -> !entry.getValue().expiresAt().isAfter(clock.instant())
+                        || (entry.getValue().flow() == flow
+                        && java.util.Objects.equals(
+                                entry.getValue().targetId(), targetId
+                        )
+                        && entry.getValue().cognitoSub().equals(
+                                principal.cognitoSub()
+                        )
+                        && java.util.Objects.equals(
+                                entry.getValue().localProfileId(),
+                                principal.localProfileId()
+                        ))
         );
         bindings.put(stateHash, new StateBinding(
                 principal.cognitoSub(),

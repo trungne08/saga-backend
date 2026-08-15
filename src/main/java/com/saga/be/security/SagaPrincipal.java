@@ -12,8 +12,20 @@ public record SagaPrincipal(
         String fullName,
         ApplicationRole applicationRole,
         UUID localProfileId,
-        AccountStatus accountStatus
+        AccountStatus accountStatus,
+        String avatarUrl
 ) implements Principal, Serializable {
+
+    public SagaPrincipal(
+            String cognitoSub,
+            String email,
+            String fullName,
+            ApplicationRole applicationRole,
+            UUID localProfileId,
+            AccountStatus accountStatus
+    ) {
+        this(cognitoSub, email, fullName, applicationRole, localProfileId, accountStatus, null);
+    }
 
     public static SagaPrincipal from(AuthenticatedProfile profile) {
         return new SagaPrincipal(
@@ -22,7 +34,8 @@ public record SagaPrincipal(
                 profile.fullName(),
                 profile.role(),
                 profile.localProfileId(),
-                profile.accountStatus()
+                profile.accountStatus(),
+                profile.avatarUrl()
         );
     }
 

@@ -1,0 +1,166 @@
+units:
+  - name: auth-controller
+    source_loc: src/main/java/com/saga/be/controller/AuthController.java:1
+    exported_signature:
+      http:
+        - GET /api/auth/login
+        - GET /api/auth/me
+        - GET /api/auth/csrf
+    depends_on:
+      - com.saga.be.service.AuthenticatedProfileService
+      - com.saga.be.security.CognitoAuthenticationSuccessHandler
+    dynamic_entrypoints: []
+    shared_refs: []
+
+  - name: personal-integration-controller
+    source_loc: src/main/java/com/saga/be/controller/PersonalIntegrationController.java:1
+    exported_signature:
+      http:
+        - GET /api/me/integrations
+        - GET /api/me/integrations/jira/connect
+        - DELETE /api/me/integrations/jira
+        - GET /api/me/integrations/github/connect
+        - GET /api/me/integrations/github/callback
+        - DELETE /api/me/integrations/github
+    depends_on:
+      - com.saga.be.integration.identity.PersonalIntegrationService
+      - com.saga.be.integration.identity.IdentityMappingService
+    dynamic_entrypoints: []
+    shared_refs: []
+
+  - name: project-integration-controller
+    source_loc: src/main/java/com/saga/be/controller/ProjectIntegrationController.java:1
+    exported_signature:
+      http:
+        - GET /api/projects/{projectId}/integrations
+        - GET /api/projects/{projectId}/jira/connect
+        - POST /api/projects/{projectId}/jira/link
+        - DELETE /api/projects/{projectId}/jira
+        - GET /api/projects/{projectId}/github/install
+        - GET /api/projects/{projectId}/github/setup
+        - GET /api/projects/{projectId}/github/callback
+        - POST /api/projects/{projectId}/github/repositories
+        - DELETE /api/projects/{projectId}/github/repositories/{repositoryId}
+        - GET /api/projects/{projectId}/sync-status
+    depends_on:
+      - com.saga.be.integration.project.ProjectIntegrationService
+      - com.saga.be.integration.sync.AutomaticSyncDispatcher
+    dynamic_entrypoints: []
+    shared_refs: []
+
+  - name: webhook-controller
+    source_loc: src/main/java/com/saga/be/controller/WebhookController.java:1
+    exported_signature:
+      http:
+        - POST /api/webhooks/github
+        - POST /api/webhooks/jira
+    depends_on:
+      - com.saga.be.integration.webhook.WebhookIngestionService
+      - com.saga.be.integration.webhook.GitHubWebhookSignatureVerifier
+      - com.saga.be.integration.webhook.JiraWebhookAuthenticator
+    dynamic_entrypoints: []
+    shared_refs: []
+
+  - name: jira-callback-controller
+    source_loc: src/main/java/com/saga/be/controller/JiraIntegrationCallbackController.java:1
+    exported_signature:
+      http:
+        - GET /api/integrations/jira/callback
+    depends_on:
+      - com.saga.be.integration.callback.JiraOAuthCallbackService
+      - com.saga.be.integration.project.ProjectIntegrationService
+    dynamic_entrypoints: []
+    shared_refs: []
+
+  - name: project-integration-callback-controller
+    source_loc: src/main/java/com/saga/be/controller/ProjectIntegrationCallbackController.java:1
+    exported_signature:
+      http:
+        - GET /api/integrations/github/setup
+        - GET /api/integrations/github/project/callback
+    depends_on:
+      - com.saga.be.integration.project.ProjectIntegrationService
+      - com.saga.be.integration.security.OAuthStateService
+    dynamic_entrypoints: []
+    shared_refs: []
+
+  - name: identity-mapping-review-controller
+    source_loc: src/main/java/com/saga/be/controller/IdentityMappingReviewController.java:1
+    exported_signature:
+      http:
+        - GET /api/integrations/identity-mappings
+        - POST /api/integrations/identity-mappings/{mappingId}/review
+    depends_on:
+      - com.saga.be.integration.identity.IdentityMappingReviewService
+    dynamic_entrypoints: []
+    shared_refs: []
+
+  - name: team-roster-controller
+    source_loc: src/main/java/com/saga/be/controller/TeamRosterController.java:1
+    exported_signature:
+      http:
+        - GET /api/v1/courses/{courseId}/teams/{teamId}/members
+    depends_on:
+      - com.saga.be.service.TeamRosterService
+    dynamic_entrypoints: []
+    shared_refs: []
+
+  - name: team-project-controller
+    source_loc: src/main/java/com/saga/be/controller/TeamProjectController.java:1
+    exported_signature:
+      http:
+        - POST /api/teams/{teamId}/projects
+    depends_on:
+      - com.saga.be.integration.project.TeamProjectService
+    dynamic_entrypoints: []
+    shared_refs: []
+
+  - name: course-controller
+    source_loc: src/main/java/com/saga/be/controller/CourseController.java:1
+    exported_signature:
+      http:
+        - GET /api/v1/courses
+        - GET /api/v1/courses/{id}
+        - POST /api/v1/courses
+        - POST /api/v1/courses/{courseId}/import-students
+    depends_on:
+      - com.saga.be.service.CourseService
+      - com.saga.be.service.ExcelImportService
+    dynamic_entrypoints: []
+    shared_refs: []
+
+  - name: semester-controller
+    source_loc: src/main/java/com/saga/be/controller/SemesterController.java:1
+    exported_signature:
+      http:
+        - GET /api/v1/semesters
+        - GET /api/v1/semesters/{id}
+        - POST /api/v1/semesters
+    depends_on:
+      - com.saga.be.service.SemesterService
+    dynamic_entrypoints: []
+    shared_refs: []
+
+  - name: class-controller
+    source_loc: src/main/java/com/saga/be/controller/ClassController.java:1
+    exported_signature:
+      http:
+        - GET /api/v1/classes
+        - GET /api/v1/classes/{id}
+        - POST /api/v1/classes
+    depends_on:
+      - com.saga.be.service.ClassService
+    dynamic_entrypoints: []
+    shared_refs: []
+
+  - name: subject-controller
+    source_loc: src/main/java/com/saga/be/controller/SubjectController.java:1
+    exported_signature:
+      http:
+        - GET /api/v1/subjects
+        - GET /api/v1/subjects/{id}
+        - POST /api/v1/subjects
+    depends_on:
+      - com.saga.be.service.SubjectService
+    dynamic_entrypoints: []
+    shared_refs: []

@@ -1,8 +1,11 @@
 package com.saga.be.integration.security;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -99,6 +102,76 @@ class ProjectIntegrationAuthorizationServiceTest {
     }
 
     @Test
+    void ordinaryTeamMemberMayAttachToProjectTasks() {
+        UUID projectId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
+        UUID studentId = UUID.randomUUID();
+        Project project = project(projectId);
+        Team team = team(teamId, project, null);
+        when(projectRepository.findById(projectId))
+                .thenReturn(Optional.of(project));
+        when(teamRepository.findByProjectId(projectId))
+                .thenReturn(Optional.of(team));
+        when(memberRepository.existsByTeamIdAndStudentId(teamId, studentId)).thenReturn(true);
+
+        assertSame(
+                project,
+                service.requireProjectContributor(
+                        principal(ApplicationRole.STUDENT, studentId),
+                        projectId
+                )
+        );
+        verify(memberRepository).existsByTeamIdAndStudentId(teamId, studentId);
+    }
+
+    @Test
+    void assignedCourseLecturerMayNotAttachEvidence() {
+        UUID projectId = UUID.randomUUID();
+        UUID lecturerId = UUID.randomUUID();
+        Project project = project(projectId);
+        Lecturer lecturer = Lecturer.builder().fullName("Lecturer").build();
+        lecturer.setId(lecturerId);
+        Course course = Course.builder().instructor(lecturer).build();
+        Team team = team(UUID.randomUUID(), project, course);
+        when(projectRepository.findById(projectId)).thenReturn(Optional.of(project));
+        when(teamRepository.findByProjectId(projectId)).thenReturn(Optional.of(team));
+
+        IntegrationException exception = assertThrows(
+                IntegrationException.class,
+                () -> service.requireProjectContributor(
+                        principal(ApplicationRole.LECTURER, lecturerId),
+                        projectId
+                )
+        );
+        assertEquals("Only a student member of the owning team may attach evidence to this task", exception.getMessage());
+    }
+
+    @Test
+    void adminMayNotAttachEvidence() {
+        UUID projectId = UUID.randomUUID();
+        Project project = project(projectId);
+        Team team = team(UUID.randomUUID(), project, null);
+        when(projectRepository.findById(projectId)).thenReturn(Optional.of(project));
+        when(teamRepository.findByProjectId(projectId)).thenReturn(Optional.of(team));
+
+        assertThrows(
+                IntegrationException.class,
+                () -> service.requireProjectContributor(
+                        principal(ApplicationRole.ADMIN, UUID.randomUUID()),
+                        projectId
+                )
+        );
+        verify(auditService, never()).recordRequiredIntegrationEvent(
+                any(SagaPrincipal.class),
+                any(),
+                any(),
+                any(),
+                any(),
+                any()
+        );
+    }
+
+    @Test
     void assignedCourseLecturerMayReviewAndRepair() {
         UUID projectId = UUID.randomUUID();
         UUID lecturerId = UUID.randomUUID();
@@ -168,7 +241,7 @@ class ProjectIntegrationAuthorizationServiceTest {
                 )
         );
         verify(auditService).recordRequiredIntegrationEvent(
-                admin.cognitoSub(),
+                admin,
                 "PROJECT_INTEGRATION_ADMIN_OVERRIDE",
                 "TEAM",
                 team.getId(),

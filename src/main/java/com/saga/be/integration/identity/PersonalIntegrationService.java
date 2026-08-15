@@ -3,6 +3,7 @@ package com.saga.be.integration.identity;
 import com.saga.be.config.GitHubIntegrationProperties;
 import com.saga.be.config.JiraIntegrationProperties;
 import com.saga.be.dto.response.IdentityConnectionResponse;
+import com.saga.be.dto.response.IntegrationCallbackResultResponse;
 import com.saga.be.dto.response.PersonalIntegrationsResponse;
 import com.saga.be.entity.IdentityMap;
 import com.saga.be.entity.enums.IntegrationProvider;
@@ -18,6 +19,7 @@ import com.saga.be.integration.security.OAuthFlow;
 import com.saga.be.integration.security.OAuthStateService;
 import com.saga.be.security.SagaPrincipal;
 import com.saga.be.service.AuthenticationAuditService;
+import com.saga.be.service.PersonalIntegrationNotificationProducer;
 import jakarta.servlet.http.HttpSession;
 import java.net.URI;
 import java.util.List;
@@ -34,6 +36,7 @@ public class PersonalIntegrationService {
     private final GitHubIntegrationProperties gitHubProperties;
     private final IntegrationAttemptLimiter attemptLimiter;
     private final AuthenticationAuditService auditService;
+    private final PersonalIntegrationNotificationProducer notificationProducer;
 
     public PersonalIntegrationService(
             IdentityMappingService identityMappingService,
@@ -43,7 +46,8 @@ public class PersonalIntegrationService {
             JiraIntegrationProperties jiraProperties,
             GitHubIntegrationProperties gitHubProperties,
             IntegrationAttemptLimiter attemptLimiter,
-            AuthenticationAuditService auditService
+            AuthenticationAuditService auditService,
+            PersonalIntegrationNotificationProducer notificationProducer
     ) {
         this.identityMappingService = identityMappingService;
         this.stateService = stateService;
@@ -53,6 +57,7 @@ public class PersonalIntegrationService {
         this.gitHubProperties = gitHubProperties;
         this.attemptLimiter = attemptLimiter;
         this.auditService = auditService;
+        this.notificationProducer = notificationProducer;
     }
 
     public PersonalIntegrationsResponse connections(SagaPrincipal principal) {
@@ -109,13 +114,14 @@ public class PersonalIntegrationService {
                 user.email()
         );
         auditService.recordIntegrationEvent(
-                principal.cognitoSub(),
+                principal,
                 "PERSONAL_IDENTITY_CONNECTED",
                 "JIRA_IDENTITY",
                 mapping.getId(),
                 "SUCCESS",
                 remoteAddress
         );
+        notificationProducer.jiraLinked(principal, mapping.getId());
         return IdentityConnectionResponse.from(mapping);
     }
 
@@ -152,6 +158,59 @@ public class PersonalIntegrationService {
                 null,
                 state
         );
+        return finishGitHubAfterState(
+                principal,
+                session,
+                code,
+                oauthError,
+                remoteAddress
+        );
+    }
+
+    public IntegrationCallbackResultResponse finishGitHubCallback(
+            SagaPrincipal principal,
+            HttpSession session,
+            String state,
+            String code,
+            String oauthError,
+            String remoteAddress
+    ) {
+        limit(principal, "personal-github-callback");
+        stateService.consume(
+                session,
+                principal,
+                OAuthFlow.PERSONAL_GITHUB,
+                null,
+                state
+        );
+        try {
+            return IntegrationCallbackResultResponse.personalSuccess(
+                    finishGitHubAfterState(
+                            principal,
+                            session,
+                            code,
+                            oauthError,
+                            remoteAddress
+                    )
+            );
+        } catch (IntegrationException exception) {
+            return IntegrationCallbackResultResponse.failure(
+                    IntegrationProvider.GITHUB,
+                    com.saga.be.dto.response.IntegrationCallbackFlow.PERSONAL,
+                    null,
+                    exception.getCode(),
+                    exception.getMessage()
+            );
+        }
+    }
+
+    private IdentityConnectionResponse finishGitHubAfterState(
+            SagaPrincipal principal,
+            HttpSession session,
+            String code,
+            String oauthError,
+            String remoteAddress
+    ) {
         requireConsent(code, oauthError);
 
         String userToken = gitHubClient.exchangeUserCode(
@@ -167,13 +226,14 @@ public class PersonalIntegrationService {
                 user.email()
         );
         auditService.recordIntegrationEvent(
-                principal.cognitoSub(),
+                principal,
                 "PERSONAL_IDENTITY_CONNECTED",
                 "GITHUB_IDENTITY",
                 mapping.getId(),
                 "SUCCESS",
                 remoteAddress
         );
+        notificationProducer.gitHubLinked(principal, mapping.getId());
         return IdentityConnectionResponse.from(mapping);
     }
 
@@ -184,7 +244,7 @@ public class PersonalIntegrationService {
     ) {
         identityMappingService.disconnectOwn(principal, provider);
         auditService.recordIntegrationEvent(
-                principal.cognitoSub(),
+                principal,
                 "PERSONAL_IDENTITY_DISCONNECTED",
                 provider.name() + "_IDENTITY",
                 principal.localProfileId(),

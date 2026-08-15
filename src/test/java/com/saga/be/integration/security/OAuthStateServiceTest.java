@@ -79,6 +79,28 @@ class OAuthStateServiceTest {
     }
 
     @Test
+    void aNewProjectJiraAuthorizationInvalidatesTheOlderCallbackState() {
+        OAuthStateService service = serviceAt(NOW);
+        MockHttpSession session = new MockHttpSession();
+        SagaPrincipal principal = student(UUID.randomUUID(), "student-sub");
+        UUID projectId = UUID.randomUUID();
+        String older = service.issue(
+                session, principal, OAuthFlow.PROJECT_JIRA, projectId
+        );
+        String current = service.issue(
+                session, principal, OAuthFlow.PROJECT_JIRA, projectId
+        );
+
+        assertThrows(IntegrationException.class, () -> service.consume(
+                session, principal, OAuthFlow.PROJECT_JIRA, projectId, older
+        ));
+        OAuthStateService.StateBinding binding = service.consume(
+                session, principal, OAuthFlow.PROJECT_JIRA, projectId, current
+        );
+        assertEquals(projectId, binding.targetId());
+    }
+
+    @Test
     void stateCannotBeUsedByAnotherAuthenticatedStudent() {
         OAuthStateService service = serviceAt(NOW);
         MockHttpSession session = new MockHttpSession();

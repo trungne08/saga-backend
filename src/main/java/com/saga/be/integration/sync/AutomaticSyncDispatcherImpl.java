@@ -21,18 +21,25 @@ import com.saga.be.integration.provider.GitHubReviewSnapshot;
 import com.saga.be.integration.provider.JiraIssuePage;
 import com.saga.be.integration.provider.JiraIssueSnapshot;
 import com.saga.be.integration.provider.JiraProviderClient;
+import com.saga.be.integration.provider.JiraSprintSnapshot;
 import com.saga.be.repository.GitRepoRepository;
 import com.saga.be.repository.JiraBoardRepository;
 import com.saga.be.repository.SyncJobLogRepository;
+import com.saga.be.repository.SprintRepository;
 import java.time.Duration;
+import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
@@ -53,15 +60,21 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
     private final JiraProviderClient jiraClient;
     private final GitHubProviderClient gitHubClient;
     private final JiraIssueUpsertService jiraUpsertService;
+    private final JiraSprintUpsertService jiraSprintUpsertService;
+    private final SprintRepository sprintRepository;
     private final GitHubDataUpsertService gitHubUpsertService;
     private final GitHubInitialBackfillJobService initialBackfillJobService;
+    private final GitHubSyncJobService gitHubSyncJobService;
+    private final GitRepoStateService gitRepoStateService;
     private final JiraSyncJobService jiraSyncJobService;
     private final SyncJobFinalizationService syncJobFinalizationService;
     private final JiraBoardStateService jiraBoardStateService;
     private final IntegrationAvailability availability;
     private final Duration overlapWindow;
     private final ZoneId jiraZoneId;
+    private final Clock clock;
 
+    @Autowired
     public AutomaticSyncDispatcherImpl(
             JiraBoardRepository jiraBoardRepository,
             GitRepoRepository gitRepoRepository,
@@ -70,14 +83,64 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
             JiraProviderClient jiraClient,
             GitHubProviderClient gitHubClient,
             JiraIssueUpsertService jiraUpsertService,
+            JiraSprintUpsertService jiraSprintUpsertService,
+            SprintRepository sprintRepository,
             GitHubDataUpsertService gitHubUpsertService,
             GitHubInitialBackfillJobService initialBackfillJobService,
+            GitHubSyncJobService gitHubSyncJobService,
+            GitRepoStateService gitRepoStateService,
             JiraSyncJobService jiraSyncJobService,
             SyncJobFinalizationService syncJobFinalizationService,
             JiraBoardStateService jiraBoardStateService,
             IntegrationAvailability availability,
             IntegrationProperties properties,
             JiraTimeZoneProperties jiraTimeZoneProperties
+    ) {
+        this(
+                jiraBoardRepository,
+                gitRepoRepository,
+                jobRepository,
+                jiraCredentialService,
+                jiraClient,
+                gitHubClient,
+                jiraUpsertService,
+                jiraSprintUpsertService,
+                sprintRepository,
+                gitHubUpsertService,
+                initialBackfillJobService,
+                gitHubSyncJobService,
+                gitRepoStateService,
+                jiraSyncJobService,
+                syncJobFinalizationService,
+                jiraBoardStateService,
+                availability,
+                properties,
+                jiraTimeZoneProperties,
+                Clock.systemUTC()
+        );
+    }
+
+    AutomaticSyncDispatcherImpl(
+            JiraBoardRepository jiraBoardRepository,
+            GitRepoRepository gitRepoRepository,
+            SyncJobLogRepository jobRepository,
+            JiraCredentialService jiraCredentialService,
+            JiraProviderClient jiraClient,
+            GitHubProviderClient gitHubClient,
+            JiraIssueUpsertService jiraUpsertService,
+            JiraSprintUpsertService jiraSprintUpsertService,
+            SprintRepository sprintRepository,
+            GitHubDataUpsertService gitHubUpsertService,
+            GitHubInitialBackfillJobService initialBackfillJobService,
+            GitHubSyncJobService gitHubSyncJobService,
+            GitRepoStateService gitRepoStateService,
+            JiraSyncJobService jiraSyncJobService,
+            SyncJobFinalizationService syncJobFinalizationService,
+            JiraBoardStateService jiraBoardStateService,
+            IntegrationAvailability availability,
+            IntegrationProperties properties,
+            JiraTimeZoneProperties jiraTimeZoneProperties,
+            Clock clock
     ) {
         this.jiraBoardRepository = jiraBoardRepository;
         this.gitRepoRepository = gitRepoRepository;
@@ -86,8 +149,12 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
         this.jiraClient = jiraClient;
         this.gitHubClient = gitHubClient;
         this.jiraUpsertService = jiraUpsertService;
+        this.jiraSprintUpsertService = jiraSprintUpsertService;
+        this.sprintRepository = sprintRepository;
         this.gitHubUpsertService = gitHubUpsertService;
         this.initialBackfillJobService = initialBackfillJobService;
+        this.gitHubSyncJobService = gitHubSyncJobService;
+        this.gitRepoStateService = gitRepoStateService;
         this.jiraSyncJobService = jiraSyncJobService;
         this.syncJobFinalizationService = syncJobFinalizationService;
         this.jiraBoardStateService = jiraBoardStateService;
@@ -96,6 +163,7 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
                 ? Duration.ofMinutes(5)
                 : properties.overlapWindow();
         this.jiraZoneId = ZoneId.of(jiraTimeZoneProperties.timeZone());
+        this.clock = clock;
     }
 
     @Override
@@ -123,19 +191,24 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
     }
 
     void syncJira(UUID boardId, SyncJobType jobType) {
-        SyncJobLog job = null;
+        if (!availability.jiraEnabled()) {
+            return;
+        }
+        SyncJobLog job = jiraSyncJobService.claim(boardId, jobType).orElse(null);
+        if (job == null) {
+            return;
+        }
+        syncClaimedJira(boardId, job);
+    }
+
+    @Override
+    public void syncClaimedJira(UUID boardId, SyncJobLog job) {
         JiraBoard board = null;
         int processed = 0;
         int failed = 0;
         JiraSyncStage stage = JiraSyncStage.CLAIM_JOB;
+        SyncJobType jobType = job.getJobType();
         try {
-            if (!availability.jiraEnabled()) {
-                return;
-            }
-            job = jiraSyncJobService.claim(boardId, jobType).orElse(null);
-            if (job == null) {
-                return;
-            }
             stage = JiraSyncStage.LOAD_BOARD;
             board = jiraBoardRepository.findById(boardId).orElse(null);
             if (board == null || board.getConnectionStatus()
@@ -177,21 +250,59 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
                     ? JiraSyncStage.REFRESH_TOKEN
                     : JiraSyncStage.LOAD_CREDENTIAL;
             String token = jiraCredentialService.validAccessToken(board);
+            stage = JiraSyncStage.DISCOVER_SPRINT_FIELD;
+            String sprintFieldId = jiraClient.sprintFieldId(
+                    token,
+                    board.getCloudId()
+            );
+            stage = JiraSyncStage.DISCOVER_ESTIMATION_FIELD;
+            String estimationFieldId = board.getJiraBoardId() == null
+                    || board.getJiraBoardId().isBlank()
+                    ? null
+                    : jiraClient.estimationFieldId(
+                            token,
+                            board.getCloudId(),
+                            board.getJiraBoardId()
+                    );
             String nextPageToken = null;
             boolean lastPage;
             Set<String> seenPageTokens = new HashSet<>();
+            Map<String, Set<String>> sprintHydrationSources =
+                    new LinkedHashMap<>();
+            JiraSyncStage itemFailureStage = null;
             int issuesFetchedFromProvider = 0;
             int issuesAfterUpperBoundFilter = 0;
             do {
                 stage = JiraSyncStage.SEARCH_ISSUES;
-                JiraIssuePage page = jiraClient.searchIssues(
-                        token,
-                        board.getCloudId(),
-                        board.getProjectKey(),
-                        effectiveLowerBound,
-                        capturedUpperBound,
-                        nextPageToken
-                );
+                JiraIssuePage page = estimationFieldId == null && sprintFieldId == null
+                        ? jiraClient.searchIssues(
+                                token,
+                                board.getCloudId(),
+                                board.getProjectKey(),
+                                effectiveLowerBound,
+                                capturedUpperBound,
+                                nextPageToken
+                        )
+                        : estimationFieldId == null
+                        ? jiraClient.searchIssues(
+                                token,
+                                board.getCloudId(),
+                                board.getProjectKey(),
+                                effectiveLowerBound,
+                                capturedUpperBound,
+                                nextPageToken,
+                                sprintFieldId
+                        )
+                        : jiraClient.searchIssues(
+                                token,
+                                board.getCloudId(),
+                                board.getProjectKey(),
+                                effectiveLowerBound,
+                                capturedUpperBound,
+                                nextPageToken,
+                                estimationFieldId,
+                                sprintFieldId
+                        );
                 issuesFetchedFromProvider += page.issues().size();
                 for (JiraIssueSnapshot issue : page.issues()) {
                     if (!JiraSyncWindow.isWithinCapturedUpperBound(
@@ -201,12 +312,18 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
                         continue;
                     }
                     issuesAfterUpperBoundFilter++;
+                    if (issue.sprintId() != null && !issue.sprintId().isBlank()) {
+                        sprintHydrationSources.computeIfAbsent(
+                                issue.sprintId(), ignored -> new LinkedHashSet<>()
+                        ).add("ISSUE_BATCH");
+                    }
                     try {
                         stage = JiraSyncStage.UPSERT_ISSUES;
                         jiraUpsertService.upsert(boardId, issue);
                         processed++;
                     } catch (RuntimeException exception) {
                         failed++;
+                        itemFailureStage = JiraSyncStage.UPSERT_ISSUES;
                         logJiraFailure(
                                 "Jira issue upsert failed",
                                 boardId,
@@ -220,7 +337,7 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
                 }
                 nextPageToken = page.nextPageToken();
                 lastPage = page.last();
-                log.info("Jira search completed: boardId={}, jobId={}, jobType={}, endpoint=/rest/api/3/search/jql, projectKey={}, jiraZoneId={}, cursorBeforeUtc={}, lowerBoundUtc={}, lowerBoundForJql={}, upperBoundUtc={}, upperBoundExclusiveForJql={}, sanitizedJql={}, httpStatus=200, issuesFetchedFromProvider={}, issuesAfterUpperBoundFilter={}, itemsProcessed={}, itemsFailed={}, isLast={}, hasNextPageToken={}",
+                log.info("Jira search completed: jiraBoardEntityId={}, jobId={}, jobType={}, endpoint=/rest/api/3/search/jql, projectKey={}, jiraZoneId={}, cursorBeforeUtc={}, lowerBoundUtc={}, lowerBoundForJql={}, upperBoundUtc={}, upperBoundExclusiveForJql={}, sanitizedJql={}, httpStatus=200, issuesFetchedFromProvider={}, issuesAfterUpperBoundFilter={}, itemsProcessed={}, itemsFailed={}, isLast={}, hasNextPageToken={}",
                         boardId, job.getId(), jobType, board.getProjectKey(),
                         jiraZoneId, cursorBefore, effectiveLowerBound, lowerBoundForJql,
                         capturedUpperBound, upperBoundExclusiveForJql,
@@ -244,6 +361,43 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
                     throw IntegrationException.unavailable("JIRA_PAGINATION_TOKEN_MISSING");
                 }
             } while (!lastPage && nextPageToken != null && !nextPageToken.isBlank());
+
+            sprintRepository.findByBoardIdAndDeletedAtIsNull(boardId).stream()
+                    .map(sprint -> sprint.getExternalSprintId())
+                    .filter(id -> id != null && !id.isBlank())
+                    .forEach(id -> sprintHydrationSources.computeIfAbsent(
+                            id, ignored -> new LinkedHashSet<>()
+                    ).add("LOCAL_SPRINT"));
+            for (Map.Entry<String, Set<String>> candidate
+                    : sprintHydrationSources.entrySet()) {
+                String sprintId = candidate.getKey();
+                try {
+                    stage = JiraSyncStage.HYDRATE_SPRINTS;
+                    requireJiraBoardAvailableForRemoteCall(boardId);
+                    JiraSprintSnapshot sprint = jiraClient.getSprint(
+                            token,
+                            board.getCloudId(),
+                            sprintId
+                    );
+                    jiraSprintUpsertService.upsert(boardId, sprint);
+                    processed++;
+                } catch (RuntimeException exception) {
+                    failed++;
+                    itemFailureStage = JiraSyncStage.HYDRATE_SPRINTS;
+                    logJiraFailure(
+                            "Jira sprint hydration failed",
+                            boardId,
+                            job,
+                            jobType,
+                            JiraSyncStage.HYDRATE_SPRINTS,
+                            categoryOf(exception),
+                            board,
+                            sprintId,
+                            candidate.getValue(),
+                            exception
+                    );
+                }
+            }
 
             if (failed == 0) {
                 LocalDateTime cursorAfter = LocalDateTime.ofInstant(
@@ -271,7 +425,9 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
                         failed,
                         null,
                         "ITEM_UPSERT_FAILED",
-                        JiraSyncStage.UPSERT_ISSUES
+                        itemFailureStage == null
+                                ? JiraSyncStage.UPSERT_ISSUES
+                                : itemFailureStage
                 );
             }
         } catch (IntegrationException exception) {
@@ -303,42 +459,52 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
         if (!availability.gitHubEnabled()) {
             return;
         }
-        SyncJobLog claimedJob = null;
-        if (jobType == SyncJobType.INITIAL_BACKFILL) {
-            claimedJob = initialBackfillJobService.claim(repositoryLocalId)
-                    .orElse(null);
-            if (claimedJob == null) {
-                return;
-            }
+        SyncJobLog job = (jobType == SyncJobType.INITIAL_BACKFILL
+                ? initialBackfillJobService.claim(repositoryLocalId)
+                : gitHubSyncJobService.claim(repositoryLocalId, jobType))
+                        .orElse(null);
+        if (job == null) {
+            return;
         }
-        GitRepo repository = gitRepoRepository
-                .findForSyncById(repositoryLocalId)
-                .orElse(null);
+        syncClaimedGitHub(repositoryLocalId, job);
+    }
+
+    @Override
+    public void syncClaimedGitHub(UUID repositoryLocalId, SyncJobLog job) {
+        SyncJobType jobType = job.getJobType();
+        GitRepo repository;
+        try {
+            repository = gitRepoRepository
+                    .findForSyncById(repositoryLocalId)
+                    .orElse(null);
+        } catch (RuntimeException exception) {
+            finalizeGitHubJob(
+                    job,
+                    SyncJobStatus.FAILED,
+                    0,
+                    0,
+                    null,
+                    gitHubCategoryOf(exception),
+                    "LOAD_REPOSITORY"
+            );
+            return;
+        }
         if (
             repository == null
             || repository.getConnectionStatus() == IntegrationStatus.DISCONNECTED
         ) {
-            if (claimedJob != null) {
-                completeJob(
-                        claimedJob,
-                        SyncJobStatus.FAILED,
-                        0,
-                        0,
-                        null,
-                        "GITHUB_REPOSITORY_UNAVAILABLE"
-                );
-            }
+            finalizeGitHubJob(
+                    job,
+                    SyncJobStatus.FAILED,
+                    0,
+                    0,
+                    null,
+                    "GITHUB_REPOSITORY_UNAVAILABLE",
+                    "LOAD_REPOSITORY"
+            );
             return;
         }
         LocalDateTime cursorBefore = repository.getSyncCursor();
-        SyncJobLog job = claimedJob == null
-                ? startJob(
-                        "GITHUB",
-                        repositoryLocalId,
-                        jobType,
-                        cursorBefore
-                )
-                : claimedJob;
         int processed = 0;
         int failed = 0;
         LocalDateTime maxUpdated = cursorBefore;
@@ -462,80 +628,69 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
                 LocalDateTime cursorAfter = maxUpdated == null
                         ? LocalDateTime.now()
                         : maxUpdated;
-                completeGitHub(repository, cursorAfter);
-                completeJob(
-                        job,
-                        SyncJobStatus.COMPLETED,
-                        processed,
-                        0,
-                        cursorAfter,
-                        null
-                );
+                if (completeGitHub(repositoryLocalId, cursorAfter)) {
+                    finalizeGitHubJob(
+                            job,
+                            SyncJobStatus.COMPLETED,
+                            processed,
+                            0,
+                            cursorAfter,
+                            null,
+                            null
+                    );
+                } else {
+                    finalizeGitHubJob(
+                            job,
+                            SyncJobStatus.FAILED,
+                            processed,
+                            0,
+                            null,
+                            "GITHUB_REPOSITORY_UNAVAILABLE",
+                            "COMPLETE_REPOSITORY"
+                    );
+                }
             } else {
-                degradeGitHub(repository);
-                completeJob(
+                degradeGitHubSafely(repositoryLocalId, job, jobType,
+                        "DEGRADE_REPOSITORY");
+                finalizeGitHubJob(
                         job,
                         SyncJobStatus.PARTIAL_FAILURE,
                         processed,
                         failed,
                         null,
-                        "ITEM_UPSERT_FAILED"
+                        "ITEM_UPSERT_FAILED",
+                        "SYNC_ITEMS"
                 );
             }
         } catch (IntegrationException exception) {
-            degradeGitHub(repository);
-            completeJob(
+            degradeGitHubSafely(repositoryLocalId, job, jobType,
+                    "DEGRADE_REPOSITORY");
+            finalizeGitHubJob(
                     job,
                     SyncJobStatus.FAILED,
                     processed,
                     failed,
                     null,
-                    exception.getCode()
+                    exception.getCode(),
+                    "SYNC_ITEMS"
             );
         } catch (RuntimeException exception) {
-            degradeGitHub(repository);
-            completeJob(
+            degradeGitHubSafely(repositoryLocalId, job, jobType,
+                    "DEGRADE_REPOSITORY");
+            finalizeGitHubJob(
                     job,
                     SyncJobStatus.FAILED,
                     processed,
                     failed,
                     null,
-                    "UNEXPECTED_SYNC_FAILURE"
+                    "UNEXPECTED_SYNC_FAILURE",
+                    "SYNC_ITEMS"
             );
         }
     }
 
-    private SyncJobLog startJob(
-            String targetSystem,
-            UUID targetId,
-            SyncJobType type,
-            LocalDateTime cursorBefore
-    ) {
-        return jobRepository.saveAndFlush(SyncJobLog.builder()
-                .targetSystem(targetSystem)
-                .targetId(targetId)
-                .jobType(type)
-                .status(SyncJobStatus.IN_PROGRESS)
-                .startedAt(LocalDateTime.now())
-                .cursorBefore(cursorBefore)
-                .build());
-    }
-
-    private void completeJob(
-            SyncJobLog job,
-            SyncJobStatus status,
-            int processed,
-            int failed,
-            LocalDateTime cursorAfter,
-            String safeErrorCategory
-    ) {
-        job.setStatus(status);
-        job.setItemsProcessed(processed);
-        job.setItemsFailed(failed);
-        job.setCursorAfter(cursorAfter);
-        job.setErrorMessage(safeErrorCategory);
-        job.setCompletedAt(LocalDateTime.now());
-        jobRepository.saveAndFlush(job);
+    private LocalDateTime utcNow() {
+        return LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
     }
 
     private void finalizeJiraFailure(
@@ -648,20 +803,87 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
         }
     }
 
-    private void completeGitHub(GitRepo repository, LocalDateTime cursor) {
-        repository.setSyncCursor(cursor);
-        repository.setLastSyncedAt(LocalDateTime.now());
-        repository.setConnectionStatus(IntegrationStatus.ACTIVE);
-        repository.setConsecutiveFailures(0);
-        gitRepoRepository.saveAndFlush(repository);
+    private boolean completeGitHub(
+            UUID repositoryId,
+            LocalDateTime cursor
+    ) {
+        return gitRepoStateService.complete(repositoryId, cursor);
     }
 
-    private void degradeGitHub(GitRepo repository) {
-        repository.setConsecutiveFailures(
-                repository.getConsecutiveFailures() + 1
+    private void degradeGitHubSafely(
+            UUID repositoryId,
+            SyncJobLog job,
+            SyncJobType jobType,
+            String stage
+    ) {
+        try {
+            gitRepoStateService.degrade(repositoryId);
+        } catch (RuntimeException exception) {
+            logGitHubFailure(
+                    "GitHub sync degradation failed",
+                    repositoryId,
+                    job,
+                    jobType,
+                    stage,
+                    exception
+            );
+        }
+    }
+
+    private void finalizeGitHubJob(
+            SyncJobLog job,
+            SyncJobStatus status,
+            int processed,
+            int failed,
+            LocalDateTime cursorAfter,
+            String errorCategory,
+            String failureStage
+    ) {
+        if (job == null || job.getId() == null) {
+            return;
+        }
+        try {
+            syncJobFinalizationService.finalizeJob(
+                    job.getId(),
+                    status,
+                    processed,
+                    failed,
+                    cursorAfter,
+                    errorCategory,
+                    failureStage
+            );
+        } catch (RuntimeException exception) {
+            logGitHubFailure(
+                    "GitHub sync finalization deferred",
+                    job.getTargetId(),
+                    job,
+                    job.getJobType(),
+                    "FINALIZE_JOB",
+                    exception
+            );
+        }
+    }
+
+    private void logGitHubFailure(
+            String message,
+            UUID repositoryId,
+            SyncJobLog job,
+            SyncJobType jobType,
+            String stage,
+            RuntimeException exception
+    ) {
+        Throwable root = rootCause(exception);
+        log.error(
+                "{}: repositoryId={}, jobId={}, jobType={}, stage={}, "
+                        + "exceptionClass={}, rootCauseClass={}",
+                message,
+                repositoryId,
+                job == null ? null : job.getId(),
+                jobType,
+                stage,
+                exception.getClass().getName(),
+                root.getClass().getName()
         );
-        repository.setConnectionStatus(IntegrationStatus.DEGRADED);
-        gitRepoRepository.saveAndFlush(repository);
     }
 
     private String jiraSearchJql(
@@ -710,6 +932,32 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
         return "UNEXPECTED_SYNC_FAILURE";
     }
 
+    /**
+     * A job can have been claimed just before a user disconnects Jira. Reload
+     * the retained board before a provider call so it cannot keep using the
+     * retired credential during sprint hydration.
+     */
+    private void requireJiraBoardAvailableForRemoteCall(UUID boardId) {
+        JiraBoard latest = jiraBoardRepository.findById(boardId).orElse(null);
+        if (latest == null || latest.getConnectionStatus()
+                == IntegrationStatus.DISCONNECTED) {
+            throw IntegrationException.conflict(
+                    "JIRA_BOARD_UNAVAILABLE",
+                    "The Jira integration is no longer connected"
+            );
+        }
+    }
+
+    private String gitHubCategoryOf(RuntimeException exception) {
+        if (exception instanceof IntegrationException integrationException) {
+            return integrationException.getCode();
+        }
+        if (exception instanceof OptimisticLockingFailureException) {
+            return "GITHUB_REPOSITORY_CONCURRENT_UPDATE";
+        }
+        return "UNEXPECTED_SYNC_FAILURE";
+    }
+
     private void logJiraFailure(
             String message,
             UUID boardId,
@@ -719,20 +967,76 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
             String errorCategory,
             RuntimeException exception
     ) {
-        Throwable root = rootCause(exception);
-        log.error(
-                "{}: boardId={}, jobId={}, jobType={}, stage={}, "
-                        + "errorCategory={}, exceptionClass={}, rootCauseClass={}",
+        logJiraFailure(
                 message,
                 boardId,
-                job == null ? null : job.getId(),
+                job,
                 jobType,
                 stage,
                 errorCategory,
+                null,
+                null,
+                Set.of(),
+                exception
+        );
+    }
+
+    private void logJiraFailure(
+            String message,
+            UUID boardId,
+            SyncJobLog job,
+            SyncJobType jobType,
+            JiraSyncStage stage,
+            String errorCategory,
+            JiraBoard board,
+            String externalSprintId,
+            Set<String> hydrationSources,
+            RuntimeException exception
+    ) {
+        Throwable root = rootCause(exception);
+        log.error(
+                "{}: jiraBoardEntityId={}, jiraExternalBoardId={}, projectKey={}, "
+                        + "externalSprintId={}, upstreamHttpStatus={}, "
+                        + "providerErrorCategory={}, jobId={}, jobType={}, "
+                        + "stage={}, failureStage={}, hydrationSources={}, exceptionClass={}, "
+                        + "rootCauseClass={}",
+                message,
+                boardId,
+                safeExternalBoardId(board),
+                board == null ? null : board.getProjectKey(),
+                externalSprintId,
+                upstreamHttpStatusOf(exception),
+                errorCategory,
+                job == null ? null : job.getId(),
+                jobType,
+                stage,
+                stage,
+                hydrationSources,
                 exception.getClass().getName(),
                 root.getClass().getName(),
                 safeThrowable(exception)
         );
+    }
+
+    private String safeExternalBoardId(JiraBoard board) {
+        if (board == null || board.getJiraBoardId() == null
+                || !board.getJiraBoardId().matches("[0-9]+")) {
+            return "NOT_CONFIGURED";
+        }
+        return board.getJiraBoardId();
+    }
+
+    private String upstreamHttpStatusOf(RuntimeException exception) {
+        if (!(exception instanceof IntegrationException integrationException)) {
+            return "UNKNOWN";
+        }
+        return switch (integrationException.getCode()) {
+            case "JIRA_ACCESS_REVOKED" -> "401";
+            case "JIRA_ACCESS_FORBIDDEN" -> "403";
+            case "JIRA_SPRINT_NOT_FOUND", "JIRA_RESOURCE_NOT_FOUND" -> "404";
+            case "JIRA_RATE_LIMITED" -> "429";
+            default -> "UNKNOWN";
+        };
     }
 
     private RuntimeException safeThrowable(RuntimeException exception) {
@@ -756,8 +1060,11 @@ public class AutomaticSyncDispatcherImpl implements AutomaticSyncDispatcher {
         LOAD_BOARD,
         LOAD_CREDENTIAL,
         REFRESH_TOKEN,
+        DISCOVER_SPRINT_FIELD,
+        DISCOVER_ESTIMATION_FIELD,
         SEARCH_ISSUES,
         UPSERT_ISSUES,
+        HYDRATE_SPRINTS,
         COMPLETE_BOARD,
         DEGRADE_BOARD,
         FINALIZE_JOB

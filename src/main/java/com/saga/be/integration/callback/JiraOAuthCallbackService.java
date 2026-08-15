@@ -1,6 +1,8 @@
 package com.saga.be.integration.callback;
 
 import com.saga.be.exception.IntegrationException;
+import com.saga.be.dto.response.IntegrationCallbackFlow;
+import com.saga.be.dto.response.IntegrationCallbackResultResponse;
 import com.saga.be.integration.identity.PersonalIntegrationService;
 import com.saga.be.integration.project.ProjectIntegrationService;
 import com.saga.be.integration.security.OAuthFlow;
@@ -26,7 +28,7 @@ public class JiraOAuthCallbackService {
         this.projectIntegrationService = projectIntegrationService;
     }
 
-    public Object complete(
+    public IntegrationCallbackResultResponse complete(
             SagaPrincipal principal,
             HttpSession session,
             String state,
@@ -43,28 +45,62 @@ public class JiraOAuthCallbackService {
             binding.flow() == OAuthFlow.PERSONAL_JIRA
             && binding.targetId() == null
         ) {
-            return personalIntegrationService.completeJiraCallback(
-                    principal,
-                    code,
-                    oauthError,
-                    remoteAddress
-            );
+            try {
+                return IntegrationCallbackResultResponse.personalSuccess(
+                        personalIntegrationService.completeJiraCallback(
+                                principal,
+                                code,
+                                oauthError,
+                                remoteAddress
+                        )
+                );
+            } catch (IntegrationException exception) {
+                return failure(
+                        IntegrationCallbackFlow.PERSONAL,
+                        null,
+                        exception
+                );
+            }
         }
         if (
             binding.flow() == OAuthFlow.PROJECT_JIRA
             && binding.targetId() != null
         ) {
-            return projectIntegrationService.completeJiraCallback(
-                    principal,
-                    binding.targetId(),
-                    session,
-                    code,
-                    oauthError
-            );
+            try {
+                return IntegrationCallbackResultResponse.projectJiraSuccess(
+                        projectIntegrationService.completeJiraCallback(
+                                principal,
+                                binding.targetId(),
+                                session,
+                                code,
+                                oauthError
+                        )
+                );
+            } catch (IntegrationException exception) {
+                return failure(
+                        IntegrationCallbackFlow.PROJECT,
+                        binding.targetId(),
+                        exception
+                );
+            }
         }
         throw IntegrationException.invalid(
                 "OAUTH_STATE_INVALID",
                 "The integration authorization state is invalid or expired"
+        );
+    }
+
+    private IntegrationCallbackResultResponse failure(
+            IntegrationCallbackFlow flow,
+            java.util.UUID projectId,
+            IntegrationException exception
+    ) {
+        return IntegrationCallbackResultResponse.failure(
+                com.saga.be.entity.enums.IntegrationProvider.JIRA,
+                flow,
+                projectId,
+                exception.getCode(),
+                exception.getMessage()
         );
     }
 }

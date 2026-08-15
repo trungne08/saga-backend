@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
+@io.swagger.v3.oas.annotations.tags.Tag(name = "Đồng bộ dữ liệu", description = "Xem và xử lý ánh xạ định danh đồng bộ.")
 @RequestMapping("/api/integrations/identity-mappings")
 public class IdentityMappingReviewController {
 

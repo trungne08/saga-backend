@@ -3,6 +3,10 @@ package com.saga.be.entity;
 import com.saga.be.entity.enums.Priority;
 import com.saga.be.entity.enums.TaskStatus;
 import com.saga.be.entity.enums.TaskType;
+import com.saga.be.entity.converter.StringListJsonConverter;
+import com.saga.be.entity.converter.TaskComponentListJsonConverter;
+import com.saga.be.entity.value.TaskComponentSnapshot;
+import jakarta.persistence.Convert;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -17,6 +21,8 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 import java.time.LocalDateTime;
+import java.util.List;
+import lombok.AccessLevel;
 
 @Entity
 @Table(name = "task")
@@ -88,4 +94,40 @@ public class Task extends BaseEntity {
 
     @Column(name = "resolution")
     private String resolution;
+
+    @Column(name = "deleted_at")
+    private LocalDateTime deletedAt;
+
+    @Column(name = "description", columnDefinition = "TEXT")
+    private String description;
+
+    @Builder.Default
+    @Getter(AccessLevel.NONE)
+    @Setter(AccessLevel.NONE)
+    @Convert(converter = StringListJsonConverter.class)
+    @Column(name = "labels_json", columnDefinition = "TEXT")
+    private List<String> labels = List.of();
+
+    @Builder.Default
+    @Getter(AccessLevel.NONE)
+    @Setter(AccessLevel.NONE)
+    @Convert(converter = TaskComponentListJsonConverter.class)
+    @Column(name = "components_json", columnDefinition = "TEXT")
+    private List<TaskComponentSnapshot> components = List.of();
+
+    public List<String> getLabels() {
+        return labels == null ? List.of() : List.copyOf(labels);
+    }
+
+    public void setLabels(List<String> labels) {
+        this.labels = labels == null ? List.of() : List.copyOf(labels);
+    }
+
+    public List<TaskComponentSnapshot> getComponents() {
+        return components == null ? List.of() : List.copyOf(components);
+    }
+
+    public void setComponents(List<TaskComponentSnapshot> components) {
+        this.components = components == null ? List.of() : List.copyOf(components);
+    }
 }

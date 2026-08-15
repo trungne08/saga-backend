@@ -3,6 +3,7 @@ package com.saga.be.integration.project;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
@@ -241,6 +242,59 @@ class ProjectIntegrationServiceGitHubBackfillIntegrationTest {
     }
 
     @Test
+    void reconnectRequiresDisconnectedStateThenUsesTheSharedInitialBackfillClaim() {
+        GitRepo repository = gitRepoRepository.saveAndFlush(GitRepo.builder()
+                .project(project)
+                .installation(installation)
+                .provider("GITHUB")
+                .repositoryId(repositoryId)
+                .ownerLogin("saga")
+                .name("backend")
+                .fullName("saga/backend")
+                .url("https://github.test/saga/backend")
+                .defaultBranch("main")
+                .connectionStatus(IntegrationStatus.DISCONNECTED)
+                .build());
+
+        service.reconnectGitHubRepository(
+                principal,
+                project.getId(),
+                repositoryId,
+                "127.0.0.1"
+        );
+
+        assertEquals(IntegrationStatus.BACKFILLING, gitRepoRepository
+                .findById(repository.getId()).orElseThrow().getConnectionStatus());
+        verify(syncDispatcher).initialGitHubBackfill(repository.getId());
+        IntegrationException duplicate = assertThrows(IntegrationException.class,
+                () -> service.reconnectGitHubRepository(principal, project.getId(), repositoryId, "127.0.0.1"));
+        assertEquals("GITHUB_RECONNECT_NOT_REQUIRED", duplicate.getCode());
+    }
+
+    @Test
+    void reconnectRequiresInstallationStillContainingTheRepository() {
+        GitRepo repository = gitRepoRepository.saveAndFlush(GitRepo.builder()
+                .project(project)
+                .installation(installation)
+                .provider("GITHUB")
+                .repositoryId(repositoryId)
+                .ownerLogin("saga")
+                .name("backend")
+                .fullName("saga/backend")
+                .connectionStatus(IntegrationStatus.DISCONNECTED)
+                .build());
+        when(gitHubClient.installationRepositories(installationId)).thenReturn(List.of());
+
+        IntegrationException exception = assertThrows(IntegrationException.class,
+                () -> service.reconnectGitHubRepository(principal, project.getId(), repositoryId, "127.0.0.1"));
+
+        assertEquals("GITHUB_RECONNECT_REQUIRES_INSTALLATION", exception.getCode());
+        assertEquals(IntegrationStatus.DISCONNECTED, gitRepoRepository
+                .findById(repository.getId()).orElseThrow().getConnectionStatus());
+        verify(syncDispatcher, never()).initialGitHubBackfill(repository.getId());
+    }
+
+    @Test
     void disabledGitHubIntegrationDoesNotCallProvider() {
         doThrow(IntegrationException.notConfigured("GitHub"))
                 .when(availability)
@@ -325,12 +379,41 @@ class ProjectIntegrationServiceGitHubBackfillIntegrationTest {
                 project.getId()
         );
 
+        verify(authorization).requireProjectManager(principal, project.getId());
         assertEquals(1, response.recentJobs().size());
         assertEquals(job.getId(), response.recentJobs().get(0).id());
         assertEquals(
                 SyncJobType.INITIAL_BACKFILL,
                 response.recentJobs().get(0).type()
         );
+    }
+
+    @Test
+    void syncHistoryPaginatesAndFiltersJobsScopedToProjectTargets() {
+        GitRepo repository = gitRepoRepository.saveAndFlush(GitRepo.builder()
+                .project(project).installation(installation).provider("GITHUB")
+                .repositoryId(repositoryId).ownerLogin("saga").name("backend")
+                .fullName("saga/backend").connectionStatus(IntegrationStatus.ACTIVE).build());
+        syncJobLogRepository.saveAndFlush(SyncJobLog.builder()
+                .targetSystem("GITHUB").targetId(repository.getId())
+                .jobType(SyncJobType.RECONCILIATION).status(SyncJobStatus.COMPLETED)
+                .startedAt(LocalDateTime.now().minusMinutes(1)).build());
+        syncJobLogRepository.saveAndFlush(SyncJobLog.builder()
+                .targetSystem("GITHUB").targetId(repository.getId())
+                .jobType(SyncJobType.INITIAL_BACKFILL).status(SyncJobStatus.IN_PROGRESS)
+                .startedAt(LocalDateTime.now()).build());
+        syncJobLogRepository.saveAndFlush(SyncJobLog.builder()
+                .targetSystem("JIRA").targetId(UUID.randomUUID())
+                .jobType(SyncJobType.RECONCILIATION).status(SyncJobStatus.COMPLETED)
+                .startedAt(LocalDateTime.now()).build());
+
+        var response = service.syncHistory(principal, project.getId(), 0, 1,
+                "github", null, null);
+
+        assertEquals(2, response.jobs().totalElements());
+        assertEquals(1, response.jobs().content().size());
+        assertFalse(response.jobs().content().get(0).targetSystem().equals("JIRA"));
+        assertTrue(response.jobs().hasNext());
     }
 
     @Test

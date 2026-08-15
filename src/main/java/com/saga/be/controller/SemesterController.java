@@ -19,6 +19,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import java.util.UUID;
 
 @RestController
+@io.swagger.v3.oas.annotations.tags.Tag(name = "Học kỳ", description = "Quản lý dữ liệu học kỳ.")
 @RequestMapping("/api/v1/semesters")
 @RequiredArgsConstructor
 @Validated
@@ -35,6 +36,22 @@ public class SemesterController {
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Semester> createSemester(@Valid @RequestBody SemesterRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(semesterService.createSemester(request));
+    }
+
+    @PutMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Semester> updateSemester(
+            @PathVariable UUID id,
+            @Valid @RequestBody SemesterRequest request
+    ) {
+        return ResponseEntity.ok(semesterService.updateSemester(id, request));
+    }
+
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Void> deleteSemester(@PathVariable UUID id) {
+        semesterService.softDeleteSemester(id);
+        return ResponseEntity.noContent().build();
     }
 
     @GetMapping

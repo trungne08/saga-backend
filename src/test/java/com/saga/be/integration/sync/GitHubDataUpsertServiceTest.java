@@ -23,6 +23,7 @@ import com.saga.be.repository.GitIssueRepository;
 import com.saga.be.repository.GitRepoRepository;
 import com.saga.be.repository.PrReviewRepository;
 import com.saga.be.repository.PullRequestRepository;
+import com.saga.be.service.TeamContributionRefreshService;
 import java.time.LocalDateTime;
 import java.util.Optional;
 import java.util.UUID;
@@ -35,6 +36,7 @@ class GitHubDataUpsertServiceTest {
     private GitRepoRepository repoRepository;
     private GitIssueRepository issueRepository;
     private IdentityMappingService mappingService;
+    private TeamContributionRefreshService teamContributionRefreshService;
     private GitHubDataUpsertService service;
 
     @BeforeEach
@@ -42,6 +44,7 @@ class GitHubDataUpsertServiceTest {
         repoRepository = mock(GitRepoRepository.class);
         issueRepository = mock(GitIssueRepository.class);
         mappingService = mock(IdentityMappingService.class);
+        teamContributionRefreshService = mock(TeamContributionRefreshService.class);
         service = new GitHubDataUpsertService(
                 repoRepository,
                 issueRepository,
@@ -49,7 +52,8 @@ class GitHubDataUpsertServiceTest {
                 mock(PullRequestRepository.class),
                 mock(PrReviewRepository.class),
                 mock(CommentRepository.class),
-                mappingService
+                mappingService,
+                teamContributionRefreshService
         );
     }
 

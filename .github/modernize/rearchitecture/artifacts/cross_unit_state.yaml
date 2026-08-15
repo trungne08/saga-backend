@@ -1,0 +1,25 @@
+flows:
+  - name: oauth-session-state
+    source_unit: auth-controller
+    target_unit: project-integration-controller
+    pairing: matched
+    notes: OAuth flow state is stored in HTTP session and consumed by the integration service on callback.
+    must_preserve: true
+  - name: identity-map-to-project-link
+    source_unit: personal-integration-controller
+    target_unit: project-integration-controller
+    pairing: matched
+    notes: Student identity verification and project integration ownership are separate but both rely on project manager authorization.
+    must_preserve: true
+  - name: webhook-receipt-to-sync-worker
+    source_unit: webhook-controller
+    target_unit: project-integration-controller
+    pairing: matched
+    notes: Durable receipt event after commit triggers async sync/reconciliation worker progression.
+    must_preserve: true
+  - name: provider-link-status-to-sync-status
+    source_unit: project-integration-controller
+    target_unit: project-integration-callback-controller
+    pairing: matched
+    notes: Project integration callbacks complete the provider session and update status surfaces consumed by the status endpoints.
+    must_preserve: true

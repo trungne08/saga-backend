@@ -342,6 +342,83 @@ public class GitHubProviderClientImpl implements GitHubProviderClient {
     }
 
     @Override
+    public GitHubCommitDetailSnapshot commitDetail(
+            long installationId,
+            String owner,
+            String repository,
+            String commitSha
+    ) {
+        String token = installationAccessToken(installationId);
+        JsonNode detail = get(repositoryUriBuilder(
+                        owner,
+                repository,
+                "/commits/" + requiredCommitSha(commitSha)
+                )
+                .queryParam("per_page", 100)
+                .queryParam("page", 1)
+                .build()
+                .encode()
+                .toUri(), token);
+        JsonNode gitCommit = detail.path("commit");
+        JsonNode stats = detail.path("stats");
+        JsonNode files = detail.path("files");
+        if (!files.isArray()) {
+            throw invalidResponse();
+        }
+        List<GitHubChangedFileSnapshot> changedFiles = new ArrayList<>();
+        for (JsonNode file : files) {
+            changedFiles.add(new GitHubChangedFileSnapshot(
+                    requiredText(file, "filename"),
+                    requiredText(file, "status"),
+                    nullableInt(file, "additions"),
+                    nullableInt(file, "deletions"),
+                    text(file, "patch")
+            ));
+        }
+        return new GitHubCommitDetailSnapshot(
+                requiredText(detail, "sha"),
+                requiredText(gitCommit, "message"),
+                parseDateTime(nestedText(gitCommit, "committer", "date")),
+                nullableInt(stats, "additions"),
+                nullableInt(stats, "deletions"),
+                changedFiles
+        );
+    }
+
+    @Override
+    public List<GitHubBranchInfo> branches(long installationId, String owner, String repository) {
+        String token = installationAccessToken(installationId);
+        List<GitHubBranchInfo> result = new ArrayList<>();
+        for (int page = 1; ; page++) {
+            JsonNode response = get(repositoryUriBuilder(owner, repository, "/branches")
+                    .queryParam("per_page", 100).queryParam("page", page).build().encode().toUri(), token);
+            if (!response.isArray()) throw invalidResponse();
+            for (JsonNode node : response) result.add(new GitHubBranchInfo(requiredText(node, "name"),
+                    requiredText(node.path("commit"), "sha"), node.path("protected").asBoolean(false)));
+            if (response.size() < 100) return List.copyOf(result);
+        }
+    }
+
+    @Override
+    public List<GitHubBranchCommitInfo> branchCommits(long installationId, String owner, String repository, String branch) {
+        String token = installationAccessToken(installationId);
+        List<GitHubBranchCommitInfo> result = new ArrayList<>();
+        for (int page = 1; ; page++) {
+            JsonNode response = get(repositoryUriBuilder(owner, repository, "/commits")
+                    .queryParam("sha", requiredBranch(branch)).queryParam("per_page", 100).queryParam("page", page)
+                    .build().encode().toUri(), token);
+            if (!response.isArray()) throw invalidResponse();
+            for (JsonNode node : response) {
+                JsonNode commit = node.path("commit");
+                result.add(new GitHubBranchCommitInfo(requiredText(node, "sha"), requiredText(commit, "message"),
+                        text(commit.path("author"), "name"), text(node.path("author"), "login"),
+                        parseInstant(text(commit.path("author"), "date")), parseInstant(text(commit.path("committer"), "date")), text(node, "html_url")));
+            }
+            if (response.size() < 100) return List.copyOf(result);
+        }
+    }
+
+    @Override
     public List<GitHubPullRequestSnapshot> pullRequests(
             long installationId,
             String owner,
@@ -806,6 +883,23 @@ public class GitHubProviderClientImpl implements GitHubProviderClient {
         return value;
     }
 
+    private String requiredBranch(String branch) {
+        if (branch == null || branch.isBlank() || branch.length() > 255 || branch.chars().anyMatch(Character::isISOControl)) {
+            throw IntegrationException.invalid("GITHUB_BRANCH_INVALID", "The GitHub branch is invalid");
+        }
+        return branch.trim();
+    }
+
+    private String requiredCommitSha(String commitSha) {
+        if (commitSha == null || !commitSha.matches("(?i)[0-9a-f]{40}")) {
+            throw IntegrationException.invalid(
+                    "GITHUB_COMMIT_SHA_INVALID",
+                    "The GitHub commit SHA is invalid"
+            );
+        }
+        return commitSha.toLowerCase(java.util.Locale.ROOT);
+    }
+
     private long requiredLong(JsonNode node, String field) {
         Long value = nullableLong(node, field);
         if (value == null || value <= 0) {
@@ -850,6 +944,10 @@ public class GitHubProviderClientImpl implements GitHubProviderClient {
 
     private LocalDateTime parseDateTime(String value) {
         return value == null ? null : OffsetDateTime.parse(value).toLocalDateTime();
+    }
+
+    private Instant parseInstant(String value) {
+        return value == null ? null : OffsetDateTime.parse(value).toInstant();
     }
 
     private String safePath(String value) {

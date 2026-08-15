@@ -1,14 +1,19 @@
 package com.saga.be.controller;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import com.saga.be.dto.response.AuthMeResponse;
+import com.saga.be.dto.response.CsrfTokenResponse;
 import com.saga.be.entity.enums.AccountStatus;
 import com.saga.be.exception.UnauthenticatedRequestException;
 import com.saga.be.security.ApplicationRole;
 import com.saga.be.security.SagaPrincipal;
+import com.saga.be.service.CurrentAccountStatusService;
 import java.net.URI;
 import java.util.Arrays;
 import java.util.List;
@@ -16,10 +21,13 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.security.web.csrf.CsrfToken;
+import org.springframework.security.web.csrf.DefaultCsrfToken;
 
 class AuthControllerTest {
 
-    private final AuthController controller = new AuthController();
+    private final CurrentAccountStatusService accountStatusService = mock(CurrentAccountStatusService.class);
+    private final AuthController controller = new AuthController(accountStatusService);
 
     @Test
     void loginRedirectsToTheBackendCognitoAuthorizationEndpoint() {
@@ -45,6 +53,7 @@ class AuthControllerTest {
                 AccountStatus.ACTIVE
         );
 
+        when(accountStatusService.currentStatusForAuthRoute(principal)).thenReturn(AccountStatus.ACTIVE);
         AuthMeResponse response = controller.me(principal, new MockHttpServletRequest());
 
         assertEquals("cognito-subject", response.cognitoSub());
@@ -53,6 +62,7 @@ class AuthControllerTest {
         assertEquals(ApplicationRole.STUDENT, response.applicationRole());
         assertEquals(localProfileId, response.localProfileId());
         assertEquals(AccountStatus.ACTIVE, response.accountStatus());
+        assertNull(response.avatarUrl());
         assertEquals(
                 List.of(
                         "cognitoSub",
@@ -60,7 +70,8 @@ class AuthControllerTest {
                         "fullName",
                         "applicationRole",
                         "localProfileId",
-                        "accountStatus"
+                        "accountStatus",
+                        "avatarUrl"
                 ),
                 Arrays.stream(AuthMeResponse.class.getRecordComponents())
                         .map(component -> component.getName())
@@ -73,6 +84,57 @@ class AuthControllerTest {
         assertThrows(
                 UnauthenticatedRequestException.class,
                 () -> controller.me(null, new MockHttpServletRequest())
+        );
+    }
+
+    @Test
+    void meReturnsSynchronizedAvatarUrlFromTheSessionPrincipal() {
+        UUID localProfileId = UUID.randomUUID();
+        SagaPrincipal principal = new SagaPrincipal(
+                "cognito-subject",
+                "student@fpt.edu.vn",
+                "Student Name",
+                ApplicationRole.STUDENT,
+                localProfileId,
+                AccountStatus.ACTIVE,
+                "https://cdn.example.test/student.png"
+        );
+        when(accountStatusService.currentStatusForAuthRoute(principal)).thenReturn(AccountStatus.ACTIVE);
+
+        AuthMeResponse response = controller.me(principal, new MockHttpServletRequest());
+
+        assertEquals("https://cdn.example.test/student.png", response.avatarUrl());
+        assertEquals(localProfileId, response.localProfileId());
+        assertEquals(AccountStatus.ACTIVE, response.accountStatus());
+    }
+
+    @Test
+    void csrfReturnsOnlyTheSpringSecurityCsrfContract() {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setAttribute(
+                CsrfToken.class.getName(),
+                new DefaultCsrfToken("X-XSRF-TOKEN", "_csrf", "csrf-value")
+        );
+        SagaPrincipal principal = new SagaPrincipal(
+                "cognito-subject",
+                "student@fpt.edu.vn",
+                "Student Name",
+                ApplicationRole.STUDENT,
+                UUID.randomUUID(),
+                AccountStatus.ACTIVE
+        );
+
+        CsrfTokenResponse response = controller.csrf(principal, request);
+
+        assertEquals("csrf-value", response.token());
+        assertEquals("X-XSRF-TOKEN", response.headerName());
+        assertEquals("_csrf", response.parameterName());
+        assertFalse(response.toString().contains("csrf-value"));
+        assertEquals(
+                List.of("token", "headerName", "parameterName"),
+                Arrays.stream(CsrfTokenResponse.class.getRecordComponents())
+                        .map(component -> component.getName())
+                        .toList()
         );
     }
 }

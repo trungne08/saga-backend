@@ -1,5 +1,6 @@
 package com.saga.be.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Table;
@@ -30,4 +31,8 @@ public class Semester extends BaseEntity {
 
     @Column(name = "end_date")
     private LocalDateTime endDate;
+
+    @JsonIgnore
+    @Column(name = "deleted_at")
+    private LocalDateTime deletedAt;
 }

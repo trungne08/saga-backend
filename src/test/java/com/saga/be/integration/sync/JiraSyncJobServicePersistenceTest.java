@@ -14,7 +14,9 @@ import com.saga.be.entity.enums.SyncJobType;
 import com.saga.be.repository.JiraBoardRepository;
 import com.saga.be.repository.ProjectRepository;
 import com.saga.be.repository.SyncJobLogRepository;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -93,7 +95,7 @@ class JiraSyncJobServicePersistenceTest {
     void staleInProgressJobIsRecoveredAndInitialBackfillCanRetry() {
         JiraBoard board = createBoard();
         SyncJobLog stale = runningJob(board.getId());
-        stale.setStartedAt(LocalDateTime.now().minusMinutes(16));
+        stale.setStartedAt(utcNow().minusMinutes(16));
         SyncJobLog persistedStale = transactionTemplate.execute(status ->
                 jobRepository.saveAndFlush(stale));
 
@@ -114,7 +116,7 @@ class JiraSyncJobServicePersistenceTest {
     void stalePendingJobIsRecovered() {
         SyncJobLog stale = runningJob(UUID.randomUUID());
         stale.setStatus(SyncJobStatus.PENDING);
-        stale.setStartedAt(LocalDateTime.now().minusMinutes(16));
+        stale.setStartedAt(utcNow().minusMinutes(16));
         SyncJobLog persistedStale = transactionTemplate.execute(status ->
                 jobRepository.saveAndFlush(stale));
 
@@ -180,7 +182,11 @@ class JiraSyncJobServicePersistenceTest {
                 .targetId(boardId)
                 .jobType(SyncJobType.INITIAL_BACKFILL)
                 .status(SyncJobStatus.IN_PROGRESS)
-                .startedAt(LocalDateTime.now())
+                .startedAt(utcNow())
                 .build();
+    }
+
+    private LocalDateTime utcNow() {
+        return LocalDateTime.ofInstant(Instant.now(), ZoneOffset.UTC);
     }
 }

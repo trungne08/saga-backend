@@ -10,8 +10,10 @@ import com.saga.be.entity.enums.GitHubInstallationStatus;
 import com.saga.be.entity.enums.IntegrationProvider;
 import com.saga.be.entity.enums.IntegrationStatus;
 import com.saga.be.entity.enums.WebhookReceiptStatus;
+import com.saga.be.exception.IntegrationException;
 import com.saga.be.integration.security.IntegrationSecretCipher;
 import com.saga.be.integration.sync.AutomaticSyncDispatcher;
+import com.saga.be.integration.sync.GitRepoStateService;
 import com.saga.be.repository.GitHubInstallationRepository;
 import com.saga.be.repository.GitRepoRepository;
 import com.saga.be.repository.WebhookReceiptRepository;
@@ -42,6 +44,8 @@ public class WebhookReceiptProcessor {
     private final ObjectMapper objectMapper;
     private final AutomaticSyncDispatcher dispatcher;
     private final IntegrationAvailability availability;
+    private final GitRepoStateService gitRepoStateService;
+    private final JiraWebhookTaskDeleteService jiraTaskDeleteService;
 
     public WebhookReceiptProcessor(
             WebhookReceiptRepository receiptRepository,
@@ -52,7 +56,9 @@ public class WebhookReceiptProcessor {
             IntegrationSecretCipher cipher,
             ObjectMapper objectMapper,
             AutomaticSyncDispatcher dispatcher,
-            IntegrationAvailability availability
+            IntegrationAvailability availability,
+            GitRepoStateService gitRepoStateService,
+            JiraWebhookTaskDeleteService jiraTaskDeleteService
     ) {
         this.receiptRepository = receiptRepository;
         this.claimService = claimService;
@@ -63,6 +69,8 @@ public class WebhookReceiptProcessor {
         this.objectMapper = objectMapper;
         this.dispatcher = dispatcher;
         this.availability = availability;
+        this.gitRepoStateService = gitRepoStateService;
+        this.jiraTaskDeleteService = jiraTaskDeleteService;
     }
 
     @Async
@@ -113,9 +121,7 @@ public class WebhookReceiptProcessor {
             );
             JsonNode payload = objectMapper.readTree(plaintext);
             if (receipt.provider() == IntegrationProvider.JIRA) {
-                if (receipt.targetId() != null) {
-                    dispatcher.reconcileJira(receipt.targetId());
-                }
+                routeJira(receipt, payload);
             } else {
                 routeGitHub(receipt, payload);
             }
@@ -124,6 +130,54 @@ public class WebhookReceiptProcessor {
             stateService.fail(receiptId, "WEBHOOK_PROCESSING_FAILED");
             logFailure(receiptId, receipt.provider(), receipt.deliveryId(), "PROCESS", exception);
         }
+    }
+
+    private void routeJira(WebhookReceiptClaim receipt, JsonNode payload) {
+        if (receipt.targetId() == null) {
+            return;
+        }
+        if ("jira:issue_deleted".equals(receipt.eventType())) {
+            JsonNode issue = payload.path("issue");
+            String externalIssueId = safeIssueIdentity(issue, "id");
+            String externalIssueKey = safeIssueIdentity(issue, "key");
+            if (externalIssueId == null && externalIssueKey == null) {
+                throw IntegrationException.invalid(
+                        "JIRA_WEBHOOK_ISSUE_IDENTITY_INVALID",
+                        "The Jira delete webhook issue identity is invalid"
+                );
+            }
+            JiraWebhookTaskDeleteService.DeleteResult result =
+                    jiraTaskDeleteService.tombstone(
+                            receipt.targetId(),
+                            externalIssueId,
+                            externalIssueKey
+                    );
+            log.info(
+                    "Jira webhook delete processed: receiptId={}, jiraBoardEntityId={}, eventType={}, result={}",
+                    receipt.receiptId(),
+                    receipt.targetId(),
+                    receipt.eventType(),
+                    result
+            );
+            return;
+        }
+        dispatcher.reconcileJira(receipt.targetId());
+    }
+
+    private String safeIssueIdentity(JsonNode issue, String field) {
+        if (!issue.isObject()) {
+            return null;
+        }
+        JsonNode value = issue.get(field);
+        if (value == null || !value.isValueNode()) {
+            return null;
+        }
+        String text = value.asText();
+        if (text == null || text.isBlank() || text.length() > 255
+                || !text.matches("[A-Za-z0-9_-]+")) {
+            return null;
+        }
+        return text;
     }
 
     private void routeGitHub(WebhookReceiptClaim receipt, JsonNode payload) {
@@ -170,10 +224,9 @@ public class WebhookReceiptProcessor {
         }
         removed.forEach(repository -> gitRepoRepository
                 .findByRepositoryId(repository.path("id").asLong())
-                .ifPresent(linked -> {
-                    linked.setConnectionStatus(IntegrationStatus.DEGRADED);
-                    gitRepoRepository.saveAndFlush(linked);
-                }));
+                .ifPresent(linked -> gitRepoStateService.markDegraded(
+                        linked.getId()
+                )));
         for (GitRepo linked : gitRepoRepository
                 .findByInstallationInstallationId(installationId)) {
             if (linked.getConnectionStatus() != IntegrationStatus.DISCONNECTED) {
@@ -187,8 +240,7 @@ public class WebhookReceiptProcessor {
                 .findByInstallationInstallationId(installationId)) {
             if (repository.getConnectionStatus()
                     != IntegrationStatus.DISCONNECTED) {
-                repository.setConnectionStatus(IntegrationStatus.DEGRADED);
-                gitRepoRepository.saveAndFlush(repository);
+                gitRepoStateService.markDegraded(repository.getId());
             }
         }
     }

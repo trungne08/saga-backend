@@ -6,6 +6,7 @@ import com.saga.be.security.CognitoLogoutSuccessHandler;
 import com.saga.be.security.CognitoOidcAuthoritiesMapper;
 import com.saga.be.security.JsonAccessDeniedHandler;
 import com.saga.be.security.JsonAuthenticationEntryPoint;
+import com.saga.be.security.InternalAiServiceAuthenticationFilter;
 import com.saga.be.security.NoStoreOAuth2AuthorizedClientRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -22,8 +23,10 @@ import org.springframework.security.web.context.HttpSessionSecurityContextReposi
 import org.springframework.security.web.context.RequestAttributeSecurityContextRepository;
 import org.springframework.security.web.context.SecurityContextRepository;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
+import org.springframework.security.web.csrf.CsrfFilter;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 import org.springframework.security.web.csrf.CsrfTokenRepository;
+import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 import org.springframework.security.oauth2.client.web.OAuth2LoginAuthenticationFilter;
 import org.springframework.web.cors.CorsConfigurationSource;
 
@@ -59,6 +62,8 @@ public class SecurityConfig {
             CorsConfigurationSource corsConfigurationSource,
             CsrfTokenRepository csrfTokenRepository,
             SecurityContextRepository securityContextRepository,
+            com.saga.be.security.AccountStatusEnforcementFilter accountStatusEnforcementFilter,
+            InternalAiServiceAuthenticationFilter internalAiServiceAuthenticationFilter,
             CognitoOidcAuthoritiesMapper authoritiesMapper,
             NoStoreOAuth2AuthorizedClientRepository authorizedClientRepository,
             CognitoAuthenticationSuccessHandler successHandler,
@@ -74,8 +79,38 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf
                         .csrfTokenRepository(csrfTokenRepository)
                         .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
-                        .ignoringRequestMatchers("/api/webhooks/**")
+                        .ignoringRequestMatchers(
+                                PathPatternRequestMatcher.pathPattern(
+                                        HttpMethod.POST,
+                                        "/api/webhooks/github"
+                                ),
+                                PathPatternRequestMatcher.pathPattern(
+                                        HttpMethod.POST,
+                                        "/api/webhooks/jira"
+                                ),
+                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/project-summary"),
+                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/resource-context"),
+                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/project-tasks"),
+                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/task-detail"),
+                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/student-progress"),
+                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/team-progress"),
+                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/team-contribution"),
+                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/student-contribution"),
+                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/team-sprints"),
+                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/course-warnings"),
+                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/project-traceability"),
+                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/validate-commit-review"),
+                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/srs-context"),
+                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/resolve-assignee"),
+                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/validate-task-create"),
+                                PathPatternRequestMatcher.pathPattern(HttpMethod.POST, "/internal/ai/v1/agent/tools/validate-task-update")
+                        )
                 )
+                .addFilterBefore(
+                        internalAiServiceAuthenticationFilter,
+                        OAuth2LoginAuthenticationFilter.class
+                )
+                .addFilterAfter(accountStatusEnforcementFilter, CsrfFilter.class)
                 .securityContext(context -> context
                         .securityContextRepository(securityContextRepository)
                         .requireExplicitSave(true)
@@ -94,6 +129,7 @@ public class SecurityConfig {
                             HttpMethod.GET,
                             "/",
                             "/index.html",
+                            "/privacy",
                             "/favicon.ico",
                             "/assets/**",
                             "/css/**",
@@ -108,6 +144,7 @@ public class SecurityConfig {
                             "/api/webhooks/github",
                             "/api/webhooks/jira"
                     ).permitAll();
+                    authorize.requestMatchers("/internal/ai/**").permitAll();
                     if (apiDocsEnabled || swaggerUiEnabled) {
                         authorize.requestMatchers(
                                 "/v3/api-docs/**",

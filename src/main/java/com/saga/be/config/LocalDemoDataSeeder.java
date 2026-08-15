@@ -9,6 +9,7 @@ import com.saga.be.dto.response.ProjectResponse;
 import com.saga.be.entity.Course;
 import com.saga.be.entity.Lecturer;
 import com.saga.be.entity.Project;
+import com.saga.be.entity.ProjectType;
 import com.saga.be.entity.Semester;
 import com.saga.be.entity.Student;
 import com.saga.be.entity.Subject;
@@ -19,6 +20,7 @@ import com.saga.be.integration.project.TeamProjectService;
 import com.saga.be.repository.ClassRepository;
 import com.saga.be.repository.CourseRepository;
 import com.saga.be.repository.LecturerRepository;
+import com.saga.be.repository.ProjectTypeRepository;
 import com.saga.be.repository.SemesterRepository;
 import com.saga.be.repository.StudentRepository;
 import com.saga.be.repository.SubjectRepository;
@@ -31,6 +33,7 @@ import com.saga.be.service.CourseService;
 import com.saga.be.service.SemesterService;
 import com.saga.be.service.SubjectService;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -65,6 +68,7 @@ public class LocalDemoDataSeeder implements ApplicationRunner {
     private final LecturerRepository lecturerRepository;
     private final TeamRepository teamRepository;
     private final TeamMemberRepository teamMemberRepository;
+    private final ProjectTypeRepository projectTypeRepository;
     private final SemesterService semesterService;
     private final SubjectService subjectService;
     private final ClassService classService;
@@ -81,6 +85,7 @@ public class LocalDemoDataSeeder implements ApplicationRunner {
             LecturerRepository lecturerRepository,
             TeamRepository teamRepository,
             TeamMemberRepository teamMemberRepository,
+            ProjectTypeRepository projectTypeRepository,
             SemesterService semesterService,
             SubjectService subjectService,
             ClassService classService,
@@ -96,6 +101,7 @@ public class LocalDemoDataSeeder implements ApplicationRunner {
         this.lecturerRepository = lecturerRepository;
         this.teamRepository = teamRepository;
         this.teamMemberRepository = teamMemberRepository;
+        this.projectTypeRepository = projectTypeRepository;
         this.semesterService = semesterService;
         this.subjectService = subjectService;
         this.classService = classService;
@@ -119,9 +125,9 @@ public class LocalDemoDataSeeder implements ApplicationRunner {
 
         Semester semester = semesterRepository.findByCode(SEMESTER_CODE)
                 .orElseGet(this::createSemester);
-        Subject subject = subjectRepository.findBySubjectCode(SUBJECT_CODE)
+        Subject subject = subjectRepository.findBySubjectCodeAndDeletedAtIsNull(SUBJECT_CODE)
                 .orElseGet(this::createSubject);
-        com.saga.be.entity.Class clazz = classRepository.findByClassCode(CLASS_CODE)
+        com.saga.be.entity.Class clazz = classRepository.findByClassCodeAndDeletedAtIsNull(CLASS_CODE)
                 .orElseGet(this::createClass);
         Lecturer instructor = lecturerRepository.findByEmailIgnoreCase(DEMO_INSTRUCTOR_EMAIL)
                 .orElseGet(() -> lecturerRepository.save(Lecturer.builder()
@@ -133,9 +139,17 @@ public class LocalDemoDataSeeder implements ApplicationRunner {
         Team team = teamRepository.findByCourseIdAndName(course.getId(), TEAM_NAME)
                 .orElseGet(() -> teamRepository.save(Team.builder().course(course).name(TEAM_NAME).build()));
 
-        TeamMember membership = teamMemberRepository
-                .findByTeamIdAndStudentId(team.getId(), leader.getId())
-                .orElseGet(() -> TeamMember.builder().team(team).student(leader).build());
+        List<TeamMember> courseMemberships = teamMemberRepository
+                .findByStudentIdAndTeamCourseId(leader.getId(), course.getId());
+        if (courseMemberships.size() > 1) {
+            throw new IllegalStateException("Local demo leader has invalid multiple Team memberships in the demo Course");
+        }
+        TeamMember membership = courseMemberships.isEmpty()
+                ? TeamMember.builder().team(team).student(leader).build()
+                : courseMemberships.get(0);
+        if (!membership.getTeam().getId().equals(team.getId())) {
+            throw new IllegalStateException("Local demo leader already belongs to another Team in the demo Course");
+        }
         if (membership.getRoleInTeam() != RoleInTeam.LEADER) {
             membership.setRoleInTeam(RoleInTeam.LEADER);
             teamMemberRepository.save(membership);
@@ -201,10 +215,11 @@ public class LocalDemoDataSeeder implements ApplicationRunner {
                 leader.getId(),
                 leader.getAccountStatus()
         );
+        ProjectType projectType = ensureProjectType();
         ProjectResponse response = teamProjectService.create(
                 principal,
                 team.getId(),
-                new CreateTeamProjectRequest(PROJECT_NAME),
+                new CreateTeamProjectRequest(PROJECT_NAME, projectType.getId()),
                 "local-demo-seed"
         );
         Project project = team.getProject();
@@ -212,5 +227,13 @@ public class LocalDemoDataSeeder implements ApplicationRunner {
             throw new IllegalStateException("Local demo project was not linked to its team");
         }
         return project;
+    }
+
+    private ProjectType ensureProjectType() {
+        return projectTypeRepository.findByCode(ProjectType.CODE_DESIGN_ARCHITECTURE)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Canonical ProjectType '" + ProjectType.CODE_DESIGN_ARCHITECTURE
+                                + "' is missing; run the project_type catalog migration before seeding local demo data"
+                ));
     }
 }

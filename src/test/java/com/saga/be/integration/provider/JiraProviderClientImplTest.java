@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 
 import ch.qos.logback.classic.Logger;
@@ -12,18 +13,24 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.saga.be.config.JiraIntegrationProperties;
 import com.saga.be.config.JiraTimeZoneProperties;
+import com.saga.be.entity.value.TaskComponentSnapshot;
 import com.saga.be.exception.IntegrationException;
 import java.net.URI;
 import java.net.URLDecoder;
+import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
+import org.springframework.test.web.client.ExpectedCount;
 import org.springframework.web.client.RestClient;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -35,6 +42,16 @@ class JiraProviderClientImplTest {
             + "/ex/jira/" + CLOUD_ID + "/rest/api/3/webhook";
     private static final String FIRST_WEBHOOK_PAGE_URL = WEBHOOK_URL
             + "?startAt=0&maxResults=100";
+    private static final String SPRINT_URL = BASE + "/ex/jira/" + CLOUD_ID
+            + "/rest/agile/1.0/sprint/42";
+    private static final String AGILE_BOARD_URL = BASE + "/ex/jira/" + CLOUD_ID
+            + "/rest/agile/1.0/board";
+    private static final String BOARD_FEATURES_URL = AGILE_BOARD_URL + "/35/features";
+    private static final String BOARD_SPRINTS_URL = AGILE_BOARD_URL + "/35/sprint";
+    private static final String PROJECT_FEATURES_URL = BASE + "/ex/jira/" + CLOUD_ID
+            + "/rest/api/3/project/10034/features";
+    private static final String PROJECT_URL = BASE + "/ex/jira/" + CLOUD_ID
+            + "/rest/api/3/project/search?startAt=0&maxResults=50&orderBy=key";
     private static final URI CALLBACK = URI.create(
             "https://callback.test/api/webhooks/jira?token=CALLBACK_SECRET"
     );
@@ -61,7 +78,7 @@ class JiraProviderClientImplTest {
     }
 
     @Test
-    void exposesProviderErrorsFromHttp200WithoutLoggingSecrets() {
+    void redactsProviderErrorsContainingCallbackSecrets() {
         Fixture fixture = fixture();
         Logger logger = (Logger) LoggerFactory.getLogger(
                 JiraProviderClientImpl.class
@@ -73,7 +90,7 @@ class JiraProviderClientImplTest {
                 .andExpect(method(HttpMethod.POST))
                 .andRespond(withStatus(org.springframework.http.HttpStatus.OK)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .body("{\"webhookRegistrationResult\":[{\"errors\":[\"JQL is invalid\"]}]}"));
+                        .body("{\"webhookRegistrationResult\":[{\"errors\":[\"callback https://callback.test/api/webhooks/jira?token=PROVIDER_CALLBACK_SECRET is already registered\"]}]}"));
 
         try {
             IntegrationException error = assertThrows(
@@ -83,13 +100,16 @@ class JiraProviderClientImplTest {
                     )
             );
             assertEquals("JIRA_WEBHOOK_REGISTRATION_REJECTED", error.getCode());
-            assertThat(error.getMessage()).contains("JQL is invalid");
+            assertThat(error.getMessage()).doesNotContain("PROVIDER_CALLBACK_SECRET");
             String logged = appender.list.stream()
                     .map(ILoggingEvent::getFormattedMessage)
                     .reduce("", String::concat);
             assertThat(logged)
                     .doesNotContain("ACCESS_TOKEN_SECRET")
-                    .doesNotContain("CALLBACK_SECRET");
+                    .doesNotContain("CALLBACK_SECRET")
+                    .doesNotContain("PROVIDER_CALLBACK_SECRET")
+                    .contains("errorCategory=REJECTED")
+                    .contains("errorCount=1");
         } finally {
             logger.detachAppender(appender);
         }
@@ -97,23 +117,45 @@ class JiraProviderClientImplTest {
     }
 
     @Test
-    void reusesMatchingExistingWebhookWithoutPostingAnother() {
+    void replacesMatchingRetainedWebhookWithFreshCallback() {
         Fixture fixture = fixture();
         fixture.server.expect(requestTo(FIRST_WEBHOOK_PAGE_URL))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(json(listResponse("12", CALLBACK.toString())));
+        fixture.server.expect(requestTo(WEBHOOK_URL))
+                .andExpect(method(HttpMethod.DELETE))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.NO_CONTENT));
+        fixture.server.expect(requestTo(WEBHOOK_URL))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(json("{\"webhookRegistrationResult\":[{\"createdWebhookId\":13}]}"));
 
         JiraWebhookRegistration result = fixture.client.ensureWebhook(
                 "ACCESS_TOKEN_SECRET", CLOUD_ID, "SDP", CALLBACK, "12"
         );
 
-        assertEquals("12", result.webhookId());
+        assertEquals("13", result.webhookId());
+        assertThat(result.created()).isTrue();
+        fixture.server.verify();
+    }
+
+    @Test
+    void maintenanceRefreshDoesNotRotateMatchingWebhook() {
+        Fixture fixture = fixture();
+        fixture.server.expect(requestTo(FIRST_WEBHOOK_PAGE_URL))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(json(listResponse("14", CALLBACK.toString())));
+
+        JiraWebhookRegistration result = fixture.client.refreshWebhook(
+                "ACCESS_TOKEN_SECRET", CLOUD_ID, "SDP", CALLBACK, "14"
+        );
+
+        assertEquals("14", result.webhookId());
         assertThat(result.created()).isFalse();
         fixture.server.verify();
     }
 
     @Test
-    void replacesOnlyTheBoardWebhookWhenCallbackUrlIsOld() {
+    void doesNotDeleteRetainedWebhookWhenCallbackEndpointIsUnrelated() {
         Fixture fixture = fixture();
         fixture.server.expect(requestTo(FIRST_WEBHOOK_PAGE_URL))
                 .andExpect(method(HttpMethod.GET))
@@ -121,9 +163,6 @@ class JiraProviderClientImplTest {
                         "9",
                         "https://example.com/api/webhooks/jira?token=old"
                 )));
-        fixture.server.expect(requestTo(WEBHOOK_URL))
-                .andExpect(method(HttpMethod.DELETE))
-                .andRespond(withStatus(org.springframework.http.HttpStatus.NO_CONTENT));
         fixture.server.expect(requestTo(WEBHOOK_URL))
                 .andExpect(method(HttpMethod.POST))
                 .andRespond(json("{\"webhookRegistrationResult\":[{\"createdWebhookId\":10}]}"));
@@ -266,6 +305,10 @@ class JiraProviderClientImplTest {
                     .contains("project = SDP")
                     .contains("updated >= \"2026-07-31 00:25\"")
                     .contains("updated < \"2026-07-31 00:32\"")
+                    .contains("labels")
+                    .contains("components")
+                    .contains("description")
+                    .contains("attachment")
                     .doesNotContain(":57")
                     .doesNotContain(":02")
                     .doesNotContainPattern(
@@ -306,6 +349,1231 @@ class JiraProviderClientImplTest {
     }
 
     @Test
+    void parsesMissingNullAndEmptyLabelsAsEmptyImmutableLists() {
+        assertThat(searchFirstIssue(null).labels()).isEmpty();
+        assertThat(searchFirstIssue("null").labels()).isEmpty();
+        assertThat(searchFirstIssue("[]").labels()).isEmpty();
+    }
+
+    @Test
+    void parsesOneAndMultipleLabelsWithoutChangingTheirValues() {
+        assertThat(searchFirstIssue("[\"Backend\"]").labels())
+                .containsExactly("Backend");
+        JiraIssueSnapshot multiple = searchFirstIssue("[\"UI Ready\",\"P1\",\"MiXeD\"]");
+        assertThat(multiple.labels())
+                .containsExactly("UI Ready", "P1", "MiXeD");
+        assertThrows(UnsupportedOperationException.class,
+                () -> multiple.labels().add("must-not-mutate"));
+    }
+
+    @Test
+    void rejectsNonStringJiraLabelValues() {
+        IntegrationException exception = assertThrows(
+                IntegrationException.class,
+                () -> searchFirstIssue("[{\"name\":\"not-a-string\"}]")
+        );
+
+        assertEquals("JIRA_RESPONSE_INVALID", exception.getCode());
+    }
+
+    @Test
+    void parsesMissingNullAndEmptyComponentsAsEmptyImmutableLists() {
+        assertThat(searchFirstIssueWithRaw(null, null, null).components()).isEmpty();
+        assertThat(searchFirstIssueWithRaw(null, "null", null).components()).isEmpty();
+        assertThat(searchFirstIssueWithRaw(null, "[]", null).components()).isEmpty();
+    }
+
+    @Test
+    void parsesAndPreservesComponentIdAndNameSnapshots() {
+        JiraIssueSnapshot issue = searchFirstIssueWithRaw(
+                null,
+                "[{\"id\":\"10\",\"name\":\"Backend\"},"
+                        + "{\"id\":\"20\",\"name\":\"UI\"}]",
+                null
+        );
+
+        assertThat(issue.components()).containsExactly(
+                new TaskComponentSnapshot("10", "Backend"),
+                new TaskComponentSnapshot("20", "UI")
+        );
+        assertThrows(UnsupportedOperationException.class,
+                () -> issue.components().add(new TaskComponentSnapshot("30", "Other")));
+    }
+
+    @Test
+    void rejectsInvalidComponentAndDescriptionShapes() {
+        assertEquals("JIRA_RESPONSE_INVALID", assertThrows(
+                IntegrationException.class,
+                () -> searchFirstIssueWithRaw(null, "[\"not-an-object\"]", null)
+        ).getCode());
+        assertEquals("JIRA_RESPONSE_INVALID", assertThrows(
+                IntegrationException.class,
+                () -> searchFirstIssueWithRaw(null, null, "{\"content\":\"not-an-array\"}")
+        ).getCode());
+    }
+
+    @Test
+    void convertsPlainTextAndAtlassianDocumentFormatDescriptionToSafeText() {
+        assertEquals("Plain description", searchFirstIssueWithRaw(
+                null,
+                null,
+                "\"Plain description\""
+        ).description());
+        assertEquals("Heading body", searchFirstIssueWithRaw(
+                null,
+                null,
+                "{\"type\":\"doc\",\"content\":[{\"type\":\"paragraph\","
+                        + "\"content\":[{\"type\":\"text\",\"text\":\"Heading \"},"
+                        + "{\"type\":\"text\",\"text\":\"body\"}]}]}"
+        ).description());
+    }
+
+    @Test
+    void parsesMissingNullAndEmptyAttachmentsAsEmptyImmutableLists() {
+        assertThat(searchFirstIssueWithRaw(null, null, null, null).attachments()).isEmpty();
+        assertThat(searchFirstIssueWithRaw(null, null, null, "null").attachments()).isEmpty();
+        assertThat(searchFirstIssueWithRaw(null, null, null, "[]").attachments()).isEmpty();
+    }
+
+    @Test
+    void parsesAttachmentMetadataWithoutContentUrls() {
+        JiraIssueSnapshot issue = searchFirstIssueWithRaw(
+                null,
+                null,
+                null,
+                "[{\"id\":\"10001\",\"filename\":\"spec.pdf\",\"mimeType\":\"application/pdf\","
+                        + "\"size\":2048,\"author\":{\"accountId\":\"acct-1\"}}]"
+        );
+
+        assertThat(issue.attachments()).containsExactly(
+                new JiraAttachmentSnapshot("10001", "spec.pdf", "application/pdf", 2048L, "acct-1")
+        );
+        assertThrows(UnsupportedOperationException.class,
+                () -> issue.attachments().add(new JiraAttachmentSnapshot("x", "y", "z", 1L, "a")));
+    }
+
+    @Test
+    void rejectsInvalidAttachmentShapes() {
+        assertEquals("JIRA_RESPONSE_INVALID", assertThrows(
+                IntegrationException.class,
+                () -> searchFirstIssueWithRaw(null, null, null, "{\"id\":\"not-an-array\"}")
+        ).getCode());
+        assertEquals("JIRA_RESPONSE_INVALID", assertThrows(
+                IntegrationException.class,
+                () -> searchFirstIssueWithRaw(null, null, null, "[{\"filename\":\"missing-id.pdf\"}]")
+        ).getCode());
+    }
+
+    @Test
+    void uploadsIssueAttachmentsAsMultipartWithAtlassianToken() {
+        Fixture fixture = fixture();
+        fixture.server.expect(requestTo(BASE + "/ex/jira/" + CLOUD_ID + "/rest/api/3/issue/101/attachments"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.header(
+                        "X-Atlassian-Token", "no-check"))
+                .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.header(
+                        HttpHeaders.AUTHORIZATION, "Bearer ACCESS_TOKEN_SECRET"))
+                .andExpect(content().contentTypeCompatibleWith(MediaType.MULTIPART_FORM_DATA))
+                .andRespond(json("""
+                        [{"id":"20001","filename":"spec.pdf","mimeType":"application/pdf",
+                          "size":12,"author":{"accountId":"acct-1"}}]
+                        """));
+
+        List<JiraAttachmentSnapshot> uploaded = fixture.client.addIssueAttachments(
+                "ACCESS_TOKEN_SECRET",
+                CLOUD_ID,
+                "101",
+                List.of(new JiraAttachmentUpload("spec.pdf", "application/pdf", "hello-world!".getBytes()))
+        );
+
+        assertThat(uploaded).containsExactly(
+                new JiraAttachmentSnapshot("20001", "spec.pdf", "application/pdf", 12L, "acct-1")
+        );
+        fixture.server.verify();
+    }
+
+    @Test
+    void rejectsEmptyAttachmentUploadBeforeCallingJira() {
+        Fixture fixture = fixture();
+
+        assertEquals("JIRA_ATTACHMENT_REQUIRED", assertThrows(
+                IntegrationException.class,
+                () -> fixture.client.addIssueAttachments("ACCESS_TOKEN_SECRET", CLOUD_ID, "101", List.of())
+        ).getCode());
+        fixture.server.verify();
+    }
+
+    @Test
+    void createsIssueRemoteLinkForASubmittedEvidenceUrl() {
+        Fixture fixture = fixture();
+        fixture.server.expect(requestTo(BASE + "/ex/jira/" + CLOUD_ID + "/rest/api/3/issue/101/remotelink"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.header(
+                        HttpHeaders.AUTHORIZATION, "Bearer ACCESS_TOKEN_SECRET"))
+                .andExpect(content().json("""
+                        {"object":{"url":"https://drive.google.com/file/d/abc/view","title":"drive.google.com"}}
+                        """))
+                .andRespond(json("{\"id\":10000,\"self\":\"https://example.atlassian.net/rest/api/3/issue/101/remotelink/10000\"}"));
+
+        assertEquals("10000", fixture.client.addIssueRemoteLink(
+                "ACCESS_TOKEN_SECRET",
+                CLOUD_ID,
+                "101",
+                "https://drive.google.com/file/d/abc/view",
+                "drive.google.com"
+        ));
+        fixture.server.verify();
+    }
+
+    @Test
+    void discoversAllAgileBoardsAcrossPagesUsingTheCanonicalProjectId() {
+        Fixture fixture = fixture();
+        fixture.server.expect(request -> {
+            assertEquals("/ex/jira/" + CLOUD_ID + "/rest/agile/1.0/board", request.getURI().getPath());
+            String query = URLDecoder.decode(request.getURI().getRawQuery(), StandardCharsets.UTF_8);
+            assertThat(query).contains("projectKeyOrId=10034").contains("startAt=0").contains("maxResults=50");
+        }).andExpect(method(HttpMethod.GET)).andRespond(json(
+                page(false, 0, 50, 2, "{\"id\":12,\"name\":\"Scrum\",\"type\":\"scrum\"}")
+        ));
+        fixture.server.expect(request -> {
+            String query = URLDecoder.decode(request.getURI().getRawQuery(), StandardCharsets.UTF_8);
+            assertThat(query).contains("projectKeyOrId=10034").contains("startAt=1");
+        }).andExpect(method(HttpMethod.GET)).andRespond(json(
+                page(true, 1, 50, 2, "{\"id\":13,\"name\":\"Kanban\",\"type\":\"kanban\"}")
+        ));
+
+        assertThat(fixture.client.discoverAgileBoards("ACCESS_TOKEN_SECRET", CLOUD_ID, "10034"))
+                .containsExactly(
+                        new JiraAgileBoardInfo("12", "Scrum", "scrum"),
+                        new JiraAgileBoardInfo("13", "Kanban", "kanban")
+                );
+        fixture.server.verify();
+    }
+
+    @Test
+    void doesNotDeleteWebhookForAnotherJiraProject() {
+        Fixture fixture = fixture();
+        fixture.server.expect(requestTo(FIRST_WEBHOOK_PAGE_URL))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(json(listResponse("68", CALLBACK.toString())
+                        .replace("project = SDP", "project = OTHER")));
+        fixture.server.expect(requestTo(WEBHOOK_URL))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(json("{\"webhookRegistrationResult\":[{\"createdWebhookId\":69}]}"));
+
+        JiraWebhookRegistration result = fixture.client.ensureWebhook(
+                "ACCESS_TOKEN_SECRET", CLOUD_ID, "SDP", CALLBACK, null
+        );
+
+        assertEquals("69", result.webhookId());
+        fixture.server.verify();
+    }
+
+    @Test
+    void failsClosedWhenMoreThanOneSafeWebhookCandidateExists() {
+        Fixture fixture = fixture();
+        fixture.server.expect(requestTo(FIRST_WEBHOOK_PAGE_URL))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(json(page(
+                        true,
+                        0,
+                        100,
+                        2,
+                        webhookValue("70", CALLBACK.toString(), "") + ","
+                                + webhookValue(
+                                        "71",
+                                        "https://callback.test/api/webhooks/jira?token=OLD_SECRET",
+                                        ""
+                                )
+                )));
+
+        IntegrationException error = assertThrows(IntegrationException.class,
+                () -> fixture.client.ensureWebhook(
+                        "ACCESS_TOKEN_SECRET", CLOUD_ID, "SDP", CALLBACK, null
+                ));
+
+        assertEquals("JIRA_WEBHOOK_ORPHAN_AMBIGUOUS", error.getCode());
+        fixture.server.verify();
+    }
+
+    @Test
+    void doesNotRegisterWhenSafeWebhookDeletionFails() {
+        Fixture fixture = fixture();
+        fixture.server.expect(requestTo(FIRST_WEBHOOK_PAGE_URL))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(json(listResponse("72", CALLBACK.toString())));
+        fixture.server.expect(requestTo(WEBHOOK_URL))
+                .andExpect(method(HttpMethod.DELETE))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR));
+
+        IntegrationException error = assertThrows(IntegrationException.class,
+                () -> fixture.client.ensureWebhook(
+                        "ACCESS_TOKEN_SECRET", CLOUD_ID, "SDP", CALLBACK, null
+                ));
+
+        assertEquals("JIRA_PROVIDER_UNAVAILABLE", error.getCode());
+        fixture.server.verify();
+    }
+
+    @Test
+    void replacesExactlyOneSafeOrphanWebhookWhenNoLocalWebhookIdExists() {
+        Fixture fixture = fixture();
+        fixture.server.expect(requestTo(FIRST_WEBHOOK_PAGE_URL))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(json(listResponse(
+                        "44",
+                        "https://callback.test/api/webhooks/jira?token=ORPHAN_SECRET"
+                )));
+        fixture.server.expect(requestTo(WEBHOOK_URL))
+                .andExpect(method(HttpMethod.DELETE))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.NO_CONTENT));
+        fixture.server.expect(requestTo(WEBHOOK_URL))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(json("{\"webhookRegistrationResult\":[{\"createdWebhookId\":45}]}"));
+
+        JiraWebhookRegistration result = fixture.client.ensureWebhook(
+                "ACCESS_TOKEN_SECRET", CLOUD_ID, "SDP", CALLBACK, null
+        );
+
+        assertEquals("45", result.webhookId());
+        assertThat(result.created()).isTrue();
+        fixture.server.verify();
+    }
+
+    @Test
+    void doesNotDeleteAnUnrelatedWebhookDuringOrphanRecovery() {
+        Fixture fixture = fixture();
+        fixture.server.expect(requestTo(FIRST_WEBHOOK_PAGE_URL))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(json(page(
+                        true,
+                        0,
+                        100,
+                        1,
+                        webhookValue(
+                                "66",
+                                "https://other.example/api/webhooks/jira?token=UNRELATED_SECRET",
+                                ""
+                        )
+                )));
+        fixture.server.expect(requestTo(WEBHOOK_URL))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(json("{\"webhookRegistrationResult\":[{\"createdWebhookId\":67}]}"));
+
+        JiraWebhookRegistration result = fixture.client.ensureWebhook(
+                "ACCESS_TOKEN_SECRET", CLOUD_ID, "SDP", CALLBACK, null
+        );
+
+        assertEquals("67", result.webhookId());
+        fixture.server.verify();
+    }
+
+    @Test
+    void parsesTheOfficialBoardFeaturesShapeAndIgnoresDocumentedExtraFields() {
+        Fixture fixture = fixture();
+        fixture.server.expect(requestTo(BOARD_FEATURES_URL))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(json("""
+                        {"features":[{
+                          "boardFeature":"SIMPLE_ROADMAP",
+                          "featureId":"feature-35",
+                          "featureType":"BASIC",
+                          "state":"ENABLED",
+                          "boardId":35,
+                          "localisedName":"Sprints",
+                          "localisedDescription":"Not retained",
+                          "unknownFutureField":true
+                        }]}
+                        """));
+
+        assertThat(fixture.client.getBoardFeatures("ACCESS_TOKEN_SECRET", CLOUD_ID, "35"))
+                .containsExactly(new JiraBoardFeature(
+                        "SIMPLE_ROADMAP", "feature-35", "ENABLED", "35"
+                ));
+        fixture.server.verify();
+    }
+
+    @Test
+    void acceptsMissingOptionalBoardFeatureFieldsWithoutCallingTheResponseMalformed() {
+        Fixture fixture = fixture();
+        fixture.server.expect(requestTo(BOARD_FEATURES_URL))
+                .andRespond(json("{" + "\"features\":[{}]}"));
+
+        assertThat(fixture.client.getBoardFeatures("ACCESS_TOKEN_SECRET", CLOUD_ID, "35"))
+                .containsExactly(new JiraBoardFeature(null, null, null, null));
+        fixture.server.verify();
+    }
+
+    @Test
+    void acceptsAnEmptyBoardSprintPageAsSprintEndpointSupport() {
+        Fixture fixture = fixture();
+        fixture.server.expect(request -> {
+            assertEquals("/ex/jira/" + CLOUD_ID + "/rest/agile/1.0/board/35/sprint",
+                    request.getURI().getPath());
+            assertEquals("maxResults=1", request.getURI().getRawQuery());
+        }).andExpect(method(HttpMethod.GET)).andRespond(json("{\"values\":[]}"));
+
+        assertThat(fixture.client.supportsBoardSprintEndpoint(
+                "ACCESS_TOKEN_SECRET", CLOUD_ID, "35"
+        )).isTrue();
+        fixture.server.verify();
+    }
+
+    @Test
+    void acceptsANonEmptyBoardSprintPageWithoutRetainingSprintValues() {
+        Fixture fixture = fixture();
+        fixture.server.expect(requestTo(BOARD_SPRINTS_URL + "?maxResults=1"))
+                .andRespond(json("{\"values\":[{\"id\":42,\"name\":\"Sprint private\"}]}"));
+
+        assertThat(fixture.client.supportsBoardSprintEndpoint(
+                "ACCESS_TOKEN_SECRET", CLOUD_ID, "35"
+        )).isTrue();
+        fixture.server.verify();
+    }
+
+    @Test
+    void rejectsMalformedBoardSprintPageWithoutLoggingProviderBody() {
+        Fixture fixture = fixture();
+        Logger logger = (Logger) LoggerFactory.getLogger(JiraProviderClientImpl.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        fixture.server.expect(requestTo(BOARD_SPRINTS_URL + "?maxResults=1"))
+                .andRespond(json("{\"unexpected\":\"PROVIDER_SECRET\"}"));
+        try {
+            assertEquals("JIRA_RESPONSE_INVALID", assertThrows(
+                    IntegrationException.class,
+                    () -> fixture.client.supportsBoardSprintEndpoint(
+                            "ACCESS_TOKEN_SECRET", CLOUD_ID, "35"
+                    )
+            ).getCode());
+            String logged = appender.list.stream()
+                    .map(ILoggingEvent::getFormattedMessage)
+                    .filter(value -> value.startsWith("Jira sprint capability probe response invalid:"))
+                    .findFirst()
+                    .orElseThrow();
+            assertThat(logged)
+                    .contains("providerOperation=supportsBoardSprintEndpoint")
+                    .contains("endpointPathTemplate=/rest/agile/1.0/board/{boardId}/sprint")
+                    .contains("responseShapeCategory=VALUES_MISSING")
+                    .doesNotContain("PROVIDER_SECRET")
+                    .doesNotContain("ACCESS_TOKEN_SECRET");
+        } finally {
+            logger.detachAppender(appender);
+        }
+        fixture.server.verify();
+    }
+
+    @Test
+    void parsesProjectFeatureIdentifiersAndStatesWithoutLocalizedValues() {
+        Fixture fixture = fixture();
+        fixture.server.expect(requestTo(PROJECT_FEATURES_URL))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(json("""
+                        {"features":[{
+                          "feature":"jsw.team.example",
+                          "projectId":10034,
+                          "state":"ENABLED",
+                          "localisedName":"Ignored",
+                          "localisedDescription":"Ignored"
+                        }]}
+                        """));
+
+        assertThat(fixture.client.getProjectFeatures("ACCESS_TOKEN_SECRET", CLOUD_ID, "10034"))
+                .containsExactly(new JiraProjectFeature("jsw.team.example", "ENABLED"));
+        fixture.server.verify();
+    }
+
+    @Test
+    void logsSafeShapeDiagnosticsWhenBoardFeaturesRootIsMalformed() {
+        Fixture fixture = fixture();
+        Logger logger = (Logger) LoggerFactory.getLogger(JiraProviderClientImpl.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        fixture.server.expect(requestTo(BOARD_FEATURES_URL))
+                .andRespond(json("{\"unexpected\":\"PROVIDER_SECRET\"}"));
+        try {
+            assertEquals("JIRA_RESPONSE_INVALID", assertThrows(
+                    IntegrationException.class,
+                    () -> fixture.client.getBoardFeatures("ACCESS_TOKEN_SECRET", CLOUD_ID, "35")
+            ).getCode());
+            String logged = appender.list.stream()
+                    .map(ILoggingEvent::getFormattedMessage)
+                    .filter(value -> value.startsWith("Jira feature response invalid:"))
+                    .findFirst()
+                    .orElseThrow();
+            assertThat(logged)
+                    .contains("providerOperation=getBoardFeatures")
+                    .contains("endpointPathTemplate=/rest/agile/1.0/board/{boardId}/features")
+                    .contains("responseShapeCategory=FEATURES_MISSING")
+                    .contains("missingRequiredFields=features")
+                    .contains("exceptionClass=IntegrationException")
+                    .doesNotContain("PROVIDER_SECRET")
+                    .doesNotContain("ACCESS_TOKEN_SECRET");
+        } finally {
+            logger.detachAppender(appender);
+        }
+        fixture.server.verify();
+    }
+
+    @Test
+    void uses3loGatewayForProjectAndBoardDiscoveryAndParsesResourceScopes() {
+        Fixture fixture = fixture();
+        fixture.server.expect(requestTo(BASE + "/oauth/token/accessible-resources"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(json("""
+                        [{"id":"cloud-123","name":"SAGA","url":"https://site.example",
+                          "scopes":["read:jira-work","read:board-scope:jira-software"]}]
+                        """));
+        fixture.server.expect(requestTo(PROJECT_URL))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(json("{\"isLast\":true,\"values\":[]}"));
+        fixture.server.expect(request -> assertThat(request.getURI().toString())
+                        .startsWith(AGILE_BOARD_URL + "?projectKeyOrId=10034"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(json("{\"isLast\":true,\"values\":[]}"));
+
+        assertThat(fixture.client.accessibleResources("ACCESS_TOKEN_SECRET"))
+                .singleElement()
+                .satisfies(resource -> assertThat(resource.scopes())
+                        .containsExactlyInAnyOrder(
+                                "read:jira-work", "read:board-scope:jira-software"
+                        ));
+        fixture.client.projects("ACCESS_TOKEN_SECRET", CLOUD_ID);
+        fixture.client.discoverAgileBoards("ACCESS_TOKEN_SECRET", CLOUD_ID, "10034");
+        fixture.server.verify();
+    }
+
+    @Test
+    void normalizesCanonicalSprintOffsetsToUtcAndKeepsNull() {
+        Fixture fixture = fixture();
+        fixture.server.expect(requestTo(SPRINT_URL))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(json("""
+                        {
+                          "id":42,
+                          "name":"Sprint 42",
+                          "state":"active",
+                          "startDate":"2026-08-06T09:15:30.123+07:00",
+                          "endDate":"2026-08-16T02:15:30.123Z",
+                          "completeDate":"2026-08-06T02:15:30.123Z",
+                          "originBoardId":99
+                        }
+                        """));
+
+        JiraSprintSnapshot sprint = fixture.client.getSprint(
+                "ACCESS_TOKEN_SECRET", CLOUD_ID, "42"
+        );
+
+        assertEquals(
+                LocalDateTime.parse("2026-08-06T02:15:30.123"),
+                sprint.startDate()
+        );
+        assertEquals(
+                LocalDateTime.parse("2026-08-16T02:15:30.123"),
+                sprint.endDate()
+        );
+        assertEquals(sprint.startDate(), sprint.completeDate());
+        fixture.server.verify();
+    }
+
+    @Test
+    void startsSprintThroughTheAgileSprintPartialUpdateEndpoint() {
+        Fixture fixture = fixture();
+        fixture.server.expect(requestTo(SPRINT_URL))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(this::assertJsonBearerRequest)
+                .andExpect(content().json("{\"state\":\"active\"}"))
+                .andRespond(json("{\"id\":\"42\",\"name\":\"Sprint 42\",\"state\":\"active\"}"));
+
+        JiraSprintSnapshot sprint = fixture.client.updateSprint(
+                "ACCESS_TOKEN_SECRET", CLOUD_ID, "42", java.util.Map.of("state", "active")
+        );
+
+        assertEquals("active", sprint.state());
+        fixture.server.verify();
+    }
+
+    @Test
+    void closesSprintThroughTheAgileSprintPartialUpdateEndpoint() {
+        Fixture fixture = fixture();
+        fixture.server.expect(requestTo(SPRINT_URL))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(this::assertJsonBearerRequest)
+                .andExpect(content().json("{\"state\":\"closed\"}"))
+                .andRespond(json("{\"id\":\"42\",\"name\":\"Sprint 42\",\"state\":\"closed\"}"));
+
+        JiraSprintSnapshot sprint = fixture.client.updateSprint(
+                "ACCESS_TOKEN_SECRET", CLOUD_ID, "42", java.util.Map.of("state", "closed")
+        );
+
+        assertEquals("closed", sprint.state());
+        fixture.server.verify();
+    }
+
+    @Test
+    void partiallyUpdatesSprintThroughPostWithoutReplacingOmittedFields() {
+        Fixture fixture = fixture();
+        fixture.server.expect(requestTo(SPRINT_URL))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(this::assertJsonBearerRequest)
+                .andExpect(content().json("{\"name\":\"Renamed\"}"))
+                .andRespond(json("{\"id\":\"42\",\"name\":\"Renamed\",\"state\":\"future\"}"));
+
+        JiraSprintSnapshot sprint = fixture.client.updateSprint(
+                "ACCESS_TOKEN_SECRET", CLOUD_ID, "42", java.util.Map.of("name", "Renamed")
+        );
+
+        assertEquals("Renamed", sprint.name());
+        fixture.server.verify();
+    }
+
+    @Test
+    void acceptsJiraCompactOffsetForCanonicalSprintDates() {
+        Fixture fixture = fixture();
+        fixture.server.expect(requestTo(SPRINT_URL))
+                .andRespond(json("""
+                        {
+                          "id":"42",
+                          "name":"Sprint 42",
+                          "startDate":"2026-08-06T09:15:30.123+0700"
+                        }
+                        """));
+
+        JiraSprintSnapshot sprint = fixture.client.getSprint(
+                "ACCESS_TOKEN_SECRET", CLOUD_ID, "42"
+        );
+
+        assertEquals(
+                LocalDateTime.parse("2026-08-06T02:15:30.123"),
+                sprint.startDate()
+        );
+        assertThat(sprint.endDate()).isNull();
+        assertThat(sprint.completeDate()).isNull();
+        fixture.server.verify();
+    }
+
+    @Test
+    void rejectsMalformedCanonicalSprintDatesWithSanitizedCategory() {
+        Fixture fixture = fixture();
+        fixture.server.expect(requestTo(SPRINT_URL))
+                .andRespond(json("""
+                        {"id":"42","name":"Sprint 42","endDate":"not-a-date"}
+                        """));
+
+        IntegrationException error = assertThrows(
+                IntegrationException.class,
+                () -> fixture.client.getSprint(
+                        "ACCESS_TOKEN_SECRET", CLOUD_ID, "42"
+                )
+        );
+
+        assertEquals("JIRA_RESPONSE_INVALID", error.getCode());
+        assertThat(error.getMessage()).doesNotContain("not-a-date");
+        fixture.server.verify();
+
+        Fixture malformedStart = fixture();
+        malformedStart.server.expect(requestTo(SPRINT_URL))
+                .andRespond(json("""
+                        {"id":"42","name":"Sprint 42","startDate":"not-a-date"}
+                        """));
+        IntegrationException startError = assertThrows(
+                IntegrationException.class,
+                () -> malformedStart.client.getSprint(
+                        "ACCESS_TOKEN_SECRET", CLOUD_ID, "42"
+                )
+        );
+        assertEquals("JIRA_RESPONSE_INVALID", startError.getCode());
+        malformedStart.server.verify();
+    }
+
+    @Test
+    void discoversSprintFieldBySchemaWithoutHardcodedFieldId() {
+        Fixture fixture = fixture();
+        fixture.server.expect(requestTo(
+                        BASE + "/ex/jira/" + CLOUD_ID + "/rest/api/3/field"
+                ))
+                .andRespond(json("""
+                        [
+                          {"id":"customfield_10016","name":"Story point estimate",
+                           "schema":{"custom":"com.atlassian.jira.plugin.system.customfieldtypes:float"}},
+                          {"id":"customfield_10020","name":"Sprint",
+                           "schema":{"custom":"com.pyxis.greenhopper.jira:gh-sprint"}}
+                        ]
+                        """));
+
+        assertEquals(
+                "customfield_10020",
+                fixture.client.sprintFieldId("ACCESS_TOKEN_SECRET", CLOUD_ID)
+        );
+        fixture.server.verify();
+    }
+
+    @Test
+    void mapsPartialIssueSprintWithoutTreatingItAsCanonicalDates() {
+        Fixture fixture = fixture();
+        fixture.server.expect(request -> {
+            String query = URLDecoder.decode(
+                    request.getURI().getRawQuery(), StandardCharsets.UTF_8
+            );
+            assertThat(query).contains("customfield_10020");
+        }).andRespond(json("""
+                {"isLast":true,"issues":[{
+                  "id":"10452","key":"SDP-1",
+                  "fields":{"summary":"Issue","updated":"2026-08-04T05:00:00Z",
+                    "customfield_10020":[
+                      {"id":41,"name":"Old Sprint","state":"closed",
+                       "startDate":"2026-07-01T00:00:00Z"},
+                      {"id":42,"name":"Current Sprint","state":"active",
+                       "startDate":null}
+                    ]}
+                }]}
+                """));
+
+        JiraIssueSnapshot issue = fixture.client.searchIssues(
+                "ACCESS_TOKEN_SECRET",
+                CLOUD_ID,
+                "SDP",
+                null,
+                Instant.parse("2026-08-04T06:00:00Z"),
+                null,
+                "customfield_10020"
+        ).issues().get(0);
+
+        assertEquals("42", issue.sprintId());
+        assertEquals("Current Sprint", issue.sprintName());
+        fixture.server.verify();
+    }
+
+    @Test
+    void mapsCreateMetadataIntoSanitizedProviderDtos() {
+        Fixture fixture = fixture();
+        String issueTypesUrl = BASE + "/ex/jira/" + CLOUD_ID
+                + "/rest/api/3/issue/createmeta/10000/issuetypes?startAt=0&maxResults=100";
+        String fieldsUrl = BASE + "/ex/jira/" + CLOUD_ID
+                + "/rest/api/3/issue/createmeta/10000/issuetypes/3?startAt=0&maxResults=100";
+        fixture.server.expect(requestTo(issueTypesUrl)).andRespond(json("""
+                {"startAt":0,"maxResults":100,"total":1,"issueTypes":[{
+                  "id":"3","name":"Task","subtask":false,
+                  "description":"A delivery item","unexpected":{"raw":"payload"}
+                }]}
+                """));
+        fixture.server.expect(requestTo(fieldsUrl)).andRespond(json("""
+                {"startAt":0,"maxResults":100,"total":2,"fields":[
+                  {"key":"summary","name":"Summary","required":true,
+                   "schema":{"type":"string"},"allowedValues":["one"]},
+                  {"key":"customfield_10001","name":"Release","required":false,
+                   "schema":{"type":"array","items":"option"},"allowedValues":[
+                     {"id":"10","value":"1.0","name":"Release 1.0","secret":"ignored"}
+                   ]}
+                ]}
+                """));
+
+        assertThat(fixture.client.getCreateIssueTypes(
+                "ACCESS_TOKEN_SECRET", CLOUD_ID, "10000"
+        )).containsExactly(new JiraCreateIssueType(
+                "3", "Task", false, "A delivery item"
+        ));
+        assertThat(fixture.client.getCreateFields(
+                "ACCESS_TOKEN_SECRET", CLOUD_ID, "10000", "3"
+        )).containsExactly(
+                new JiraCreateField(
+                        "summary", "Summary", true, "string", null,
+                        List.of(new JiraCreateFieldAllowedValue(null, "one", null))
+                ),
+                new JiraCreateField(
+                        "customfield_10001", "Release", false, "array", "option",
+                        List.of(new JiraCreateFieldAllowedValue(
+                                "10", "1.0", "Release 1.0"
+                        ))
+                )
+        );
+        fixture.server.verify();
+    }
+
+    @Test
+    void mapsEditMetadataPriorityAllowedValuesAndSendsResolvedProviderId() {
+        Fixture fixture = fixture();
+        String issueUrl = BASE + "/ex/jira/" + CLOUD_ID + "/rest/api/3/issue/10452";
+        fixture.server.expect(requestTo(issueUrl + "/editmeta"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(json("""
+                        {"fields":{"priority":{
+                          "name":"Priority","required":false,
+                          "schema":{"type":"priority"},
+                          "allowedValues":[
+                            {"id":"priority-high","name":"High","ignored":"raw"},
+                            {"id":"priority-low","name":"Low"}
+                          ]
+                        }}}
+                        """));
+        fixture.server.expect(requestTo(issueUrl))
+                .andExpect(method(HttpMethod.PUT))
+                .andExpect(content().json("""
+                        {"fields":{"priority":{"id":"priority-high"}}}
+                        """))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.NO_CONTENT));
+
+        assertThat(fixture.client.getEditMetadata(
+                "ACCESS_TOKEN_SECRET", CLOUD_ID, "10452"
+        )).containsExactly(new JiraCreateField(
+                "priority", "Priority", false, "priority", null,
+                List.of(
+                        new JiraCreateFieldAllowedValue("priority-high", null, "High"),
+                        new JiraCreateFieldAllowedValue("priority-low", null, "Low")
+                )
+        ));
+        fixture.client.updateIssue(
+                "ACCESS_TOKEN_SECRET", CLOUD_ID, "10452",
+                Map.of("priority", Map.of("id", "priority-high"))
+        );
+
+        fixture.server.verify();
+    }
+
+    @Test
+    void acceptsEmptyCreateMetadata() {
+        Fixture fixture = fixture();
+        fixture.server.expect(request -> { }).andRespond(json(
+                "{\"startAt\":0,\"maxResults\":100,\"total\":0,\"issueTypes\":[]}"
+        ));
+
+        assertThat(fixture.client.getCreateIssueTypes(
+                "ACCESS_TOKEN_SECRET", CLOUD_ID, "SDP"
+        )).isEmpty();
+        fixture.server.verify();
+    }
+
+    @Test
+    void getIssueUsesTheCanonicalSearchSnapshotMapper() {
+        Fixture fixture = fixture();
+        fixture.server.expect(request -> {
+            assertEquals(
+                    "/ex/jira/" + CLOUD_ID + "/rest/api/3/issue/SDP-42",
+                    request.getURI().getPath()
+            );
+            assertThat(URLDecoder.decode(
+                    request.getURI().getRawQuery(), StandardCharsets.UTF_8
+            )).contains("labels").contains("components").contains("description").contains("attachment");
+        }).andRespond(json("""
+                {"id":"10452","key":"SDP-42","fields":{
+                  "summary":"Canonical issue","issuetype":{"name":"Task"},
+                  "status":{"name":"To Do"},"priority":{"name":"High"},
+                  "updated":"2026-07-31T00:30:57.360+0700",
+                  "labels":["Backend"],"components":[{"id":"10","name":"API"}],
+                  "description":{"type":"doc","content":[{"type":"paragraph",
+                    "content":[{"type":"text","text":"Safe description"}]}]}
+                }}
+                """));
+
+        JiraIssueSnapshot issue = fixture.client.getIssue(
+                "ACCESS_TOKEN_SECRET", CLOUD_ID, "SDP-42"
+        );
+
+        assertEquals("10452", issue.id());
+        assertEquals("SDP-42", issue.key());
+        assertEquals("Canonical issue", issue.title());
+        assertThat(issue.labels()).containsExactly("Backend");
+        assertThat(issue.components()).containsExactly(
+                new TaskComponentSnapshot("10", "API")
+        );
+        assertEquals("Safe description", issue.description());
+        assertThat(issue.attachments()).isEmpty();
+        assertThat(issue.assigneeAccountId()).isNull();
+        assertThat(issue.sprintId()).isNull();
+        assertThat(issue.storyPoints()).isNull();
+        fixture.server.verify();
+    }
+
+    @Test
+    void estimationPutAcceptsDocumented200BodiesWithoutUsingThemAsCanonicalTruth() {
+        for (String providerValue : List.of("\"5\"", "\"5.0\"", "\"0\"", "\"0.0\"")) {
+            Fixture fixture = fixture();
+            fixture.server.expect(request -> {
+                assertEquals("/ex/jira/" + CLOUD_ID + "/rest/agile/1.0/issue/10452/estimation",
+                        request.getURI().getPath());
+                assertThat(request.getURI().getQuery()).contains("boardId=35");
+            }).andExpect(method(HttpMethod.PUT))
+                    .andExpect(content().json("{\"value\":5}"))
+                    .andRespond(json("{\"fieldId\":\"customfield_example\",\"value\":" + providerValue + "}"));
+
+            fixture.client.estimateIssue("ACCESS_TOKEN_SECRET", CLOUD_ID, "35", "10452", 5);
+
+            fixture.server.verify();
+        }
+    }
+
+    @Test
+    void normalizesWholeCanonicalEstimationValuesWithoutFloatingPointComparison() {
+        assertEquals(5, canonicalEstimation("\"5\"").storyPoints());
+        assertEquals(5, canonicalEstimation("\"5.0\"").storyPoints());
+        assertEquals(0, canonicalEstimation("\"0\"").storyPoints());
+        assertEquals(0, canonicalEstimation("\"0.0\"").storyPoints());
+        assertEquals(5, canonicalEstimation("5.0").storyPoints());
+    }
+
+    @Test
+    void genericSearchRequestsDiscoveredEstimationFieldAndProjectsItsValue() {
+        Fixture fixture = fixture();
+        fixture.server.expect(request -> {
+            String query = URLDecoder.decode(
+                    request.getURI().getRawQuery(), StandardCharsets.UTF_8
+            );
+            assertThat(query)
+                    .contains("customfield_story_points")
+                    .contains("customfield_sprint");
+        }).andRespond(json("""
+                {"isLast":true,"issues":[{
+                  "id":"10452","key":"SDP-42","fields":{
+                    "summary":"Canonical issue",
+                    "updated":"2026-07-31T00:30:57.360+0700",
+                    "customfield_story_points":"5.0"
+                  }
+                }]}
+                """));
+
+        JiraIssueSnapshot issue = fixture.client.searchIssues(
+                "ACCESS_TOKEN_SECRET",
+                CLOUD_ID,
+                "SDP",
+                null,
+                Instant.parse("2026-07-31T00:31:02Z"),
+                null,
+                "customfield_story_points",
+                "customfield_sprint"
+        ).issues().get(0);
+
+        assertEquals(5, issue.storyPoints());
+        assertThat(issue.storyPointsAuthoritative()).isTrue();
+        fixture.server.verify();
+    }
+
+    @Test
+    void mapsEditMetadataIssueTypeAllowedValuesAndSendsSparseResolvedProviderId() {
+        Fixture fixture = fixture();
+        String issueUrl = BASE + "/ex/jira/" + CLOUD_ID + "/rest/api/3/issue/10452";
+        fixture.server.expect(requestTo(issueUrl + "/editmeta"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(json("""
+                        {"fields":{"issuetype":{
+                          "name":"Issue Type","required":false,
+                          "schema":{"type":"issuetype"},
+                          "allowedValues":[
+                            {"id":"type-feature","name":"Feature","subtask":false,"hierarchyLevel":0},
+                            {"id":"type-request","name":"Request","subtask":false,"hierarchyLevel":0}
+                          ]
+                        }}}
+                        """));
+        fixture.server.expect(requestTo(issueUrl))
+                .andExpect(method(HttpMethod.PUT))
+                .andExpect(content().json("""
+                        {"fields":{"issuetype":{"id":"type-feature"}}}
+                        """))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.NO_CONTENT));
+
+        assertThat(fixture.client.getEditMetadata(
+                "ACCESS_TOKEN_SECRET", CLOUD_ID, "10452"
+        )).containsExactly(new JiraCreateField(
+                "issuetype", "Issue Type", false, "issuetype", null,
+                List.of(
+                        new JiraCreateFieldAllowedValue("type-feature", null, "Feature"),
+                        new JiraCreateFieldAllowedValue("type-request", null, "Request")
+                )
+        ));
+        fixture.client.updateIssue(
+                "ACCESS_TOKEN_SECRET", CLOUD_ID, "10452",
+                Map.of("issuetype", Map.of("id", "type-feature"))
+        );
+
+        fixture.server.verify();
+    }
+
+    @Test
+    void requestedNullEstimationIsAuthoritativeButOmittedFieldIsNot() {
+        JiraIssueSnapshot requestedNull = canonicalEstimation("null");
+        JiraIssueSnapshot omitted = canonicalEstimation(null);
+
+        assertThat(requestedNull.storyPoints()).isNull();
+        assertThat(requestedNull.storyPointsAuthoritative()).isTrue();
+        assertThat(omitted.storyPoints()).isNull();
+        assertThat(omitted.storyPointsAuthoritative()).isFalse();
+    }
+
+    @Test
+    void rejectsNonWholeOrMissingCanonicalEstimationValues() {
+        for (String value : Arrays.asList("\"5.5\"", "\"abc\"", "\"\"", "-1", "2147483648", "{}", "[]")) {
+            assertEquals("JIRA_RESPONSE_INVALID", assertThrows(IntegrationException.class,
+                    () -> canonicalEstimation(value)).getCode());
+        }
+    }
+
+    @Test
+    void mapsProviderHttpFailuresWithoutExposingProviderBody() {
+        assertProviderFailure(org.springframework.http.HttpStatus.BAD_REQUEST,
+                "JIRA_REQUEST_REJECTED", 1);
+        assertProviderFailure(org.springframework.http.HttpStatus.UNAUTHORIZED,
+                "JIRA_ACCESS_REVOKED", 1);
+        assertProviderFailure(org.springframework.http.HttpStatus.FORBIDDEN,
+                "JIRA_ACCESS_FORBIDDEN", 1);
+        assertProviderFailure(org.springframework.http.HttpStatus.NOT_FOUND,
+                "JIRA_RESOURCE_NOT_FOUND", 1);
+        assertProviderFailure(org.springframework.http.HttpStatus.TOO_MANY_REQUESTS,
+                "JIRA_RATE_LIMITED", 3);
+        assertProviderFailure(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,
+                "JIRA_PROVIDER_UNAVAILABLE", 3);
+    }
+
+    @Test
+    void getSprintPreservesAuthenticationAccessAndMissingSprintCategories() {
+        assertSprintFailure(org.springframework.http.HttpStatus.UNAUTHORIZED,
+                "JIRA_ACCESS_REVOKED", 1);
+        assertSprintFailure(org.springframework.http.HttpStatus.FORBIDDEN,
+                "JIRA_ACCESS_FORBIDDEN", 1);
+        assertSprintFailure(org.springframework.http.HttpStatus.NOT_FOUND,
+                "JIRA_SPRINT_NOT_FOUND", 1);
+        assertSprintFailure(org.springframework.http.HttpStatus.TOO_MANY_REQUESTS,
+                "JIRA_RATE_LIMITED", 3);
+        assertSprintFailure(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,
+                "JIRA_PROVIDER_UNAVAILABLE", 3);
+    }
+
+    @Test
+    void getBoardFeaturesMapsFailuresWithoutExposingProviderBodies() {
+        assertBoardFeaturesFailure(org.springframework.http.HttpStatus.UNAUTHORIZED,
+                "JIRA_ACCESS_REVOKED", 1);
+        assertBoardFeaturesFailure(org.springframework.http.HttpStatus.FORBIDDEN,
+                "JIRA_ACCESS_FORBIDDEN", 1);
+        assertBoardFeaturesFailure(org.springframework.http.HttpStatus.NOT_FOUND,
+                "JIRA_BOARD_NOT_FOUND", 1);
+        assertBoardFeaturesFailure(org.springframework.http.HttpStatus.TOO_MANY_REQUESTS,
+                "JIRA_RATE_LIMITED", 3);
+        assertBoardFeaturesFailure(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,
+                "JIRA_PROVIDER_UNAVAILABLE", 3);
+    }
+
+    @Test
+    void boardSprintCapabilityProbeMapsDocumentedHttpSemantics() {
+        assertBoardSprintProbeFailure(org.springframework.http.HttpStatus.BAD_REQUEST,
+                "JIRA_SPRINT_CAPABILITY_UNCONFIRMED", 1);
+        assertBoardSprintProbeFailure(org.springframework.http.HttpStatus.UNAUTHORIZED,
+                "JIRA_ACCESS_REVOKED", 1);
+        assertBoardSprintProbeFailure(org.springframework.http.HttpStatus.FORBIDDEN,
+                "JIRA_ACCESS_FORBIDDEN", 1);
+        assertBoardSprintProbeFailure(org.springframework.http.HttpStatus.NOT_FOUND,
+                "JIRA_BOARD_NOT_FOUND", 1);
+        assertBoardSprintProbeFailure(org.springframework.http.HttpStatus.TOO_MANY_REQUESTS,
+                "JIRA_RATE_LIMITED", 3);
+        assertBoardSprintProbeFailure(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,
+                "JIRA_PROVIDER_UNAVAILABLE", 3);
+    }
+
+    @Test
+    void boardSprintCapabilityProbeMapsNetworkFailureToProviderUnavailable() {
+        Fixture fixture = fixture();
+        fixture.server.expect(requestTo(BOARD_SPRINTS_URL + "?maxResults=1"))
+                .andRespond(org.springframework.test.web.client.response.MockRestResponseCreators
+                        .withException(new SocketTimeoutException("timeout")));
+
+        assertEquals("JIRA_PROVIDER_UNAVAILABLE", assertThrows(
+                IntegrationException.class,
+                () -> fixture.client.supportsBoardSprintEndpoint(
+                        "ACCESS_TOKEN_SECRET", CLOUD_ID, "35"
+                )
+        ).getCode());
+        fixture.server.verify();
+    }
+
+    @Test
+    void mapsTimeoutAndMalformedMetadataResponsesSafely() {
+        Fixture timeout = fixture();
+        timeout.server.expect(request -> { }).andRespond(
+                org.springframework.test.web.client.response.MockRestResponseCreators
+                        .withException(new SocketTimeoutException("timeout"))
+        );
+        assertEquals("JIRA_PROVIDER_UNAVAILABLE", assertThrows(
+                IntegrationException.class,
+                () -> timeout.client.getCreateIssueTypes(
+                        "ACCESS_TOKEN_SECRET", CLOUD_ID, "SDP"
+                )
+        ).getCode());
+
+        Fixture malformed = fixture();
+        malformed.server.expect(request -> { }).andRespond(json(
+                "{\"issueTypes\":[{\"id\":\"3\"}"
+        ));
+        assertEquals("JIRA_RESPONSE_INVALID", assertThrows(
+                IntegrationException.class,
+                () -> malformed.client.getCreateIssueTypes(
+                        "ACCESS_TOKEN_SECRET", CLOUD_ID, "SDP"
+                )
+        ).getCode());
+        timeout.server.verify();
+        malformed.server.verify();
+    }
+
+    @Test
+    void requiresTheClassicWriteScopeBeforeFutureWriteCalls() {
+        JiraWriteScope.requireGranted("read:jira-work write:jira-work");
+
+        IntegrationException exception = assertThrows(
+                IntegrationException.class,
+                () -> JiraWriteScope.requireGranted("read:jira-work")
+        );
+
+        assertEquals("JIRA_SCOPE_INSUFFICIENT", exception.getCode());
+        assertThat(exception.getMessage()).doesNotContain("ACCESS_TOKEN_SECRET");
+    }
+
+    private void assertProviderFailure(
+            org.springframework.http.HttpStatus status,
+            String expectedCode,
+            int calls
+    ) {
+        Fixture fixture = fixture();
+        fixture.server.expect(ExpectedCount.times(calls), request -> { })
+                .andRespond(withStatus(status)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"error\":\"PROVIDER_SECRET\"}"));
+
+        IntegrationException exception = assertThrows(
+                IntegrationException.class,
+                () -> fixture.client.getCreateIssueTypes(
+                        "ACCESS_TOKEN_SECRET", CLOUD_ID, "SDP"
+                )
+        );
+
+        assertEquals(expectedCode, exception.getCode());
+        assertThat(exception.getMessage()).doesNotContain("PROVIDER_SECRET");
+        fixture.server.verify();
+    }
+
+    private void assertJsonBearerRequest(
+            org.springframework.http.client.ClientHttpRequest request
+    ) {
+        String authorization = request.getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
+        assertThat(authorization != null
+                && authorization.startsWith("Bearer ")
+                && authorization.length() > "Bearer ".length()).isTrue();
+        assertThat(request.getHeaders().getAccept()).contains(MediaType.APPLICATION_JSON);
+        assertThat(request.getHeaders().getContentType()).isEqualTo(MediaType.APPLICATION_JSON);
+    }
+
+    private void assertSprintFailure(
+            org.springframework.http.HttpStatus status,
+            String expectedCode,
+            int calls
+    ) {
+        Fixture fixture = fixture();
+        fixture.server.expect(ExpectedCount.times(calls), requestTo(SPRINT_URL))
+                .andRespond(withStatus(status)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"error\":\"PROVIDER_SECRET\"}"));
+
+        IntegrationException exception = assertThrows(
+                IntegrationException.class,
+                () -> fixture.client.getSprint(
+                        "ACCESS_TOKEN_SECRET", CLOUD_ID, "42"
+                )
+        );
+
+        assertEquals(expectedCode, exception.getCode());
+        assertThat(exception.getMessage()).doesNotContain("PROVIDER_SECRET");
+        fixture.server.verify();
+    }
+
+    private void assertBoardFeaturesFailure(
+            org.springframework.http.HttpStatus status,
+            String expectedCode,
+            int calls
+    ) {
+        Fixture fixture = fixture();
+        fixture.server.expect(ExpectedCount.times(calls), requestTo(BOARD_FEATURES_URL))
+                .andRespond(withStatus(status)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"error\":\"PROVIDER_SECRET\"}"));
+
+        IntegrationException exception = assertThrows(
+                IntegrationException.class,
+                () -> fixture.client.getBoardFeatures("ACCESS_TOKEN_SECRET", CLOUD_ID, "35")
+        );
+
+        assertEquals(expectedCode, exception.getCode());
+        assertThat(exception.getMessage()).doesNotContain("PROVIDER_SECRET");
+        fixture.server.verify();
+    }
+
+    private void assertBoardSprintProbeFailure(
+            org.springframework.http.HttpStatus status,
+            String expectedCode,
+            int calls
+    ) {
+        Fixture fixture = fixture();
+        fixture.server.expect(ExpectedCount.times(calls), requestTo(BOARD_SPRINTS_URL + "?maxResults=1"))
+                .andRespond(withStatus(status)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("{\"error\":\"PROVIDER_SECRET\"}"));
+
+        IntegrationException exception = assertThrows(
+                IntegrationException.class,
+                () -> fixture.client.supportsBoardSprintEndpoint(
+                        "ACCESS_TOKEN_SECRET", CLOUD_ID, "35"
+                )
+        );
+
+        assertEquals(expectedCode, exception.getCode());
+        assertThat(exception.getMessage()).doesNotContain("PROVIDER_SECRET");
+        fixture.server.verify();
+    }
+
+    private JiraIssueSnapshot searchFirstIssue(String labelsJson) {
+        return searchFirstIssueWithRaw(labelsJson, null, null);
+    }
+
+    private JiraIssueSnapshot searchFirstIssueWithRaw(
+            String labelsJson,
+            String componentsJson,
+            String descriptionJson
+    ) {
+        return searchFirstIssueWithRaw(labelsJson, componentsJson, descriptionJson, null);
+    }
+
+    private JiraIssueSnapshot searchFirstIssueWithRaw(
+            String labelsJson,
+            String componentsJson,
+            String descriptionJson,
+            String attachmentJson
+    ) {
+        Fixture fixture = fixture();
+        String labelsField = optionalJsonField("labels", labelsJson);
+        String componentsField = optionalJsonField("components", componentsJson);
+        String descriptionField = optionalJsonField("description", descriptionJson);
+        String attachmentField = optionalJsonField("attachment", attachmentJson);
+        fixture.server.expect(request -> { }).andRespond(json("""
+                {"isLast":true,"issues":[{
+                  "id":"10452","key":"SDP-1",
+                  "fields":{"summary":"Labels test",
+                    "updated":"2026-07-31T00:30:57.360+0700"%s%s%s%s}
+                }]}
+                """.formatted(labelsField, componentsField, descriptionField, attachmentField)));
+
+        JiraIssueSnapshot issue = fixture.client.searchIssues(
+                "ACCESS_TOKEN_SECRET",
+                CLOUD_ID,
+                "SDP",
+                null,
+                Instant.parse("2026-07-31T00:31:02Z"),
+                null
+        ).issues().get(0);
+        fixture.server.verify();
+        return issue;
+    }
+
+    private String optionalJsonField(String name, String json) {
+        return json == null ? "" : ",\"" + name + "\":" + json;
+    }
+
+    @Test
     void formatsUtcSearchBoundsInConfiguredJiraZoneAcrossMidnight() {
         Fixture fixture = fixture("Asia/Ho_Chi_Minh");
         fixture.server.expect(request -> {
@@ -335,7 +1603,7 @@ class JiraProviderClientImplTest {
     }
 
     @Test
-    void treatsMissingValuesAndMalformedJsonAsInvalidAndRedactsBody() {
+    void treatsMissingValuesAndMalformedJsonAsInvalidWithoutLoggingRawBody() {
         Fixture missingValues = fixture();
         missingValues.server.expect(requestTo(FIRST_WEBHOOK_PAGE_URL))
                 .andRespond(json("{\"isLast\":true}"));
@@ -367,7 +1635,7 @@ class JiraProviderClientImplTest {
                     .reduce("", String::concat);
             assertThat(logged)
                     .contains("operation=GET")
-                    .contains("<redacted>")
+                .doesNotContain("<redacted>")
                     .doesNotContain("RESPONSE_SECRET")
                     .doesNotContain("ACCESS_TOKEN_SECRET");
         } finally {
@@ -379,6 +1647,24 @@ class JiraProviderClientImplTest {
 
     private Fixture fixture() {
         return fixture("UTC");
+    }
+
+    private JiraIssueSnapshot canonicalEstimation(String value) {
+        Fixture fixture = fixture();
+        String field = value == null ? "" : ",\"customfield_example\":" + value;
+        fixture.server.expect(request -> {
+            String query = URLDecoder.decode(request.getURI().getRawQuery(), StandardCharsets.UTF_8);
+            assertThat(query).contains("customfield_example");
+        }).andRespond(json("""
+                {"id":"10452","key":"SDP-42","fields":{
+                  "summary":"Canonical issue","updated":"2026-07-31T00:30:57.360+0700"%s
+                }}
+                """.formatted(field)));
+        try {
+            return fixture.client.getIssue("ACCESS_TOKEN_SECRET", CLOUD_ID, "SDP-42", "customfield_example");
+        } finally {
+            fixture.server.verify();
+        }
     }
 
     private Fixture fixture(String jiraTimeZone) {

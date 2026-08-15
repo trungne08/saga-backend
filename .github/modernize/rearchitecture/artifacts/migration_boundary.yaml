@@ -1,0 +1,20 @@
+intent:
+  user_intent: backend rewrite boundary limited to runtime-reachable integration and authorization contracts
+  cleanup_required: false
+  full_rewrite_reason: null
+strategy:
+  must_rewrite:
+    - src/main/java/com/saga/be/integration/project/ProjectIntegrationService.java
+    - src/main/java/com/saga/be/integration/webhook/WebhookIngestionService.java
+    - src/main/java/com/saga/be/integration/identity/IdentityMappingService.java
+    - src/main/java/com/saga/be/config/SecurityConfig.java
+  copy_as_is:
+    - src/main/java/com/saga/be/entity
+    - src/main/java/com/saga/be/repository
+    - src/main/java/com/saga/be/dto
+  legacy_allowed_to_remain:
+    - docs/integrations/README.md
+    - src/main/java/com/saga/be/security
+  defer_cleanup:
+    - provider-side callback session handling
+    - deployment-specific secret wiring and environment docs

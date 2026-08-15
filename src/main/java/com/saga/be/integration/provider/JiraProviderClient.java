@@ -19,6 +19,154 @@ public interface JiraProviderClient {
 
     List<JiraProjectInfo> projects(String accessToken, String cloudId);
 
+    List<JiraAgileBoardInfo> discoverAgileBoards(
+            String accessToken, String cloudId, String jiraProjectId
+    );
+
+    List<JiraBoardFeature> getBoardFeatures(
+            String accessToken, String cloudId, String boardId
+    );
+
+    List<JiraProjectFeature> getProjectFeatures(
+            String accessToken, String cloudId, String jiraProjectId
+    );
+
+    /**
+     * Performs a read-only, one-item Sprint page probe for a board. A
+     * successful return means Jira accepted the board Sprint endpoint and
+     * returned a structurally valid page; it does not load or persist sprints.
+     */
+    boolean supportsBoardSprintEndpoint(
+            String accessToken, String cloudId, String boardId
+    );
+
+    List<JiraCreateIssueType> getCreateIssueTypes(
+            String accessToken,
+            String cloudId,
+            String projectIdOrKey
+    );
+
+    List<JiraCreateField> getCreateFields(
+            String accessToken,
+            String cloudId,
+            String projectIdOrKey,
+            String issueTypeId
+    );
+
+    JiraIssueSnapshot getIssue(
+            String accessToken,
+            String cloudId,
+            String issueIdOrKey
+    );
+
+    /**
+     * Loads an issue together with the board-configured estimation field. The
+     * default keeps provider fakes compatible; the Jira implementation adds
+     * the field only after discovering its id from the board configuration.
+     */
+    default JiraIssueSnapshot getIssue(
+            String accessToken,
+            String cloudId,
+            String issueIdOrKey,
+            String estimationFieldId
+    ) {
+        return getIssue(accessToken, cloudId, issueIdOrKey);
+    }
+
+    List<JiraCreateField> getEditMetadata(
+            String accessToken, String cloudId, String issueIdOrKey
+    );
+
+    JiraIssueReference createIssue(
+            String accessToken, String cloudId, java.util.Map<String, Object> fields
+    );
+
+    void updateIssue(
+            String accessToken, String cloudId, String issueIdOrKey, java.util.Map<String, Object> fields
+    );
+
+    void deleteIssue(String accessToken, String cloudId, String issueIdOrKey);
+
+    List<JiraTransition> getTransitions(String accessToken, String cloudId, String issueIdOrKey);
+
+    void transitionIssue(
+            String accessToken, String cloudId, String issueIdOrKey, String transitionId
+    );
+
+    void assignIssue(
+            String accessToken, String cloudId, String issueIdOrKey, String accountId
+    );
+
+    List<JiraAttachmentSnapshot> addIssueAttachments(
+            String accessToken,
+            String cloudId,
+            String issueIdOrKey,
+            List<JiraAttachmentUpload> files
+    );
+
+    String addIssueRemoteLink(
+            String accessToken,
+            String cloudId,
+            String issueIdOrKey,
+            String url,
+            String title
+    );
+
+    JiraSprintSnapshot getSprint(String accessToken, String cloudId, String sprintId);
+
+    JiraSprintSnapshot createSprint(
+            String accessToken,
+            String cloudId,
+            String boardId,
+            String name,
+            String goal,
+            String startDate,
+            String endDate
+    );
+
+    JiraSprintSnapshot updateSprint(
+            String accessToken,
+            String cloudId,
+            String sprintId,
+            java.util.Map<String, Object> changes
+    );
+
+    void deleteSprint(String accessToken, String cloudId, String sprintId);
+
+    void moveIssuesToSprint(
+            String accessToken,
+            String cloudId,
+            String sprintId,
+            List<String> issueIdsOrKeys
+    );
+
+    void moveIssuesToBacklog(
+            String accessToken,
+            String cloudId,
+            String boardId,
+            List<String> issueIdsOrKeys
+    );
+
+    void estimateIssue(
+            String accessToken,
+            String cloudId,
+            String boardId,
+            String issueIdOrKey,
+            Integer value
+    );
+
+    boolean supportsEstimation(String accessToken, String cloudId, String boardId);
+
+    /** Returns the configured estimation field id, or {@code null} when absent. */
+    default String estimationFieldId(String accessToken, String cloudId, String boardId) {
+        return null;
+    }
+
+    /** Returns the Jira Software Sprint custom-field id, or {@code null} when absent. */
+    default String sprintFieldId(String accessToken, String cloudId) {
+        return null;
+    }
+
     String registerWebhook(
             String accessToken,
             String cloudId,
@@ -27,9 +175,9 @@ public interface JiraProviderClient {
     );
 
     /**
-     * Reuses a matching dynamic webhook where possible, and replaces only the
-     * webhook identified by {@code existingWebhookId} when its configuration
-     * no longer matches the current board.
+     * Reconciles one safely identified SAGA webhook for the current Project,
+     * then registers a fresh callback. Scheduler renewal does not use this
+     * replacement policy.
      */
     JiraWebhookRegistration ensureWebhook(
             String accessToken,
@@ -38,6 +186,20 @@ public interface JiraProviderClient {
             URI callbackUri,
             String existingWebhookId
     );
+
+    /**
+     * Maintains an existing webhook without rotating its callback on every
+     * scheduler run. Implementations may create one only when it is missing.
+     */
+    default JiraWebhookRegistration refreshWebhook(
+            String accessToken,
+            String cloudId,
+            String projectKey,
+            URI callbackUri,
+            String existingWebhookId
+    ) {
+        return ensureWebhook(accessToken, cloudId, projectKey, callbackUri, existingWebhookId);
+    }
 
     List<JiraWebhook> listWebhooks(String accessToken, String cloudId);
 
@@ -51,4 +213,44 @@ public interface JiraProviderClient {
             Instant capturedUpperBoundUtc,
             String nextPageToken
     );
+
+    default JiraIssuePage searchIssues(
+            String accessToken,
+            String cloudId,
+            String projectKey,
+            Instant lowerBoundUtc,
+            Instant capturedUpperBoundUtc,
+            String nextPageToken,
+            String sprintFieldId
+    ) {
+        return searchIssues(
+                accessToken,
+                cloudId,
+                projectKey,
+                lowerBoundUtc,
+                capturedUpperBoundUtc,
+                nextPageToken
+        );
+    }
+
+    default JiraIssuePage searchIssues(
+            String accessToken,
+            String cloudId,
+            String projectKey,
+            Instant lowerBoundUtc,
+            Instant capturedUpperBoundUtc,
+            String nextPageToken,
+            String estimationFieldId,
+            String sprintFieldId
+    ) {
+        return searchIssues(
+                accessToken,
+                cloudId,
+                projectKey,
+                lowerBoundUtc,
+                capturedUpperBoundUtc,
+                nextPageToken,
+                sprintFieldId
+        );
+    }
 }

@@ -3,11 +3,19 @@ package com.saga.be.controller;
 import com.saga.be.dto.request.GitHubRepositoriesLinkRequest;
 import com.saga.be.config.IntegrationAvailability;
 import com.saga.be.dto.request.JiraProjectLinkRequest;
+import com.saga.be.dto.request.ManualSyncProvider;
 import com.saga.be.dto.response.GitHubInstallationResponse;
 import com.saga.be.dto.response.JiraAuthorizationResponse;
 import com.saga.be.dto.response.ProjectIntegrationsResponse;
 import com.saga.be.dto.response.SyncStatusResponse;
+import com.saga.be.dto.response.SyncHistoryResponse;
+import com.saga.be.entity.enums.SyncJobStatus;
+import com.saga.be.entity.enums.SyncJobType;
+import com.saga.be.dto.response.ManualProjectSyncResponse;
 import com.saga.be.integration.project.ProjectIntegrationService;
+import com.saga.be.integration.project.ManualProjectSyncService;
+import com.saga.be.integration.callback.IntegrationCallbackRedirectService;
+import com.saga.be.integration.callback.IntegrationCallbackResultStore;
 import com.saga.be.security.SagaPrincipal;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
@@ -28,18 +36,28 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
+@io.swagger.v3.oas.annotations.tags.Tag(name = "Tích hợp dự án", description = "Liên kết, trạng thái và đồng bộ Jira/GitHub của dự án.")
 @RequestMapping("/api/projects/{projectId}")
 public class ProjectIntegrationController {
 
     private final ProjectIntegrationService integrationService;
+    private final ManualProjectSyncService manualSyncService;
     private final IntegrationAvailability availability;
+    private final IntegrationCallbackResultStore resultStore;
+    private final IntegrationCallbackRedirectService callbackRedirectService;
 
     public ProjectIntegrationController(
             ProjectIntegrationService integrationService,
-            IntegrationAvailability availability
+            ManualProjectSyncService manualSyncService,
+            IntegrationAvailability availability,
+            IntegrationCallbackResultStore resultStore,
+            IntegrationCallbackRedirectService callbackRedirectService
     ) {
         this.integrationService = integrationService;
+        this.manualSyncService = manualSyncService;
         this.availability = availability;
+        this.resultStore = resultStore;
+        this.callbackRedirectService = callbackRedirectService;
     }
 
     @GetMapping("/integrations")
@@ -133,7 +151,7 @@ public class ProjectIntegrationController {
     }
 
     @GetMapping("/github/callback")
-    public GitHubInstallationResponse githubCallback(
+    public ResponseEntity<Void> githubCallback(
             @AuthenticationPrincipal SagaPrincipal principal,
             @PathVariable UUID projectId,
             HttpSession session,
@@ -141,14 +159,17 @@ public class ProjectIntegrationController {
             @RequestParam(required = false) String code,
             @RequestParam(required = false, name = "error") String oauthError
     ) {
-        return integrationService.finishGitHubInstallation(
+        availability.requireGitHub();
+        String resultId = resultStore.store(session, principal,
+                integrationService.finishGitHubInstallationCallback(
                 principal,
                 projectId,
                 session,
                 state,
                 code,
                 oauthError
-        );
+        ));
+        return redirect(callbackRedirectService.callbackResultUri(resultId));
     }
 
     @PostMapping("/github/repositories")
@@ -188,6 +209,41 @@ public class ProjectIntegrationController {
             @PathVariable UUID projectId
     ) {
         return integrationService.syncStatus(principal, projectId);
+    }
+
+    @GetMapping("/sync-history")
+    public SyncHistoryResponse syncHistory(
+            @AuthenticationPrincipal SagaPrincipal principal,
+            @PathVariable UUID projectId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String targetSystem,
+            @RequestParam(required = false) SyncJobStatus status,
+            @RequestParam(required = false) SyncJobType jobType
+    ) {
+        if (page < 0 || size < 1 || size > 100) {
+            throw com.saga.be.exception.IntegrationException.invalid(
+                    "SYNC_HISTORY_PAGE_INVALID", "Pagination is invalid");
+        }
+        return integrationService.syncHistory(
+                principal, projectId, page, size, targetSystem, status, jobType);
+    }
+
+    @PostMapping("/github/repositories/{repositoryId}/connect")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public void githubRepositoryReconnect(@AuthenticationPrincipal SagaPrincipal principal,
+            @PathVariable UUID projectId, @PathVariable Long repositoryId, HttpServletRequest request) {
+        integrationService.reconnectGitHubRepository(principal, projectId, repositoryId, request.getRemoteAddr());
+    }
+
+    @PostMapping("/sync")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public ManualProjectSyncResponse sync(
+            @AuthenticationPrincipal SagaPrincipal principal,
+            @PathVariable UUID projectId,
+            @RequestParam(defaultValue = "ALL") ManualSyncProvider provider
+    ) {
+        return manualSyncService.request(principal, projectId, provider);
     }
 
     private ResponseEntity<Void> redirect(URI uri) {

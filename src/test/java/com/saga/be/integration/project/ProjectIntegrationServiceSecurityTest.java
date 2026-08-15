@@ -29,6 +29,7 @@ import com.saga.be.repository.SyncJobLogRepository;
 import com.saga.be.security.ApplicationRole;
 import com.saga.be.security.SagaPrincipal;
 import com.saga.be.service.AuthenticationAuditService;
+import com.saga.be.service.ProjectIntegrationNotificationProducer;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpSession;
@@ -78,6 +79,8 @@ class ProjectIntegrationServiceSecurityTest {
                 mock(IntegrationUrlResolver.class),
                 mock(IntegrationSecretCipher.class),
                 mock(JiraCredentialService.class),
+                mock(JiraBoardResolutionService.class),
+                mock(JiraBoardLinkPersistenceService.class),
                 mock(JiraBoardRepository.class),
                 installationRepository,
                 mock(GitRepoRepository.class),
@@ -86,7 +89,8 @@ class ProjectIntegrationServiceSecurityTest {
                 mock(AutomaticSyncDispatcher.class),
                 event -> { },
                 mock(IntegrationAttemptLimiter.class),
-                mock(AuthenticationAuditService.class)
+                mock(AuthenticationAuditService.class),
+                mock(ProjectIntegrationNotificationProducer.class)
         );
         UUID projectId = UUID.randomUUID();
         SagaPrincipal principal = new SagaPrincipal(

@@ -1,0 +1,358 @@
+package com.saga.be.controller;
+
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import com.saga.be.OAuth2TestConfiguration;
+import com.saga.be.entity.Admin;
+import com.saga.be.entity.Course;
+import com.saga.be.entity.GitRepo;
+import com.saga.be.entity.GitHubInstallation;
+import com.saga.be.entity.JiraBoard;
+import com.saga.be.entity.Lecturer;
+import com.saga.be.entity.Project;
+import com.saga.be.entity.Student;
+import com.saga.be.entity.SyncJobLog;
+import com.saga.be.entity.SystemAuditLog;
+import com.saga.be.entity.Team;
+import com.saga.be.entity.WebhookReceipt;
+import com.saga.be.entity.enums.AccountStatus;
+import com.saga.be.entity.enums.GitHubInstallationStatus;
+import com.saga.be.entity.enums.IntegrationStatus;
+import com.saga.be.entity.enums.IntegrationProvider;
+import com.saga.be.entity.enums.SyncJobStatus;
+import com.saga.be.entity.enums.SyncJobType;
+import com.saga.be.entity.enums.WebhookReceiptStatus;
+import com.saga.be.integration.provider.GitHubProviderClient;
+import com.saga.be.integration.provider.JiraProviderClient;
+import com.saga.be.repository.AdminRepository;
+import com.saga.be.repository.CourseRepository;
+import com.saga.be.repository.GitRepoRepository;
+import com.saga.be.repository.GitHubInstallationRepository;
+import com.saga.be.repository.JiraBoardRepository;
+import com.saga.be.repository.LecturerRepository;
+import com.saga.be.repository.ProjectRepository;
+import com.saga.be.repository.StudentRepository;
+import com.saga.be.repository.SyncJobLogRepository;
+import com.saga.be.repository.SystemAuditLogRepository;
+import com.saga.be.repository.TeamRepository;
+import com.saga.be.repository.WebhookReceiptRepository;
+import com.saga.be.security.ApplicationRole;
+import com.saga.be.security.SagaPrincipal;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.UUID;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.context.annotation.Import;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.web.servlet.MockMvc;
+
+@SpringBootTest
+@AutoConfigureMockMvc
+@ActiveProfiles("test")
+@Import(OAuth2TestConfiguration.class)
+class AdminReadControllerIntegrationTest {
+
+    @Autowired private MockMvc mockMvc;
+    @Autowired private AdminRepository adminRepository;
+    @Autowired private LecturerRepository lecturerRepository;
+    @Autowired private StudentRepository studentRepository;
+    @Autowired private CourseRepository courseRepository;
+    @Autowired private TeamRepository teamRepository;
+    @Autowired private ProjectRepository projectRepository;
+    @Autowired private JiraBoardRepository jiraBoardRepository;
+    @Autowired private GitRepoRepository gitRepoRepository;
+    @Autowired private GitHubInstallationRepository gitHubInstallationRepository;
+    @Autowired private WebhookReceiptRepository webhookReceiptRepository;
+    @Autowired private SyncJobLogRepository syncJobLogRepository;
+    @MockitoBean private SystemAuditLogRepository systemAuditLogRepository;
+    @MockitoBean private JiraProviderClient jiraProviderClient;
+    @MockitoBean private GitHubProviderClient gitHubProviderClient;
+
+    @BeforeEach
+    void defaultAuditPage() {
+        when(systemAuditLogRepository.findAll(any(org.springframework.data.domain.Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of()));
+    }
+
+    @AfterEach
+    void cleanupAndVerifyProviderIsolation() {
+        webhookReceiptRepository.deleteAll();
+        syncJobLogRepository.deleteAll();
+        gitRepoRepository.deleteAll();
+        gitHubInstallationRepository.deleteAll();
+        jiraBoardRepository.deleteAll();
+        teamRepository.deleteAll();
+        projectRepository.deleteAll();
+        courseRepository.deleteAll();
+        studentRepository.deleteAll();
+        lecturerRepository.deleteAll();
+        adminRepository.deleteAll();
+        verifyNoInteractions(jiraProviderClient, gitHubProviderClient);
+    }
+
+    @Test
+    void allAdminReadsRequireAdminSession() throws Exception {
+        List<String> paths = List.of("/api/admin/users", "/api/admin/audit-logs", "/api/admin/system-stats",
+                "/api/admin/teams", "/api/admin/projects", "/api/admin/integrations/health");
+        for (String path : paths) {
+            mockMvc.perform(get(path)).andExpect(status().isUnauthorized());
+            mockMvc.perform(get(path).with(authentication(authenticationFor(ApplicationRole.LECTURER))))
+                    .andExpect(status().isForbidden());
+            mockMvc.perform(get(path).with(authentication(authenticationFor(ApplicationRole.STUDENT))))
+                    .andExpect(status().isForbidden());
+            mockMvc.perform(get(path).with(authentication(authenticationFor(ApplicationRole.ADMIN))))
+                    .andExpect(status().isOk());
+        }
+    }
+
+    @Test
+    void usersAreDatabasePagedFilteredAndSanitized() throws Exception {
+        Admin admin = adminRepository.saveAndFlush(Admin.builder().cognitoSub("secret-admin-sub")
+                .email("admin@example.test").fullName("Admin Alpha").build());
+        Lecturer lecturer = lecturerRepository.saveAndFlush(Lecturer.builder().cognitoSub("secret-lecturer-sub")
+                .email("lecturer@example.test").fullName("Lecturer Alpha")
+                .accountStatus(AccountStatus.ACTIVE).build());
+        Student student = studentRepository.saveAndFlush(Student.builder().cognitoSub("secret-student-sub")
+                .studentCode("SE-01").email("student@example.test").fullName("Student Alpha")
+                .accountStatus(AccountStatus.ACTIVE).build());
+
+        String response = mockMvc.perform(get("/api/admin/users").param("keyword", "alpha")
+                        .param("page", "0").param("size", "1")
+                        .with(authentication(authenticationFor(ApplicationRole.ADMIN))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].localProfileId").value(lecturer.getId().toString()))
+                .andReturn().getResponse().getContentAsString();
+        assertFalse(response.contains("secret-admin-sub"));
+        assertFalse(response.contains("secret-lecturer-sub"));
+        assertFalse(response.contains("secret-student-sub"));
+
+        mockMvc.perform(get("/api/admin/users").param("keyword", "alpha")
+                        .param("page", "1").param("size", "1")
+                        .with(authentication(authenticationFor(ApplicationRole.ADMIN))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].localProfileId").value(student.getId().toString()));
+
+        String allManagedUsers = mockMvc.perform(get("/api/admin/users").param("size", "20")
+                        .with(authentication(authenticationFor(ApplicationRole.ADMIN))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(jsonPath("$.content.length()").value(2))
+                .andReturn().getResponse().getContentAsString();
+        assertFalse(allManagedUsers.contains(admin.getId().toString()));
+
+        mockMvc.perform(get("/api/admin/users").param("role", "STUDENT").param("accountStatus", "ACTIVE")
+                        .with(authentication(authenticationFor(ApplicationRole.ADMIN))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].localProfileId").value(student.getId().toString()))
+                .andExpect(jsonPath("$.content[0].studentCode").value("SE-01"));
+        mockMvc.perform(get("/api/admin/users").param("role", "LECTURER").param("accountStatus", "ACTIVE")
+                        .with(authentication(authenticationFor(ApplicationRole.ADMIN))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].localProfileId").value(lecturer.getId().toString()));
+        mockMvc.perform(get("/api/admin/users").param("role", "ADMIN")
+                        .with(authentication(authenticationFor(ApplicationRole.ADMIN))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(0));
+        mockMvc.perform(get("/api/admin/users").param("size", "101")
+                        .with(authentication(authenticationFor(ApplicationRole.ADMIN))))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void auditLogsAreNewestFirstAndDoNotExposeRawOrSensitiveFields() throws Exception {
+        SystemAuditLog newer = audit("new", Instant.parse("2026-08-09T10:00:00Z"));
+        SystemAuditLog older = audit("old", Instant.parse("2026-08-08T10:00:00Z"));
+        when(systemAuditLogRepository.findAll(any(org.springframework.data.domain.Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(newer, older)));
+
+        String response = mockMvc.perform(get("/api/admin/audit-logs")
+                        .with(authentication(authenticationFor(ApplicationRole.ADMIN))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.content[0].id").value("new"))
+                .andExpect(jsonPath("$.content[0].action").value("LOGIN"))
+                .andExpect(jsonPath("$.content[0].timestamp").value("2026-08-09T10:00:00Z"))
+                .andReturn().getResponse().getContentAsString();
+        assertFalse(response.contains("raw-old-payload"));
+        assertFalse(response.contains("raw-new-payload"));
+        assertFalse(response.contains("secret-actor"));
+        assertFalse(response.contains("192.0.2.10"));
+        verify(systemAuditLogRepository).findAll(any(org.springframework.data.domain.Pageable.class));
+    }
+
+    @Test
+    void statsTeamsAndProjectsUseOnlyLocalSafeSnapshots() throws Exception {
+        adminRepository.saveAndFlush(Admin.builder().cognitoSub("stats-admin-sub").email("stats-admin@test")
+                .fullName("Stats Admin").build());
+        Lecturer lecturer = lecturerRepository.saveAndFlush(Lecturer.builder().cognitoSub("stats-lecturer-sub")
+                .email("stats-lecturer@test").fullName("Stats Lecturer").build());
+        Student student = studentRepository.saveAndFlush(Student.builder().cognitoSub("stats-student-sub")
+                .studentCode("STATS-01").email("stats-student@test").fullName("Stats Student")
+                .accountStatus(AccountStatus.ACTIVE).build());
+        Course course = courseRepository.saveAndFlush(Course.builder().instructor(lecturer).courseCode("STATS")
+                .name("Stats Course").build());
+        Project project = projectRepository.saveAndFlush(Project.builder().course(course).name("Stats Project")
+                .description("Safe description").repositoryUrl("https://secret.example/repo")
+                .createdByCognitoSub("secret-project-owner").build());
+        Team team = teamRepository.saveAndFlush(Team.builder().course(course).project(project).name("Stats Team").build());
+        jiraBoardRepository.saveAndFlush(JiraBoard.builder().project(project).connectionStatus(IntegrationStatus.ACTIVE)
+                .encryptedAccessToken("never-return").encryptedRefreshToken("never-return").build());
+        gitRepoRepository.saveAndFlush(GitRepo.builder().project(project).name("repo").fullName("private/repo")
+                .url("https://secret.example/repo").connectionStatus(IntegrationStatus.ACTIVE).build());
+
+        mockMvc.perform(get("/api/admin/system-stats").with(authentication(authenticationFor(ApplicationRole.ADMIN))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalProfiles").value(3))
+                .andExpect(jsonPath("$.totalCourses").value(1)).andExpect(jsonPath("$.totalTeams").value(1))
+                .andExpect(jsonPath("$.totalProjects").value(1)).andExpect(jsonPath("$.activeJiraBoards").value(1))
+                .andExpect(jsonPath("$.activeGitRepositories").value(1)).andExpect(jsonPath("$.generatedAt").exists());
+
+        mockMvc.perform(get("/api/admin/teams").with(authentication(authenticationFor(ApplicationRole.ADMIN))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.content[0].id").value(team.getId().toString()))
+                .andExpect(jsonPath("$.content[0].course.courseCode").value("STATS"))
+                .andExpect(jsonPath("$.content[0].project.id").value(project.getId().toString()));
+        String response = mockMvc.perform(get("/api/admin/projects").with(authentication(authenticationFor(ApplicationRole.ADMIN))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.content[0].id").value(project.getId().toString()))
+                .andExpect(jsonPath("$.content[0].jira.connectionStatus").value("ACTIVE"))
+                .andExpect(jsonPath("$.content[0].gitHub.repositoryCount").value(1))
+                .andReturn().getResponse().getContentAsString();
+        assertFalse(response.contains("never-return"));
+        assertFalse(response.contains("secret-project-owner"));
+        assertFalse(response.contains("https://secret.example/repo"));
+        assertFalse(response.contains(student.getCognitoSub()));
+    }
+
+    @Test
+    void integrationHealthReturnsOnlyDeterministicLocalStatesWithoutSecrets() throws Exception {
+        Course course = courseRepository.saveAndFlush(Course.builder().courseCode("HEALTH").name("Health Course").build());
+        Project jiraProject = projectRepository.saveAndFlush(Project.builder().course(course).name("Jira Project").build());
+        Project gitHubProject = projectRepository.saveAndFlush(Project.builder().course(course).name("GitHub Project").build());
+        JiraBoard jiraBoard = jiraBoardRepository.saveAndFlush(JiraBoard.builder().project(jiraProject)
+                .connectionStatus(IntegrationStatus.ACTIVE).webhookId("stored-webhook-id")
+                .lastSyncedAt(LocalDateTime.of(2026, 8, 9, 8, 0))
+                .encryptedAccessToken("never-return-token").encryptedRefreshToken("never-return-refresh").build());
+        jiraBoardRepository.saveAndFlush(JiraBoard.builder().project(gitHubProject)
+                .connectionStatus(IntegrationStatus.DEGRADED).build());
+        GitHubInstallation installation = gitHubInstallationRepository.saveAndFlush(GitHubInstallation.builder()
+                .installationId(901L).installedByCognitoSub("never-return-installation-sub")
+                .installationStatus(GitHubInstallationStatus.ACTIVE).build());
+        gitRepoRepository.saveAndFlush(GitRepo.builder().project(gitHubProject).installation(installation)
+                .name("repo-a").connectionStatus(IntegrationStatus.ACTIVE)
+                .lastSyncedAt(LocalDateTime.of(2026, 8, 9, 9, 0)).url("https://never-return.example/repo").build());
+        gitRepoRepository.saveAndFlush(GitRepo.builder().project(gitHubProject).installation(installation)
+                .name("repo-b").connectionStatus(IntegrationStatus.DEGRADED).build());
+        WebhookReceipt jiraReceipt = webhookReceiptRepository.saveAndFlush(WebhookReceipt.builder().provider(IntegrationProvider.JIRA)
+                .deliveryId("jira-delivery").eventType("issue_updated").payloadCiphertext("never-return-payload")
+                .receiptStatus(WebhookReceiptStatus.COMPLETED)
+                .processedAt(LocalDateTime.of(2026, 8, 9, 8, 5)).build());
+        webhookReceiptRepository.saveAndFlush(WebhookReceipt.builder().provider(IntegrationProvider.GITHUB)
+                .deliveryId("github-delivery").eventType("push").payloadCiphertext("never-return-payload")
+                .receiptStatus(WebhookReceiptStatus.FAILED).build());
+        syncJobLogRepository.saveAndFlush(SyncJobLog.builder()
+                .targetSystem("JIRA")
+                .targetId(jiraBoard.getId())
+                .jobType(SyncJobType.OTHER)
+                .status(SyncJobStatus.FAILED)
+                .errorCategory("JIRA_WEBHOOK_PROVIDER_UNAVAILABLE")
+                .failureStage("WEBHOOK_MAINTENANCE")
+                .startedAt(LocalDateTime.of(2026, 8, 9, 8, 10))
+                .completedAt(LocalDateTime.of(2026, 8, 9, 8, 11))
+                .itemsProcessed(0)
+                .itemsFailed(1)
+                .build());
+
+        String response = mockMvc.perform(get("/api/admin/integrations/health")
+                        .with(authentication(authenticationFor(ApplicationRole.ADMIN))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.jira.enabled").value(false))
+                .andExpect(jsonPath("$.jira.linkedProjectCount").value(2))
+                .andExpect(jsonPath("$.jira.connectionStatuses[2].status").value("ACTIVE"))
+                .andExpect(jsonPath("$.jira.connectionStatuses[2].count").value(1))
+                .andExpect(jsonPath("$.jira.connectionStatuses[3].status").value("DEGRADED"))
+                .andExpect(jsonPath("$.jira.connectionStatuses[3].count").value(1))
+                .andExpect(jsonPath("$.jira.storedWebhookIdCount").value(1))
+                .andExpect(jsonPath("$.jira.latestLastSyncedAt").value("2026-08-09T08:00:00"))
+                .andExpect(jsonPath("$.jira.latestWebhookReceipt.receiptId").value(jiraReceipt.getId().toString()))
+                .andExpect(jsonPath("$.jira.latestWebhookReceipt.eventType").value("issue_updated"))
+                .andExpect(jsonPath("$.jira.latestWebhookReceipt.status").value("COMPLETED"))
+                .andExpect(jsonPath("$.jira.latestWebhookReceipt.receivedAt").isNotEmpty())
+                .andExpect(jsonPath("$.jira.latestWebhookReceipt.processedAt").value("2026-08-09T08:05:00"))
+                .andExpect(jsonPath("$.jira.latestWebhookMaintenance.status").value("FAILED"))
+                .andExpect(jsonPath("$.jira.latestWebhookMaintenance.jiraBoardId")
+                        .value(jiraBoard.getId().toString()))
+                .andExpect(jsonPath("$.jira.latestWebhookMaintenance.occurredAt").value("2026-08-09T08:11:00"))
+                .andExpect(jsonPath("$.jira.latestWebhookMaintenance.safeErrorCode")
+                        .value("JIRA_WEBHOOK_PROVIDER_UNAVAILABLE"))
+                .andExpect(jsonPath("$.jira.webhookReceiptStatuses[2].count").value(1))
+                .andExpect(jsonPath("$.gitHub.enabled").value(false))
+                .andExpect(jsonPath("$.gitHub.linkedProjectCount").value(1))
+                .andExpect(jsonPath("$.gitHub.connectionStatuses[2].count").value(1))
+                .andExpect(jsonPath("$.gitHub.connectionStatuses[3].count").value(1))
+                .andExpect(jsonPath("$.gitHub.installationStatuses[0].status").value("ACTIVE"))
+                .andExpect(jsonPath("$.gitHub.installationStatuses[0].count").value(1))
+                .andExpect(jsonPath("$.gitHub.latestLastSyncedAt").value("2026-08-09T09:00:00"))
+                .andExpect(jsonPath("$.gitHub.latestWebhookReceipt.eventType").value("push"))
+                .andExpect(jsonPath("$.gitHub.latestWebhookReceipt.status").value("FAILED"))
+                .andExpect(jsonPath("$.gitHub.webhookReceiptStatuses[3].count").value(1))
+                .andReturn().getResponse().getContentAsString();
+
+        assertFalse(response.contains("never-return-token"));
+        assertFalse(response.contains("never-return-refresh"));
+        assertFalse(response.contains("never-return-installation-sub"));
+        assertFalse(response.contains("never-return-payload"));
+        assertFalse(response.contains("https://never-return.example/repo"));
+    }
+
+    @Test
+    void integrationHealthIsDeterministicWhenNoIntegrationIsStored() throws Exception {
+        mockMvc.perform(get("/api/admin/integrations/health")
+                        .with(authentication(authenticationFor(ApplicationRole.ADMIN))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.jira.enabled").value(false))
+                .andExpect(jsonPath("$.jira.linkedProjectCount").value(0))
+                .andExpect(jsonPath("$.jira.connectionStatuses.length()").value(5))
+                .andExpect(jsonPath("$.jira.storedWebhookIdCount").value(0))
+                .andExpect(jsonPath("$.jira.webhookReceiptStatuses.length()").value(4))
+                .andExpect(jsonPath("$.gitHub.enabled").value(false))
+                .andExpect(jsonPath("$.gitHub.linkedProjectCount").value(0))
+                .andExpect(jsonPath("$.gitHub.connectionStatuses.length()").value(5))
+                .andExpect(jsonPath("$.gitHub.installationStatuses.length()").value(3))
+                .andExpect(jsonPath("$.gitHub.webhookReceiptStatuses.length()").value(4));
+    }
+
+    private SystemAuditLog audit(String id, Instant timestamp) {
+        SystemAuditLog log = new SystemAuditLog();
+        log.setId(id);
+        log.setAction("LOGIN");
+        log.setTargetEntity("SESSION");
+        log.setTimestamp(timestamp);
+        log.setActorId("secret-actor");
+        log.setIpAddress("192.0.2.10");
+        log.setOldValues("raw-old-payload");
+        log.setNewValues("raw-new-payload");
+        return log;
+    }
+
+    private Authentication authenticationFor(ApplicationRole role) {
+        SagaPrincipal principal = new SagaPrincipal(role.name().toLowerCase() + "-sub", role.name().toLowerCase()
+                + "@example.test", role.name() + " User", role, UUID.randomUUID(), null);
+        return UsernamePasswordAuthenticationToken.authenticated(principal, null,
+                List.of(new SimpleGrantedAuthority("ROLE_" + role.name())));
+    }
+}

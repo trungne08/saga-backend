@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
+@io.swagger.v3.oas.annotations.tags.Tag(name = "Dự án", description = "Tạo dự án cho nhóm.")
 @RequestMapping("/api/teams/{teamId}/projects")
 public class TeamProjectController {
 

@@ -19,6 +19,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import java.util.UUID;
 
 @RestController
+@io.swagger.v3.oas.annotations.tags.Tag(name = "Lớp học", description = "Quản lý dữ liệu lớp học.")
 @RequestMapping("/api/v1/classes")
 @RequiredArgsConstructor
 @Validated
@@ -35,6 +36,22 @@ public class ClassController {
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Class> createClass(@Valid @RequestBody ClassRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(classService.createClass(request));
+    }
+
+    @PutMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Class> updateClass(
+            @PathVariable UUID id,
+            @Valid @RequestBody ClassRequest request
+    ) {
+        return ResponseEntity.ok(classService.updateClass(id, request));
+    }
+
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Void> deleteClass(@PathVariable UUID id) {
+        classService.softDeleteClass(id);
+        return ResponseEntity.noContent().build();
     }
 
     @GetMapping

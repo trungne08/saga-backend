@@ -1,0 +1,11 @@
+package com.saga.be.dto.request;
+
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
+
+public record FirebaseInstallationRegistrationRequest(
+        @NotBlank
+        @Size(max = 255)
+        String firebaseInstallationId
+) {
+}

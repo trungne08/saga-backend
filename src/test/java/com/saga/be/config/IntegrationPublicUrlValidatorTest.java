@@ -3,6 +3,7 @@ package com.saga.be.config;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import java.time.Duration;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.env.MockEnvironment;
 
@@ -50,6 +51,7 @@ class IntegrationPublicUrlValidatorTest {
                 base,
                 jira,
                 github,
+                callbackProperties(),
                 new IntegrationUrlResolver(
                         jira,
                         github,
@@ -70,6 +72,7 @@ class IntegrationPublicUrlValidatorTest {
                 "http://localhost:8080",
                 jira,
                 github,
+                callbackProperties(),
                 new IntegrationUrlResolver(jira, github, ""),
                 new MockEnvironment()
         ).validate());
@@ -86,6 +89,7 @@ class IntegrationPublicUrlValidatorTest {
                 "https://saga.example",
                 disabled,
                 github,
+                callbackProperties(),
                 new IntegrationUrlResolver(disabled, github, ""),
                 new MockEnvironment()
         ).validate());
@@ -97,6 +101,7 @@ class IntegrationPublicUrlValidatorTest {
                 "https://saga.example",
                 enabled,
                 github,
+                callbackProperties(),
                 new IntegrationUrlResolver(enabled, github, ""),
                 new MockEnvironment()
         ).validate());
@@ -113,6 +118,7 @@ class IntegrationPublicUrlValidatorTest {
                 "https://saga.example",
                 jira,
                 disabled,
+                callbackProperties(),
                 new IntegrationUrlResolver(jira, disabled, ""),
                 new MockEnvironment()
         ).validate());
@@ -122,6 +128,7 @@ class IntegrationPublicUrlValidatorTest {
                 "https://saga.example",
                 jira,
                 enabled,
+                callbackProperties(),
                 new IntegrationUrlResolver(jira, enabled, ""),
                 new MockEnvironment()
         ).validate());
@@ -148,6 +155,7 @@ class IntegrationPublicUrlValidatorTest {
                         "https://saga.example",
                         jiraWithoutApiUrl,
                         github,
+                        callbackProperties(),
                         new IntegrationUrlResolver(jiraWithoutApiUrl, github, ""),
                         new MockEnvironment()
                 ).validate()
@@ -179,6 +187,7 @@ class IntegrationPublicUrlValidatorTest {
                 publicBaseUrl,
                 jira,
                 github,
+                callbackProperties(),
                 resolver,
                 new MockEnvironment()
         );
@@ -213,6 +222,35 @@ class IntegrationPublicUrlValidatorTest {
     private GitHubIntegrationProperties emptyGitHub(boolean enabled) {
         return new GitHubIntegrationProperties(
                 enabled, "", "", "", "", "", "", "", "", "", "", "", ""
+        );
+    }
+
+    @Test
+    void rejectsUnsafeFrontendCallbackRedirectUri() {
+        JiraIntegrationProperties jira = new JiraIntegrationProperties(
+                false, "", "", "", "", "", "", "", ""
+        );
+        GitHubIntegrationProperties github = github(false, "", "");
+
+        assertThrows(IllegalStateException.class, () ->
+                new IntegrationPublicUrlValidator(
+                        "https://saga.example",
+                        jira,
+                        github,
+                        new IntegrationCallbackProperties(
+                                "https://user@example.com/callback#fragment",
+                                Duration.ofMinutes(5)
+                        ),
+                        new IntegrationUrlResolver(jira, github, ""),
+                        new MockEnvironment()
+                ).validate()
+        );
+    }
+
+    private IntegrationCallbackProperties callbackProperties() {
+        return new IntegrationCallbackProperties(
+                "https://frontend.example/integrations/callback",
+                Duration.ofMinutes(5)
         );
     }
 

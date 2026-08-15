@@ -21,6 +21,7 @@ import com.saga.be.security.ApplicationRole;
 import com.saga.be.security.NoStoreOAuth2AuthorizedClientRepository;
 import com.saga.be.security.SagaPrincipal;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import jakarta.servlet.http.Cookie;
@@ -88,7 +89,13 @@ class SecurityIntegrationTest {
         mockMvc.perform(get("/api/v1/subjects"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.status").value(401))
+                .andExpect(jsonPath("$.error").value("AUTHENTICATION_REQUIRED"))
                 .andExpect(jsonPath("$.message").value("Authentication is required"));
+
+        mockMvc.perform(get("/api/auth/csrf"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.status").value(401))
+                .andExpect(jsonPath("$.error").value("AUTHENTICATION_REQUIRED"));
     }
 
     @Test
@@ -117,6 +124,13 @@ class SecurityIntegrationTest {
 
         mockMvc.perform(get("/api/auth/login"))
                 .andExpect(status().isFound());
+    }
+
+    @Test
+    void csrfExemptionIsLimitedToTheTwoWebhookPostEndpoints() throws Exception {
+        mockMvc.perform(post("/api/webhooks/not-a-webhook")
+                        .with(authentication(adminAuthentication())))
+                .andExpect(status().isForbidden());
     }
 
     @Test
@@ -170,12 +184,21 @@ class SecurityIntegrationTest {
     @Test
     void csrfCookieAndHeaderProtectUnsafeRequests() throws Exception {
         Authentication admin = adminAuthentication();
-        MvcResult meResult = mockMvc.perform(get("/api/auth/me")
+        MvcResult csrfResult = mockMvc.perform(get("/api/auth/csrf")
                         .with(authentication(admin)))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.token").isNotEmpty())
+                .andExpect(jsonPath("$.headerName").value("X-XSRF-TOKEN"))
+                .andExpect(jsonPath("$.parameterName").value("_csrf"))
+                .andExpect(jsonPath("$.JSESSIONID").doesNotExist())
+                .andExpect(jsonPath("$.sessionId").doesNotExist())
+                .andExpect(jsonPath("$.accessToken").doesNotExist())
+                .andExpect(jsonPath("$.idToken").doesNotExist())
+                .andExpect(jsonPath("$.refreshToken").doesNotExist())
+                .andExpect(jsonPath("$.clientSecret").doesNotExist())
                 .andReturn();
 
-        Cookie csrfCookie = meResult.getResponse().getCookie("XSRF-TOKEN");
+        Cookie csrfCookie = csrfResult.getResponse().getCookie("XSRF-TOKEN");
         assertNotNull(csrfCookie);
         assertFalse(csrfCookie.isHttpOnly());
         assertFalse(csrfCookie.getSecure());
@@ -191,6 +214,14 @@ class SecurityIntegrationTest {
         mockMvc.perform(post("/api/v1/subjects")
                         .with(authentication(admin))
                         .cookie(csrfCookie)
+                        .header("X-XSRF-TOKEN", "invalid-csrf-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(subjectJson("CSRF-INVALID")))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(post("/api/v1/subjects")
+                        .with(authentication(admin))
+                        .cookie(csrfCookie)
                         .header("X-XSRF-TOKEN", csrfCookie.getValue())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(subjectJson("CSRF-PASS")))
@@ -201,7 +232,7 @@ class SecurityIntegrationTest {
     void corsAllowsTheConfiguredFrontendToSendTheCsrfHeaderWithCredentials()
             throws Exception {
         mockMvc.perform(options("/api/v1/subjects")
-                        .header("Origin", "http://localhost:5173")
+                        .header("Origin", "http://localhost:3000")
                         .header("Access-Control-Request-Method", "POST")
                         .header(
                                 "Access-Control-Request-Headers",
@@ -210,7 +241,7 @@ class SecurityIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(header().string(
                         "Access-Control-Allow-Origin",
-                        "http://localhost:5173"
+                        "http://localhost:3000"
                 ))
                 .andExpect(header().string(
                         "Access-Control-Allow-Credentials",
@@ -220,6 +251,31 @@ class SecurityIntegrationTest {
                         "Access-Control-Allow-Headers",
                         containsString("X-XSRF-TOKEN")
                 ));
+    }
+
+    @Test
+    void corsPreflightAllowsJiraSprintMutationIdempotencyHeader() throws Exception {
+        assertJiraMutationPreflightIsAllowed(
+                "/api/v1/projects/10000000-0000-0000-0000-000000000001/sprints"
+        );
+    }
+
+    @Test
+    void corsPreflightAllowsJiraTaskMutationIdempotencyHeader() throws Exception {
+        assertJiraMutationPreflightIsAllowed(
+                "/api/v1/projects/10000000-0000-0000-0000-000000000001/tasks"
+        );
+    }
+
+    @Test
+    void corsDoesNotGrantCredentialsToAnUnconfiguredOrigin() throws Exception {
+        mockMvc.perform(options("/api/v1/subjects")
+                        .header("Origin", "http://localhost:3001")
+                        .header("Access-Control-Request-Method", "POST")
+                        .header("Access-Control-Request-Headers", "X-XSRF-TOKEN"))
+                .andExpect(status().isForbidden())
+                .andExpect(header().doesNotExist("Access-Control-Allow-Origin"))
+                .andExpect(header().doesNotExist("Access-Control-Allow-Credentials"));
     }
 
     @Test
@@ -244,7 +300,8 @@ class SecurityIntegrationTest {
                                 }
                                 """))
                 .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.status").value(403));
+                .andExpect(jsonPath("$.status").value(403))
+                .andExpect(jsonPath("$.error").value("ACCESS_DENIED"));
     }
 
     @Test
@@ -263,7 +320,8 @@ class SecurityIntegrationTest {
                         .session(session)
                         .with(authentication(student))
                         .cookie(csrfCookie)
-                        .header("X-XSRF-TOKEN", csrfCookie.getValue()))
+                        .header("X-XSRF-TOKEN", csrfCookie.getValue())
+                        .param("logout_uri", "https://evil.example"))
                 .andExpect(status().isFound())
                 .andReturn();
 
@@ -271,11 +329,134 @@ class SecurityIntegrationTest {
         assertTrue(session.isInvalid());
         assertTrue(location != null && location.startsWith("https://cognito.test/logout?"));
         assertTrue(location.contains("client_id=test-client"));
+        assertTrue(location.contains(
+                "logout_uri=http%3A%2F%2Flocalhost%3A3000%2Flogout%2Fcallback"
+        ));
         assertFalse(location.contains("test-secret"));
+        assertFalse(location.contains("evil.example"));
+        assertEquals(0, result.getResponse().getCookie("JSESSIONID").getMaxAge());
+        assertEquals(0, result.getResponse().getCookie("XSRF-TOKEN").getMaxAge());
+    }
+
+    @Test
+    void logoutRejectsMissingCsrfWithoutInvalidatingTheSession() throws Exception {
+        MockHttpSession session = new MockHttpSession();
+        Authentication student = authenticationFor(ApplicationRole.STUDENT);
+
+        mockMvc.perform(post("/api/auth/logout")
+                        .session(session)
+                        .with(authentication(student)))
+                .andExpect(status().isForbidden());
+
+        assertFalse(session.isInvalid());
+    }
+
+    @Test
+    void logoutRejectsInvalidCsrfWithoutInvalidatingTheSession() throws Exception {
+        MockHttpSession session = new MockHttpSession();
+        Authentication student = authenticationFor(ApplicationRole.STUDENT);
+        MvcResult csrfResult = mockMvc.perform(get("/api/auth/csrf")
+                        .session(session)
+                        .with(authentication(student)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.headerName").value("X-XSRF-TOKEN"))
+                .andReturn();
+        Cookie csrfCookie = csrfResult.getResponse().getCookie("XSRF-TOKEN");
+        assertNotNull(csrfCookie);
+
+        mockMvc.perform(post("/api/auth/logout")
+                        .session(session)
+                        .with(authentication(student))
+                        .cookie(csrfCookie)
+                        .header("X-XSRF-TOKEN", "invalid-csrf-token"))
+                .andExpect(status().isForbidden());
+
+        assertFalse(session.isInvalid());
+    }
+
+    @Test
+    void anonymousLogoutWithValidCsrfUsesFrameworkLogout() throws Exception {
+        Authentication student = authenticationFor(ApplicationRole.STUDENT);
+        MvcResult csrfResult = mockMvc.perform(get("/api/auth/csrf")
+                        .with(authentication(student)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.headerName").value("X-XSRF-TOKEN"))
+                .andReturn();
+        Cookie csrfCookie = csrfResult.getResponse().getCookie("XSRF-TOKEN");
+        assertNotNull(csrfCookie);
+
+        mockMvc.perform(post("/api/auth/logout")
+                        .cookie(csrfCookie)
+                        .header("X-XSRF-TOKEN", csrfCookie.getValue()))
+                .andExpect(status().isFound())
+                .andExpect(header().string("Location", containsString("https://cognito.test/logout?")));
+    }
+
+    @Test
+    void anonymousLogoutWithMissingOrInvalidCsrfIsForbidden() throws Exception {
+        mockMvc.perform(post("/api/auth/logout"))
+                .andExpect(status().isForbidden());
+
+        Authentication student = authenticationFor(ApplicationRole.STUDENT);
+        MvcResult csrfResult = mockMvc.perform(get("/api/auth/csrf")
+                        .with(authentication(student)))
+                .andExpect(status().isOk())
+                .andReturn();
+        Cookie csrfCookie = csrfResult.getResponse().getCookie("XSRF-TOKEN");
+        assertNotNull(csrfCookie);
+
+        mockMvc.perform(post("/api/auth/logout")
+                        .cookie(csrfCookie)
+                        .header("X-XSRF-TOKEN", "invalid-csrf-token"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void getLogoutDoesNotInvalidateTheSession() throws Exception {
+        MockHttpSession session = new MockHttpSession();
+        Authentication student = authenticationFor(ApplicationRole.STUDENT);
+
+        mockMvc.perform(get("/api/auth/logout")
+                        .session(session)
+                        .with(authentication(student)))
+                .andExpect(status().isNotFound());
+
+        assertFalse(session.isInvalid());
     }
 
     private Authentication adminAuthentication() {
         return authenticationFor(ApplicationRole.ADMIN);
+    }
+
+    private void assertJiraMutationPreflightIsAllowed(String route) throws Exception {
+        MvcResult result = mockMvc.perform(options(route)
+                        .header("Origin", "http://localhost:3000")
+                        .header("Access-Control-Request-Method", "POST")
+                        .header(
+                                "Access-Control-Request-Headers",
+                                "content-type, x-xsrf-token, idempotency-key"
+                        ))
+                .andExpect(status().isOk())
+                .andExpect(header().string(
+                        "Access-Control-Allow-Origin",
+                        "http://localhost:3000"
+                ))
+                .andExpect(header().string(
+                        "Access-Control-Allow-Credentials",
+                        "true"
+                ))
+                .andExpect(header().string(
+                        "Access-Control-Allow-Methods",
+                        containsString("POST")
+                ))
+                .andReturn();
+
+        String allowedHeaders = result.getResponse().getHeader("Access-Control-Allow-Headers");
+        assertNotNull(allowedHeaders);
+        String normalizedAllowedHeaders = allowedHeaders.toLowerCase(Locale.ROOT);
+        assertTrue(normalizedAllowedHeaders.contains("content-type"));
+        assertTrue(normalizedAllowedHeaders.contains("x-xsrf-token"));
+        assertTrue(normalizedAllowedHeaders.contains("idempotency-key"));
     }
 
     private Authentication authenticationFor(ApplicationRole role) {

@@ -18,6 +18,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import java.util.UUID;
 
 @RestController
+@io.swagger.v3.oas.annotations.tags.Tag(name = "Môn học", description = "Quản lý dữ liệu môn học.")
 @RequestMapping("/api/v1/subjects")
 @RequiredArgsConstructor
 @Validated
@@ -34,6 +35,22 @@ public class SubjectController {
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<Subject> createSubject(@Valid @RequestBody SubjectRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(subjectService.createSubject(request));
+    }
+
+    @PutMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Subject> updateSubject(
+            @PathVariable UUID id,
+            @Valid @RequestBody SubjectRequest request
+    ) {
+        return ResponseEntity.ok(subjectService.updateSubject(id, request));
+    }
+
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<Void> deleteSubject(@PathVariable UUID id) {
+        subjectService.softDeleteSubject(id);
+        return ResponseEntity.noContent().build();
     }
 
     @GetMapping

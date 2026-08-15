@@ -11,16 +11,22 @@ public record AuthMeResponse(
         String fullName,
         ApplicationRole applicationRole,
         UUID localProfileId,
-        AccountStatus accountStatus
+        AccountStatus accountStatus,
+        String avatarUrl
 ) {
     public static AuthMeResponse from(SagaPrincipal principal) {
+        return from(principal, principal.accountStatus());
+    }
+
+    public static AuthMeResponse from(SagaPrincipal principal, AccountStatus accountStatus) {
         return new AuthMeResponse(
                 principal.cognitoSub(),
                 principal.email(),
                 principal.fullName(),
                 principal.applicationRole(),
                 principal.localProfileId(),
-                principal.accountStatus()
+                accountStatus,
+                principal.avatarUrl()
         );
     }
 }

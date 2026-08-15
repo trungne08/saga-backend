@@ -17,9 +17,27 @@ import org.springframework.stereotype.Repository;
 public interface GitRepoRepository extends JpaRepository<GitRepo, UUID> {
     List<GitRepo> findByProjectIdOrderByFullName(UUID projectId);
 
+    List<GitRepo> findByProjectIdAndRepositoryIdIsNotNullOrderByFullNameAscRepositoryIdAsc(
+            UUID projectId
+    );
+
     Optional<GitRepo> findByProjectIdAndRepositoryId(
             UUID projectId,
             Long repositoryId
+    );
+
+    @EntityGraph(attributePaths = {"project", "installation"})
+    Optional<GitRepo> findForCommitContextByProjectIdAndRepositoryId(
+            UUID projectId,
+            Long repositoryId
+    );
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @EntityGraph(attributePaths = {"installation"})
+    @Query("select repository from GitRepo repository where repository.project.id = :projectId and repository.repositoryId = :repositoryId")
+    Optional<GitRepo> findForReconnectByProjectIdAndRepositoryId(
+            @Param("projectId") UUID projectId,
+            @Param("repositoryId") Long repositoryId
     );
 
     Optional<GitRepo> findByRepositoryId(Long repositoryId);
@@ -33,7 +51,21 @@ public interface GitRepoRepository extends JpaRepository<GitRepo, UUID> {
     @Query("select repository from GitRepo repository where repository.id = :id")
     Optional<GitRepo> findForInitialBackfillClaimById(@Param("id") UUID id);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select repository from GitRepo repository where repository.id = :id")
+    Optional<GitRepo> findForStateUpdateById(@Param("id") UUID id);
+
     List<GitRepo> findByInstallationInstallationId(Long installationId);
 
     List<GitRepo> findByConnectionStatusIn(List<IntegrationStatus> statuses);
+
+    List<GitRepo> findByProjectIdIn(List<UUID> projectIds);
+
+    long countByConnectionStatus(IntegrationStatus connectionStatus);
+
+    @Query("select count(distinct repository.project.id) from GitRepo repository")
+    long countDistinctLinkedProjectId();
+
+    @Query("select max(repository.lastSyncedAt) from GitRepo repository")
+    java.time.LocalDateTime findLatestLastSyncedAt();
 }

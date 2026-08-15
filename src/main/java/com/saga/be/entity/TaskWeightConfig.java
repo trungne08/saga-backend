@@ -26,8 +26,8 @@ public class TaskWeightConfig extends BaseEntity {
     private Subject subject;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "class_id", nullable = true)
-    private Class clazz;
+    @JoinColumn(name = "course_id", nullable = true)
+    private Course course;
 
     @Column(name = "task_type")
     private String taskType;

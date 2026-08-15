@@ -31,6 +31,7 @@ public class IntegrationReconciliationScheduler {
     private final GitHubProviderClient gitHubClient;
     private final JiraWebhookMaintenanceService webhookMaintenanceService;
     private final AutomaticSyncDispatcher dispatcher;
+    private final GitRepoStateService gitRepoStateService;
 
     public IntegrationReconciliationScheduler(
             IntegrationProperties properties,
@@ -40,7 +41,8 @@ public class IntegrationReconciliationScheduler {
             GitHubInstallationRepository installationRepository,
             GitHubProviderClient gitHubClient,
             JiraWebhookMaintenanceService webhookMaintenanceService,
-            AutomaticSyncDispatcher dispatcher
+            AutomaticSyncDispatcher dispatcher,
+            GitRepoStateService gitRepoStateService
     ) {
         this.properties = properties;
         this.availability = availability;
@@ -50,6 +52,7 @@ public class IntegrationReconciliationScheduler {
         this.gitHubClient = gitHubClient;
         this.webhookMaintenanceService = webhookMaintenanceService;
         this.dispatcher = dispatcher;
+        this.gitRepoStateService = gitRepoStateService;
     }
 
     @Scheduled(
@@ -115,8 +118,7 @@ public class IntegrationReconciliationScheduler {
                             installation.getInstallationId()
                     )) {
                 if (!accessibleIds.contains(repository.getRepositoryId())) {
-                    repository.setConnectionStatus(IntegrationStatus.DEGRADED);
-                    gitRepoRepository.saveAndFlush(repository);
+                    gitRepoStateService.markDegraded(repository.getId());
                 } else if (repository.getConnectionStatus()
                         != IntegrationStatus.DISCONNECTED) {
                     dispatcher.reconcileGitHub(repository.getId());
@@ -140,8 +142,7 @@ public class IntegrationReconciliationScheduler {
                 )) {
             if (repository.getConnectionStatus()
                     != IntegrationStatus.DISCONNECTED) {
-                repository.setConnectionStatus(IntegrationStatus.DEGRADED);
-                gitRepoRepository.saveAndFlush(repository);
+                gitRepoStateService.markDegraded(repository.getId());
             }
         }
     }

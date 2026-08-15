@@ -26,6 +26,7 @@ import com.saga.be.entity.GitHubInstallation;
 import com.saga.be.entity.GitRepo;
 import com.saga.be.entity.JiraBoard;
 import com.saga.be.entity.Project;
+import com.saga.be.entity.Sprint;
 import com.saga.be.entity.SyncJobLog;
 import com.saga.be.entity.enums.GitHubInstallationStatus;
 import com.saga.be.entity.enums.IntegrationStatus;
@@ -37,9 +38,12 @@ import com.saga.be.integration.provider.GitHubProviderClient;
 import com.saga.be.integration.provider.JiraIssuePage;
 import com.saga.be.integration.provider.JiraIssueSnapshot;
 import com.saga.be.integration.provider.JiraProviderClient;
+import com.saga.be.integration.provider.JiraSprintSnapshot;
 import com.saga.be.repository.GitRepoRepository;
 import com.saga.be.repository.JiraBoardRepository;
 import com.saga.be.repository.SyncJobLogRepository;
+import com.saga.be.repository.SprintRepository;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -51,17 +55,27 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.OptimisticLockingFailureException;
 
 class AutomaticSyncDispatcherImplTest {
+
+    private static final Clock FIXED_CLOCK = Clock.fixed(
+            Instant.parse("2026-08-04T05:13:49Z"),
+            ZoneOffset.UTC
+    );
 
     private JiraBoardRepository boardRepository;
     private SyncJobLogRepository jobRepository;
     private JiraCredentialService credentialService;
     private JiraProviderClient jiraClient;
     private JiraIssueUpsertService jiraUpsertService;
+    private JiraSprintUpsertService jiraSprintUpsertService;
+    private SprintRepository sprintRepository;
     private GitRepoRepository gitRepoRepository;
     private GitHubProviderClient gitHubClient;
     private GitHubInitialBackfillJobService initialBackfillJobService;
+    private GitHubSyncJobService gitHubSyncJobService;
+    private GitRepoStateService gitRepoStateService;
     private JiraSyncJobService jiraSyncJobService;
     private SyncJobFinalizationService syncJobFinalizationService;
     private JiraBoardStateService jiraBoardStateService;
@@ -78,11 +92,15 @@ class AutomaticSyncDispatcherImplTest {
         credentialService = mock(JiraCredentialService.class);
         jiraClient = mock(JiraProviderClient.class);
         jiraUpsertService = mock(JiraIssueUpsertService.class);
+        jiraSprintUpsertService = mock(JiraSprintUpsertService.class);
+        sprintRepository = mock(SprintRepository.class);
         gitRepoRepository = mock(GitRepoRepository.class);
         gitHubClient = mock(GitHubProviderClient.class);
         initialBackfillJobService = mock(
                 GitHubInitialBackfillJobService.class
         );
+        gitHubSyncJobService = mock(GitHubSyncJobService.class);
+        gitRepoStateService = mock(GitRepoStateService.class);
         jiraSyncJobService = mock(JiraSyncJobService.class);
         syncJobFinalizationService = mock(SyncJobFinalizationService.class);
         jiraBoardStateService = mock(JiraBoardStateService.class);
@@ -97,8 +115,12 @@ class AutomaticSyncDispatcherImplTest {
                 jiraClient,
                 gitHubClient,
                 jiraUpsertService,
+                jiraSprintUpsertService,
+                sprintRepository,
                 mock(GitHubDataUpsertService.class),
                 initialBackfillJobService,
+                gitHubSyncJobService,
+                gitRepoStateService,
                 jiraSyncJobService,
                 syncJobFinalizationService,
                 jiraBoardStateService,
@@ -113,7 +135,8 @@ class AutomaticSyncDispatcherImplTest {
                         true,
                         Duration.ofMinutes(5)
                 ),
-                new JiraTimeZoneProperties("UTC")
+                new JiraTimeZoneProperties("UTC"),
+                FIXED_CLOCK
         );
         boardId = UUID.randomUUID();
         Project project = Project.builder().name("Project").build();
@@ -244,6 +267,213 @@ class AutomaticSyncDispatcherImplTest {
                 any(),
                 isNull(),
                 isNull()
+        );
+    }
+
+    @Test
+    void reconciliationProcessesCanonicalRequestIssueWithoutFailure() {
+        JiraIssueSnapshot request = new JiraIssueSnapshot(
+                "request-1", "SAGA-REQUEST-1", "Canonical request",
+                "Request", "To Do", "Medium", null, null, null, null,
+                LocalDateTime.parse("2026-08-13T04:00:00"),
+                LocalDateTime.parse("2026-08-13T05:00:00"),
+                null, null, null, null
+        );
+        when(jiraClient.searchIssues(
+                eq("token"), eq("cloud-id"), eq("SAGA"), any(), any(), eq(null)
+        )).thenReturn(new JiraIssuePage(List.of(request), null, true));
+        when(jiraUpsertService.upsert(boardId, request)).thenReturn(true);
+
+        dispatcher.syncJira(boardId, SyncJobType.RECONCILIATION);
+
+        verify(jiraUpsertService).upsert(boardId, request);
+        verify(jiraBoardStateService).complete(eq(boardId), any());
+        verify(syncJobFinalizationService).finalizeJob(
+                eq(jiraJob.getId()),
+                eq(SyncJobStatus.COMPLETED),
+                eq(1),
+                eq(0),
+                any(),
+                isNull(),
+                isNull()
+        );
+    }
+
+    @Test
+    void jiraReconciliationDiscoversAndProjectsBoardEstimationField() {
+        board.setJiraBoardId("35");
+        JiraIssueSnapshot estimated = new JiraIssueSnapshot(
+                "1", "SAGA-1", "Estimated task", "Task", "To Do", "Medium",
+                5, null, null, null,
+                LocalDateTime.parse("2026-08-04T04:00:00"),
+                LocalDateTime.parse("2026-08-04T05:00:00"),
+                null, null, null, null,
+                Instant.parse("2026-08-04T05:00:00Z"),
+                List.of(), null, List.of(), true
+        );
+        when(jiraClient.estimationFieldId("token", "cloud-id", "35"))
+                .thenReturn("customfield_story_points");
+        when(jiraClient.searchIssues(
+                eq("token"), eq("cloud-id"), eq("SAGA"), any(), any(), eq(null),
+                eq("customfield_story_points"), isNull()
+        )).thenReturn(new JiraIssuePage(List.of(estimated), null, true));
+
+        dispatcher.syncJira(boardId, SyncJobType.RECONCILIATION);
+
+        verify(jiraClient).estimationFieldId("token", "cloud-id", "35");
+        verify(jiraClient).searchIssues(
+                eq("token"), eq("cloud-id"), eq("SAGA"), any(), any(), eq(null),
+                eq("customfield_story_points"), isNull()
+        );
+        verify(jiraUpsertService).upsert(boardId, estimated);
+    }
+
+    @Test
+    void jiraSyncHydratesEachDistinctIssueSprintExactlyOnce() {
+        JiraIssueSnapshot first = issueInSprint("1", "42", "Sprint 42");
+        JiraIssueSnapshot second = issueInSprint("2", "42", "Sprint 42");
+        JiraSprintSnapshot canonical = new JiraSprintSnapshot(
+                "42",
+                "Sprint 42",
+                "active",
+                "Goal",
+                LocalDateTime.parse("2026-08-01T02:00:00"),
+                LocalDateTime.parse("2026-08-15T02:00:00"),
+                null,
+                "99"
+        );
+        when(jiraClient.sprintFieldId("token", "cloud-id"))
+                .thenReturn("customfield_10020");
+        when(jiraClient.searchIssues(
+                eq("token"), eq("cloud-id"), eq("SAGA"), any(), any(),
+                eq(null), eq("customfield_10020")
+        )).thenReturn(new JiraIssuePage(List.of(first, second), null, true));
+        Sprint alreadyKnown = Sprint.builder()
+                .board(board)
+                .externalSprintId("42")
+                .build();
+        when(sprintRepository.findByBoardIdAndDeletedAtIsNull(boardId))
+                .thenReturn(List.of(alreadyKnown));
+        when(jiraClient.getSprint("token", "cloud-id", "42"))
+                .thenReturn(canonical);
+
+        dispatcher.syncJira(boardId, SyncJobType.RECONCILIATION);
+
+        verify(jiraClient, times(1)).getSprint("token", "cloud-id", "42");
+        verify(jiraSprintUpsertService).upsert(boardId, canonical);
+        verify(syncJobFinalizationService).finalizeJob(
+                eq(jiraJob.getId()),
+                eq(SyncJobStatus.COMPLETED),
+                eq(3),
+                eq(0),
+                any(),
+                isNull(),
+                isNull()
+        );
+    }
+
+    @Test
+    void jiraSyncRepairsAnExistingSprintEvenWhenNoIssueChanged() {
+        Sprint local = Sprint.builder()
+                .board(board)
+                .externalSprintId("42")
+                .name("Sprint 42")
+                .build();
+        JiraSprintSnapshot canonical = new JiraSprintSnapshot(
+                "42",
+                "Sprint 42",
+                "active",
+                null,
+                LocalDateTime.parse("2026-08-01T02:00:00"),
+                LocalDateTime.parse("2026-08-15T02:00:00"),
+                null,
+                "99"
+        );
+        when(jiraClient.searchIssues(
+                eq("token"), eq("cloud-id"), eq("SAGA"), any(), any(), eq(null)
+        )).thenReturn(new JiraIssuePage(List.of(), null, true));
+        when(sprintRepository.findByBoardIdAndDeletedAtIsNull(boardId))
+                .thenReturn(List.of(local));
+        when(jiraClient.getSprint("token", "cloud-id", "42"))
+                .thenReturn(canonical);
+
+        dispatcher.syncJira(boardId, SyncJobType.RECONCILIATION);
+
+        verify(jiraClient).getSprint("token", "cloud-id", "42");
+        verify(jiraSprintUpsertService).upsert(boardId, canonical);
+    }
+
+    @Test
+    void jiraSyncHydratesLocalSprintWithMissingCanonicalDatesWhenSearchIsEmpty() {
+        Sprint local = Sprint.builder()
+                .board(board)
+                .externalSprintId("42")
+                .name("Embedded sprint")
+                .build();
+        JiraSprintSnapshot canonical = new JiraSprintSnapshot(
+                "42", "Sprint 42", "active", null,
+                LocalDateTime.parse("2026-08-01T02:00:00"),
+                LocalDateTime.parse("2026-08-15T02:00:00"), null, "99"
+        );
+        when(jiraClient.searchIssues(
+                eq("token"), eq("cloud-id"), eq("SAGA"), any(), any(), eq(null)
+        )).thenReturn(new JiraIssuePage(List.of(), null, true));
+        when(sprintRepository.findByBoardIdAndDeletedAtIsNull(boardId))
+                .thenReturn(List.of(local));
+        when(jiraClient.getSprint("token", "cloud-id", "42"))
+                .thenReturn(canonical);
+
+        dispatcher.syncJira(boardId, SyncJobType.RECONCILIATION);
+
+        verify(jiraClient).getSprint("token", "cloud-id", "42");
+        verify(jiraSprintUpsertService).upsert(boardId, canonical);
+    }
+
+    @Test
+    void failingSprintDoesNotPreventOtherSprintAndEmitsSafeStructuredDiagnostics() {
+        board.setJiraBoardId("99");
+        Sprint first = Sprint.builder().board(board).externalSprintId("42").build();
+        Sprint missing = Sprint.builder().board(board).externalSprintId("43").build();
+        JiraSprintSnapshot canonical = new JiraSprintSnapshot(
+                "42", "Sprint 42", "active", null, null, null, null, "99"
+        );
+        when(jiraClient.searchIssues(
+                eq("token"), eq("cloud-id"), eq("SAGA"), any(), any(), eq(null)
+        )).thenReturn(new JiraIssuePage(List.of(), null, true));
+        when(sprintRepository.findByBoardIdAndDeletedAtIsNull(boardId))
+                .thenReturn(List.of(first, missing));
+        when(jiraClient.getSprint("token", "cloud-id", "42")).thenReturn(canonical);
+        when(jiraClient.getSprint("token", "cloud-id", "43")).thenThrow(
+                new IntegrationException(org.springframework.http.HttpStatus.NOT_FOUND,
+                        "JIRA_SPRINT_NOT_FOUND", "RAW_PROVIDER_RESPONSE_SECRET")
+        );
+        Logger logger = (Logger) LoggerFactory.getLogger(
+                AutomaticSyncDispatcherImpl.class
+        );
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            dispatcher.syncJira(boardId, SyncJobType.RECONCILIATION);
+            String logged = appender.list.stream()
+                    .map(ILoggingEvent::getFormattedMessage)
+                    .reduce("", String::concat);
+            assertThat(logged).contains("jiraBoardEntityId=" + boardId)
+                    .contains("jiraExternalBoardId=99")
+                    .contains("projectKey=SAGA")
+                    .contains("externalSprintId=43")
+                    .contains("upstreamHttpStatus=404")
+                    .contains("providerErrorCategory=JIRA_SPRINT_NOT_FOUND")
+                    .contains("failureStage=HYDRATE_SPRINTS")
+                    .doesNotContain("RAW_PROVIDER_RESPONSE_SECRET")
+                    .doesNotContain("token");
+        } finally {
+            logger.detachAppender(appender);
+        }
+        verify(jiraSprintUpsertService).upsert(boardId, canonical);
+        verify(syncJobFinalizationService).finalizeJob(
+                jiraJob.getId(), SyncJobStatus.PARTIAL_FAILURE, 1, 1,
+                null, "ITEM_UPSERT_FAILED", "HYDRATE_SPRINTS"
         );
     }
 
@@ -476,17 +706,78 @@ class AutomaticSyncDispatcherImplTest {
                 "backend",
                 null
         )).thenReturn(List.of());
+        when(gitRepoStateService.complete(eq(repositoryId), any()))
+                .thenReturn(true);
 
         dispatcher.syncGitHub(repositoryId, SyncJobType.INITIAL_BACKFILL);
 
-        assertEquals(IntegrationStatus.ACTIVE, repository.getConnectionStatus());
-        assertNotNull(repository.getLastSyncedAt());
-        assertNotNull(repository.getSyncCursor());
-        assertEquals(SyncJobStatus.COMPLETED, job.getStatus());
-        assertNotNull(job.getCompletedAt());
-        assertEquals(0, job.getItemsProcessed());
-        assertEquals(0, job.getItemsFailed());
-        verify(jobRepository).saveAndFlush(job);
+        verify(gitRepoStateService).complete(eq(repositoryId), any());
+        verify(syncJobFinalizationService).finalizeJob(
+                eq(job.getId()),
+                eq(SyncJobStatus.COMPLETED),
+                eq(0),
+                eq(0),
+                any(),
+                isNull(),
+                isNull()
+        );
+    }
+
+    @Test
+    void githubReconciliationWritesStartAndCompletionUsingFixedUtcClock() {
+        UUID repositoryId = UUID.randomUUID();
+        Project project = Project.builder().name("Project").build();
+        project.setId(UUID.randomUUID());
+        GitHubInstallation installation = GitHubInstallation.builder()
+                .installationId(123L)
+                .installationStatus(GitHubInstallationStatus.ACTIVE)
+                .build();
+        GitRepo repository = GitRepo.builder()
+                .project(project)
+                .installation(installation)
+                .ownerLogin("saga")
+                .name("backend")
+                .connectionStatus(IntegrationStatus.ACTIVE)
+                .build();
+        repository.setId(repositoryId);
+        SyncJobLog job = SyncJobLog.builder()
+                .targetSystem("GITHUB")
+                .targetId(repositoryId)
+                .jobType(SyncJobType.RECONCILIATION)
+                .status(SyncJobStatus.IN_PROGRESS)
+                .build();
+        job.setId(UUID.randomUUID());
+        when(gitHubSyncJobService.claim(
+                repositoryId,
+                SyncJobType.RECONCILIATION
+        )).thenReturn(Optional.of(job));
+        when(gitRepoRepository.findForSyncById(repositoryId))
+                .thenReturn(Optional.of(repository));
+        when(gitHubClient.pullRequests(123L, "saga", "backend", null))
+                .thenReturn(List.of());
+        when(gitHubClient.issues(123L, "saga", "backend", null))
+                .thenReturn(List.of());
+        when(gitHubClient.commits(123L, "saga", "backend", null))
+                .thenReturn(List.of());
+        when(gitHubClient.issueComments(123L, "saga", "backend", null))
+                .thenReturn(List.of());
+        when(gitHubClient.reviewComments(123L, "saga", "backend", null))
+                .thenReturn(List.of());
+        when(gitRepoStateService.complete(eq(repositoryId), any()))
+                .thenReturn(true);
+
+        dispatcher.syncGitHub(repositoryId, SyncJobType.RECONCILIATION);
+
+        verify(gitRepoStateService).complete(eq(repositoryId), any());
+        verify(syncJobFinalizationService).finalizeJob(
+                eq(job.getId()),
+                eq(SyncJobStatus.COMPLETED),
+                eq(0),
+                eq(0),
+                any(),
+                isNull(),
+                isNull()
+        );
     }
 
     @Test
@@ -495,7 +786,8 @@ class AutomaticSyncDispatcherImplTest {
         clearInvocations(
                 gitRepoRepository,
                 gitHubClient,
-                initialBackfillJobService
+                initialBackfillJobService,
+                gitHubSyncJobService
         );
 
         dispatcher.syncGitHub(
@@ -506,7 +798,8 @@ class AutomaticSyncDispatcherImplTest {
         verifyNoInteractions(
                 gitRepoRepository,
                 gitHubClient,
-                initialBackfillJobService
+                initialBackfillJobService,
+                gitHubSyncJobService
         );
     }
 
@@ -549,6 +842,7 @@ class AutomaticSyncDispatcherImplTest {
                 .status(SyncJobStatus.IN_PROGRESS)
                 .startedAt(LocalDateTime.now())
                 .build();
+        job.setId(UUID.randomUUID());
         when(initialBackfillJobService.claim(repositoryId))
                 .thenReturn(Optional.of(job));
         when(gitRepoRepository.findForSyncById(repositoryId))
@@ -565,15 +859,57 @@ class AutomaticSyncDispatcherImplTest {
                 SyncJobType.INITIAL_BACKFILL
         );
 
-        assertEquals(
-                IntegrationStatus.DEGRADED,
-                repository.getConnectionStatus()
+        verify(gitRepoStateService).degrade(repositoryId);
+        verify(syncJobFinalizationService).finalizeJob(
+                eq(job.getId()),
+                eq(SyncJobStatus.FAILED),
+                eq(0),
+                eq(0),
+                isNull(),
+                eq("UNEXPECTED_SYNC_FAILURE"),
+                eq("SYNC_ITEMS")
         );
-        assertEquals(1, repository.getConsecutiveFailures());
-        assertEquals(SyncJobStatus.FAILED, job.getStatus());
-        assertEquals("UNEXPECTED_SYNC_FAILURE", job.getErrorMessage());
-        assertNotNull(job.getCompletedAt());
-        verify(jobRepository).saveAndFlush(job);
+    }
+
+    @Test
+    void optimisticLockDuringGitHubDegradationStillFinalizesTheJob() {
+        UUID repositoryId = UUID.randomUUID();
+        GitHubInstallation installation = GitHubInstallation.builder()
+                .installationId(123L)
+                .installationStatus(GitHubInstallationStatus.SUSPENDED)
+                .build();
+        GitRepo repository = GitRepo.builder()
+                .installation(installation)
+                .connectionStatus(IntegrationStatus.ACTIVE)
+                .build();
+        repository.setId(repositoryId);
+        SyncJobLog job = SyncJobLog.builder()
+                .targetSystem("GITHUB")
+                .targetId(repositoryId)
+                .jobType(SyncJobType.RECONCILIATION)
+                .status(SyncJobStatus.IN_PROGRESS)
+                .build();
+        job.setId(UUID.randomUUID());
+        when(gitHubSyncJobService.claim(
+                repositoryId,
+                SyncJobType.RECONCILIATION
+        )).thenReturn(Optional.of(job));
+        when(gitRepoRepository.findForSyncById(repositoryId))
+                .thenReturn(Optional.of(repository));
+        doThrow(new OptimisticLockingFailureException("concurrent update"))
+                .when(gitRepoStateService).degrade(repositoryId);
+
+        dispatcher.syncGitHub(repositoryId, SyncJobType.RECONCILIATION);
+
+        verify(syncJobFinalizationService).finalizeJob(
+                eq(job.getId()),
+                eq(SyncJobStatus.FAILED),
+                eq(0),
+                eq(0),
+                isNull(),
+                eq("GITHUB_INSTALLATION_INACTIVE"),
+                eq("SYNC_ITEMS")
+        );
     }
 
     private JiraIssueSnapshot issue(String id, LocalDateTime updatedAt) {
@@ -594,6 +930,32 @@ class AutomaticSyncDispatcherImplTest {
                 null,
                 null,
                 null
+        );
+    }
+
+    private JiraIssueSnapshot issueInSprint(
+            String id,
+            String sprintId,
+            String sprintName
+    ) {
+        LocalDateTime updatedAt = LocalDateTime.parse("2026-08-04T05:00:00");
+        return new JiraIssueSnapshot(
+                id,
+                "SAGA-" + id,
+                "Issue " + id,
+                "Task",
+                "To Do",
+                "Medium",
+                null,
+                null,
+                null,
+                null,
+                updatedAt.minusDays(1),
+                updatedAt,
+                null,
+                null,
+                sprintId,
+                sprintName
         );
     }
 }

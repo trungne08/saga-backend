@@ -1,6 +1,7 @@
 package com.saga.be.integration.project;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -19,6 +20,7 @@ import com.saga.be.integration.provider.GitHubProviderClient;
 import com.saga.be.integration.provider.JiraAccessibleResource;
 import com.saga.be.integration.provider.JiraProjectInfo;
 import com.saga.be.integration.provider.JiraProviderClient;
+import com.saga.be.integration.provider.JiraWriteScope;
 import com.saga.be.integration.provider.JiraWebhookRegistration;
 import com.saga.be.integration.security.IntegrationAttemptLimiter;
 import com.saga.be.integration.security.IntegrationSecretCipher;
@@ -33,6 +35,7 @@ import com.saga.be.repository.SyncJobLogRepository;
 import com.saga.be.security.ApplicationRole;
 import com.saga.be.security.SagaPrincipal;
 import com.saga.be.service.AuthenticationAuditService;
+import com.saga.be.service.ProjectIntegrationNotificationProducer;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -45,7 +48,53 @@ import org.springframework.mock.web.MockHttpSession;
 class ProjectIntegrationServiceJiraWebhookTest {
 
     @Test
-    void compensatesProviderWebhookWhenTheBoardWriteFailsAfterCreation() {
+    void disconnectRetainsBoardMetadataAndHistoryAnchorWhileRetiringCredentials() {
+        UUID projectId = UUID.randomUUID();
+        Project project = new Project();
+        project.setId(projectId);
+        JiraBoard board = JiraBoard.builder()
+                .project(project)
+                .cloudId("cloud")
+                .jiraProjectId("10034")
+                .projectKey("SDP")
+                .jiraBoardId("99")
+                .encryptedAccessToken("old-ciphertext")
+                .encryptedRefreshToken("old-refresh-ciphertext")
+                .grantedScopes("read:jira-work")
+                .connectionStatus(com.saga.be.entity.enums.IntegrationStatus.ACTIVE)
+                .build();
+        JiraBoardRepository boards = mock(JiraBoardRepository.class);
+        ProjectIntegrationAuthorizationService authorization = mock(
+                ProjectIntegrationAuthorizationService.class
+        );
+        when(authorization.requireProjectManager(any(), eq(projectId)))
+                .thenReturn(project);
+        when(boards.findByProjectId(projectId)).thenReturn(Optional.of(board));
+        when(boards.saveAndFlush(board)).thenReturn(board);
+        ProjectIntegrationService service = service(
+                authorization,
+                mock(ProjectIntegrationSessionStore.class),
+                mock(JiraProviderClient.class),
+                mock(IntegrationUrlResolver.class),
+                mock(IntegrationSecretCipher.class),
+                boards
+        );
+
+        service.disconnectJira(admin(), projectId, "127.0.0.1");
+
+        assertEquals(com.saga.be.entity.enums.IntegrationStatus.DISCONNECTED,
+                board.getConnectionStatus());
+        assertEquals("10034", board.getJiraProjectId());
+        assertEquals("SDP", board.getProjectKey());
+        assertEquals("99", board.getJiraBoardId());
+        org.junit.jupiter.api.Assertions.assertNull(board.getEncryptedAccessToken());
+        org.junit.jupiter.api.Assertions.assertNull(board.getEncryptedRefreshToken());
+        org.junit.jupiter.api.Assertions.assertNull(board.getGrantedScopes());
+        verify(boards).saveAndFlush(board);
+    }
+
+    @Test
+    void doesNotRegisterProviderWebhookWhenTheLocalUpsertFails() {
         UUID projectId = UUID.randomUUID();
         UUID boardId = UUID.randomUUID();
         Project project = new Project();
@@ -68,7 +117,8 @@ class ProjectIntegrationServiceJiraWebhookTest {
                         Instant.now().plusSeconds(3600),
                         Set.of("read:jira-work", "manage:jira-webhook"),
                         List.of(new JiraAccessibleResource(
-                                "cloud", "site", "https://site.test"
+                                "cloud", "site", "https://site.test",
+                                JiraWriteScope.projectIntegrationScopes()
                         ))
                 )
         );
@@ -79,8 +129,6 @@ class ProjectIntegrationServiceJiraWebhookTest {
                 "https://tunnel.test/api/webhooks/jira"
         );
         when(cipher.encrypt(any(), any())).thenReturn("encrypted");
-        when(jira.ensureWebhook(any(), any(), any(), any(), any()))
-                .thenReturn(new JiraWebhookRegistration("99", true));
         when(boards.findByProjectId(projectId)).thenReturn(Optional.empty());
         AtomicInteger saves = new AtomicInteger();
         when(boards.saveAndFlush(any(JiraBoard.class))).thenAnswer(call -> {
@@ -101,7 +149,9 @@ class ProjectIntegrationServiceJiraWebhookTest {
                 new JiraProjectLinkRequest("cloud", "10034"), "127.0.0.1"
         ));
 
-        verify(jira).deleteWebhook("ACCESS_TOKEN_SECRET", "cloud", "99");
+        verify(jira, org.mockito.Mockito.never()).ensureWebhook(
+                any(), any(), any(), any(), any()
+        );
     }
 
     private ProjectIntegrationService service(
@@ -128,7 +178,12 @@ class ProjectIntegrationServiceJiraWebhookTest {
                 ),
                 urls,
                 cipher,
-                mock(JiraCredentialService.class),
+                new JiraCredentialService(cipher, jira, boards),
+                mock(JiraBoardResolutionService.class),
+                new JiraBoardLinkPersistenceService(
+                        boards,
+                        new JiraCredentialService(cipher, jira, boards)
+                ),
                 boards,
                 mock(GitHubInstallationRepository.class),
                 mock(GitRepoRepository.class),
@@ -137,7 +192,8 @@ class ProjectIntegrationServiceJiraWebhookTest {
                 mock(AutomaticSyncDispatcher.class),
                 event -> { },
                 mock(IntegrationAttemptLimiter.class),
-                mock(AuthenticationAuditService.class)
+                mock(AuthenticationAuditService.class),
+                mock(ProjectIntegrationNotificationProducer.class)
         );
     }
 

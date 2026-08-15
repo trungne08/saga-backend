@@ -7,16 +7,17 @@ import com.saga.be.config.JiraIntegrationProperties;
 import com.saga.be.dto.request.GitHubRepositoriesLinkRequest;
 import com.saga.be.dto.request.JiraProjectLinkRequest;
 import com.saga.be.dto.response.GitHubInstallationResponse;
+import com.saga.be.dto.response.IntegrationCallbackResultResponse;
 import com.saga.be.dto.response.GitHubRepositoryResponse;
 import com.saga.be.dto.response.JiraAuthorizationResponse;
 import com.saga.be.dto.response.JiraSiteResponse;
 import com.saga.be.dto.response.ProjectIntegrationsResponse;
 import com.saga.be.dto.response.SyncStatusResponse;
+import com.saga.be.dto.response.SyncHistoryResponse;
 import com.saga.be.entity.GitHubInstallation;
 import com.saga.be.entity.GitRepo;
 import com.saga.be.entity.JiraBoard;
 import com.saga.be.entity.Project;
-import com.saga.be.entity.enums.BoardType;
 import com.saga.be.entity.enums.GitHubInstallationStatus;
 import com.saga.be.entity.enums.IntegrationStatus;
 import com.saga.be.exception.IntegrationException;
@@ -28,6 +29,7 @@ import com.saga.be.integration.provider.JiraOAuthToken;
 import com.saga.be.integration.provider.JiraProjectInfo;
 import com.saga.be.integration.provider.JiraProviderClient;
 import com.saga.be.integration.provider.JiraWebhookRegistration;
+import com.saga.be.integration.provider.JiraWriteScope;
 import com.saga.be.integration.security.IntegrationAttemptLimiter;
 import com.saga.be.integration.security.IntegrationSecretCipher;
 import com.saga.be.integration.security.OAuthFlow;
@@ -42,6 +44,7 @@ import com.saga.be.repository.SyncJobLogRepository;
 import com.saga.be.security.ApplicationRole;
 import com.saga.be.security.SagaPrincipal;
 import com.saga.be.service.AuthenticationAuditService;
+import com.saga.be.service.ProjectIntegrationNotificationProducer;
 import jakarta.servlet.http.HttpSession;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -56,6 +59,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.dao.DataIntegrityViolationException;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.springframework.context.ApplicationEventPublisher;
@@ -73,15 +78,6 @@ public class ProjectIntegrationService {
     private static final Logger log = LoggerFactory.getLogger(
             ProjectIntegrationService.class
     );
-    private static final Set<String> CLASSIC_WEBHOOK_SCOPES = Set.of(
-            "read:jira-work",
-            "manage:jira-webhook"
-    );
-    private static final Set<String> GRANULAR_WEBHOOK_SCOPES = Set.of(
-            "read:webhook:jira",
-            "write:webhook:jira"
-    );
-
     private final ProjectIntegrationAuthorizationService authorization;
     private final OAuthStateService stateService;
     private final ProjectIntegrationSessionStore sessionStore;
@@ -93,6 +89,8 @@ public class ProjectIntegrationService {
     private final IntegrationUrlResolver urlResolver;
     private final IntegrationSecretCipher cipher;
     private final JiraCredentialService jiraCredentialService;
+    private final JiraBoardResolutionService jiraBoardResolutionService;
+    private final JiraBoardLinkPersistenceService jiraBoardLinkPersistenceService;
     private final JiraBoardRepository jiraBoardRepository;
     private final GitHubInstallationRepository installationRepository;
     private final GitRepoRepository gitRepoRepository;
@@ -102,6 +100,7 @@ public class ProjectIntegrationService {
     private final ApplicationEventPublisher eventPublisher;
     private final IntegrationAttemptLimiter attemptLimiter;
     private final AuthenticationAuditService auditService;
+    private final ProjectIntegrationNotificationProducer notificationProducer;
     private final SecureRandom secureRandom = new SecureRandom();
 
     public ProjectIntegrationService(
@@ -116,6 +115,8 @@ public class ProjectIntegrationService {
             IntegrationUrlResolver urlResolver,
             IntegrationSecretCipher cipher,
             JiraCredentialService jiraCredentialService,
+            JiraBoardResolutionService jiraBoardResolutionService,
+            JiraBoardLinkPersistenceService jiraBoardLinkPersistenceService,
             JiraBoardRepository jiraBoardRepository,
             GitHubInstallationRepository installationRepository,
             GitRepoRepository gitRepoRepository,
@@ -124,7 +125,8 @@ public class ProjectIntegrationService {
             AutomaticSyncDispatcher syncDispatcher,
             ApplicationEventPublisher eventPublisher,
             IntegrationAttemptLimiter attemptLimiter,
-            AuthenticationAuditService auditService
+            AuthenticationAuditService auditService,
+            ProjectIntegrationNotificationProducer notificationProducer
     ) {
         this.authorization = authorization;
         this.stateService = stateService;
@@ -137,6 +139,8 @@ public class ProjectIntegrationService {
         this.urlResolver = urlResolver;
         this.cipher = cipher;
         this.jiraCredentialService = jiraCredentialService;
+        this.jiraBoardResolutionService = jiraBoardResolutionService;
+        this.jiraBoardLinkPersistenceService = jiraBoardLinkPersistenceService;
         this.jiraBoardRepository = jiraBoardRepository;
         this.installationRepository = installationRepository;
         this.gitRepoRepository = gitRepoRepository;
@@ -146,6 +150,7 @@ public class ProjectIntegrationService {
         this.eventPublisher = eventPublisher;
         this.attemptLimiter = attemptLimiter;
         this.auditService = auditService;
+        this.notificationProducer = notificationProducer;
     }
 
     public ProjectIntegrationsResponse integrations(
@@ -181,6 +186,7 @@ public class ProjectIntegrationService {
     ) {
         authorization.requireProjectManager(principal, projectId);
         limit(principal, "project-jira-connect");
+        requireConfiguredJiraScopes();
         String state = stateService.issue(
                 session,
                 principal,
@@ -232,7 +238,6 @@ public class ProjectIntegrationService {
         );
     }
 
-    @Transactional
     public ProjectIntegrationsResponse linkJira(
             SagaPrincipal principal,
             UUID projectId,
@@ -242,78 +247,80 @@ public class ProjectIntegrationService {
     ) {
         Project project = authorization.requireProjectManager(principal, projectId);
         limit(principal, "project-jira-link");
-        ProjectIntegrationSessionStore.ResolvedJiraGrant grant =
-                sessionStore.requireJiraGrant(session, projectId);
-        requireJiraWebhookScopes(grant.scopes());
-        JiraAccessibleResource resource = grant.resources().stream()
-                .filter(value -> value.cloudId().equals(request.cloudId()))
-                .findFirst()
-                .orElseThrow(() -> IntegrationException.conflict(
-                        "JIRA_SITE_NOT_AUTHORIZED",
-                        "The selected Jira site was not authorized in this session"
-                ));
-        JiraProjectInfo jiraProject = jiraClient.projects(
+        JiraLinkStage stage = JiraLinkStage.LOAD_FRESH_GRANT;
+        String verifiedCloudId = null;
+        Set<String> missingScopeNames = Set.of();
+        try {
+            ProjectIntegrationSessionStore.ResolvedJiraGrant grant =
+                    sessionStore.requireJiraGrant(session, projectId);
+            stage = JiraLinkStage.VERIFY_ACCESSIBLE_RESOURCE;
+            JiraAccessibleResource resource = grant.resources().stream()
+                    .filter(value -> value.cloudId().equals(request.cloudId()))
+                    .findFirst()
+                    .orElseThrow(() -> IntegrationException.conflict(
+                            "JIRA_SITE_NOT_AUTHORIZED",
+                            "The selected Jira site was not authorized in this session"
+                    ));
+            verifiedCloudId = resource.cloudId();
+            stage = JiraLinkStage.SCOPE_PREFLIGHT;
+            missingScopeNames = JiraWriteScope.missing(
+                    resource.scopes(),
+                    JiraWriteScope.linkScopes().toArray(String[]::new)
+            );
+            requireJiraLinkScopes(resource.scopes());
+            stage = JiraLinkStage.RESOLVE_PROJECT;
+            JiraProjectInfo jiraProject = jiraClient.projects(
                         grant.accessToken(),
                         resource.cloudId()
-                )
-                .stream()
-                .filter(value -> value.id().equals(request.jiraProjectId()))
-                .findFirst()
-                .orElseThrow(() -> IntegrationException.conflict(
-                        "JIRA_PROJECT_NOT_ACCESSIBLE",
-                        "The selected Jira project is not accessible"
-                ));
+                    )
+                    .stream()
+                    .filter(value -> matchesJiraProject(
+                            value,
+                            request.jiraProjectId()
+                    ))
+                    .findFirst()
+                    .orElseThrow(() -> IntegrationException.conflict(
+                            "JIRA_PROJECT_NOT_ACCESSIBLE",
+                            "The selected Jira project is not accessible"
+                    ));
 
-        JiraBoard board = jiraBoardRepository.findByProjectId(projectId)
-                .orElseGet(() -> JiraBoard.builder()
-                        .project(project)
-                        .type(BoardType.OTHER)
-                        .connectionStatus(IntegrationStatus.CONNECTING)
-                        .build());
-        if (
-            board.getJiraProjectId() != null
-            && !board.getJiraProjectId().equals(jiraProject.id())
-            && board.getConnectionStatus() != IntegrationStatus.DISCONNECTED
-        ) {
-            throw IntegrationException.conflict(
-                    "JIRA_PROJECT_ALREADY_LINKED",
-                    "Disconnect the current Jira project before linking another one"
+            JiraBoard discovery = JiraBoard.builder()
+                    .project(project)
+                    .name(jiraProject.name())
+                    .cloudId(resource.cloudId())
+                    .siteUrl(resource.siteUrl())
+                    .jiraProjectId(jiraProject.id())
+                    .projectKey(jiraProject.key())
+                    .connectionStatus(IntegrationStatus.CONNECTING)
+                    .build();
+            // Provider I/O occurs before the short, locked local upsert transaction.
+            stage = JiraLinkStage.RESOLVE_SPRINT_CAPABILITY;
+            jiraBoardResolutionService.resolveForLinking(discovery, grant.accessToken());
+            JiraBoardLinkCommand command = new JiraBoardLinkCommand(
+                    project,
+                    jiraProject.name(),
+                    resource.cloudId(),
+                    resource.siteUrl(),
+                    jiraProject.id(),
+                    jiraProject.key(),
+                    discovery.getJiraBoardId(),
+                    grant.accessToken(),
+                    grant.refreshToken(),
+                    grant.tokenExpiresAt(),
+                    resource.scopes(),
+                    principal.cognitoSub(),
+                    principal.applicationRole() == ApplicationRole.STUDENT
+                            ? projectStudent(principal)
+                            : null
             );
-        }
+            stage = JiraLinkStage.UPSERT_JIRA_BOARD;
+            JiraBoard board = upsertJiraBoard(command, projectId);
 
-        board.setName(jiraProject.name());
-        board.setCloudId(resource.cloudId());
-        board.setSiteUrl(resource.siteUrl());
-        board.setJiraProjectId(jiraProject.id());
-        board.setProjectKey(jiraProject.key());
-        board.setConnectedByCognitoSub(principal.cognitoSub());
-        board.setConnectedByStudent(
-                principal.applicationRole() == ApplicationRole.STUDENT
-                        ? projectStudent(principal)
-                        : null
-        );
-        board.setConnectionStatus(IntegrationStatus.CONNECTING);
-        if (board.getId() == null) {
-            board = jiraBoardRepository.saveAndFlush(board);
-        }
-        board.setEncryptedAccessToken(jiraCredentialService.encryptAccess(
-                board,
-                grant.accessToken()
-        ));
-        board.setEncryptedRefreshToken(jiraCredentialService.encryptRefresh(
-                board,
-                grant.refreshToken()
-        ));
-        board.setTokenExpiresAt(LocalDateTime.ofInstant(
-                grant.tokenExpiresAt(),
-                ZoneOffset.UTC
-        ));
-        board.setGrantedScopes(String.join(" ", grant.scopes()));
-
-        String webhookSecret = randomSecret();
-        URI callback = jiraWebhookCallback(webhookSecret);
-        JiraWebhookRegistration registration = null;
-        try {
+            String webhookSecret = randomSecret();
+            URI callback = jiraWebhookCallback(webhookSecret);
+            JiraWebhookRegistration registration = null;
+            try {
+                stage = JiraLinkStage.REGISTER_WEBHOOK;
             registration = jiraClient.ensureWebhook(
                     grant.accessToken(),
                     resource.cloudId(),
@@ -321,39 +328,54 @@ public class ProjectIntegrationService {
                     callback,
                     board.getWebhookId()
             );
-            board.setWebhookId(registration.webhookId());
-            // A reused webhook retains its original token, whose hash is
-            // already stored on the board. Replacing it gets a new secret.
-            if (registration.created()) {
-                board.setWebhookSecretHash(sha256(webhookSecret));
-            }
-            board.setWebhookExpiresAt(LocalDateTime.now().plusDays(29));
-            board.setConnectionStatus(IntegrationStatus.BACKFILLING);
-            board.setConsecutiveFailures(0);
-            JiraBoard saved = jiraBoardRepository.saveAndFlush(board);
+            JiraBoard saved = jiraBoardLinkPersistenceService.complete(
+                    command,
+                    registration.webhookId(),
+                    registration.created(),
+                    registration.created() ? sha256(webhookSecret) : null
+            );
             sessionStore.removeJiraGrant(session, projectId);
 
             dispatchAfterCommit(() -> syncDispatcher.initialJiraBackfill(saved.getId()));
             auditService.recordIntegrationEvent(
-                    principal.cognitoSub(),
+                    principal,
                     "PROJECT_JIRA_LINKED",
                     "PROJECT",
                     projectId,
                     "BACKFILLING",
                     remoteAddress
             );
+            notificationProducer.jiraProjectLinked(principal, projectId, saved.getId());
             return integrations(principal, projectId);
-        } catch (RuntimeException exception) {
-            compensateCreatedWebhook(
-                    registration,
-                    grant.accessToken(),
-                    resource.cloudId(),
-                    projectId
+            } catch (RuntimeException exception) {
+                compensateCreatedWebhook(
+                        registration,
+                        grant.accessToken(),
+                        resource.cloudId(),
+                        projectId
+                );
+                throw exception;
+            }
+        } catch (IntegrationException exception) {
+            logJiraLinkFailure(
+                    projectId, stage, verifiedCloudId, missingScopeNames, exception
             );
             throw exception;
         }
     }
 
+    private boolean matchesJiraProject(
+            JiraProjectInfo jiraProject,
+            String requestedProjectIdOrKey
+    ) {
+        String requested = requestedProjectIdOrKey == null
+                ? ""
+                : requestedProjectIdOrKey.trim();
+        return jiraProject.id().equals(requested)
+                || jiraProject.key().equalsIgnoreCase(requested);
+    }
+
+    @Transactional
     public void disconnectJira(
             SagaPrincipal principal,
             UUID projectId,
@@ -382,12 +404,13 @@ public class ProjectIntegrationService {
         board.setEncryptedAccessToken(null);
         board.setEncryptedRefreshToken(null);
         board.setTokenExpiresAt(null);
+        board.setGrantedScopes(null);
         board.setWebhookId(null);
         board.setWebhookSecretHash(null);
         board.setWebhookExpiresAt(null);
         jiraBoardRepository.saveAndFlush(board);
         auditService.recordIntegrationEvent(
-                principal.cognitoSub(),
+                principal,
                 "PROJECT_JIRA_DISCONNECTED",
                 "PROJECT",
                 projectId,
@@ -490,6 +513,32 @@ public class ProjectIntegrationService {
         );
     }
 
+    public IntegrationCallbackResultResponse finishGitHubInstallationCallback(
+            SagaPrincipal principal,
+            UUID projectId,
+            HttpSession session,
+            String state,
+            String code,
+            String oauthError
+    ) {
+        authorization.requireProjectManager(principal, projectId);
+        limit(principal, "project-github-verify");
+        stateService.consume(
+                session,
+                principal,
+                OAuthFlow.PROJECT_GITHUB_INSTALLATION_VERIFY,
+                projectId,
+                state
+        );
+        return completeGitHubInstallationResult(
+                principal,
+                projectId,
+                session,
+                code,
+                oauthError
+        );
+    }
+
     public GitHubInstallationResponse finishGitHubInstallationFromProvider(
             SagaPrincipal principal,
             HttpSession session,
@@ -514,6 +563,61 @@ public class ProjectIntegrationService {
                 code,
                 oauthError
         );
+    }
+
+    public IntegrationCallbackResultResponse
+            finishGitHubInstallationFromProviderCallback(
+            SagaPrincipal principal,
+            HttpSession session,
+            String state,
+            String code,
+            String oauthError
+    ) {
+        OAuthStateService.StateBinding binding =
+                stateService.consumeWithResolvedTarget(
+                        session,
+                        principal,
+                        OAuthFlow.PROJECT_GITHUB_INSTALLATION_VERIFY,
+                        state
+                );
+        UUID projectId = binding.targetId();
+        authorization.requireProjectManager(principal, projectId);
+        limit(principal, "project-github-verify");
+        return completeGitHubInstallationResult(
+                principal,
+                projectId,
+                session,
+                code,
+                oauthError
+        );
+    }
+
+    private IntegrationCallbackResultResponse completeGitHubInstallationResult(
+            SagaPrincipal principal,
+            UUID projectId,
+            HttpSession session,
+            String code,
+            String oauthError
+    ) {
+        try {
+            return IntegrationCallbackResultResponse.projectGitHubSuccess(
+                    completeGitHubInstallation(
+                            principal,
+                            projectId,
+                            session,
+                            code,
+                            oauthError
+                    )
+            );
+        } catch (IntegrationException exception) {
+            return IntegrationCallbackResultResponse.failure(
+                    com.saga.be.entity.enums.IntegrationProvider.GITHUB,
+                    com.saga.be.dto.response.IntegrationCallbackFlow.PROJECT,
+                    projectId,
+                    exception.getCode(),
+                    exception.getMessage()
+            );
+        }
     }
 
     private URI startGitHubInstallationVerification(
@@ -695,12 +799,17 @@ public class ProjectIntegrationService {
         }
 
         auditService.recordIntegrationEvent(
-                principal.cognitoSub(),
+                principal,
                 "PROJECT_GITHUB_REPOSITORIES_LINKED",
                 "PROJECT",
                 projectId,
                 "BACKFILLING",
                 remoteAddress
+        );
+        notificationProducer.gitHubProjectLinked(
+                principal,
+                projectId,
+                request.installationId()
         );
         return integrations(principal, projectId);
     }
@@ -721,7 +830,7 @@ public class ProjectIntegrationService {
         repository.setConnectionStatus(IntegrationStatus.DISCONNECTED);
         gitRepoRepository.saveAndFlush(repository);
         auditService.recordIntegrationEvent(
-                principal.cognitoSub(),
+                principal,
                 "PROJECT_GITHUB_REPOSITORY_DISCONNECTED",
                 "PROJECT",
                 projectId,
@@ -730,20 +839,35 @@ public class ProjectIntegrationService {
         );
     }
 
+    @Transactional
+    public void reconnectGitHubRepository(SagaPrincipal principal, UUID projectId, Long repositoryId, String remoteAddress) {
+        authorization.requireProjectManager(principal, projectId);
+        GitRepo repository = gitRepoRepository.findForReconnectByProjectIdAndRepositoryId(projectId, repositoryId)
+                .orElseThrow(() -> new IntegrationException(org.springframework.http.HttpStatus.NOT_FOUND,
+                        "GITHUB_REPOSITORY_NOT_FOUND", "The linked GitHub repository does not exist"));
+        if (repository.getConnectionStatus() != IntegrationStatus.DISCONNECTED) {
+            throw IntegrationException.conflict("GITHUB_RECONNECT_NOT_REQUIRED", "The GitHub repository is already connected");
+        }
+        if (repository.getInstallation() == null || !gitHubClient.installationRepositories(
+                repository.getInstallation().getInstallationId()).stream().anyMatch(value ->
+                        java.util.Objects.equals(value.id(), repository.getRepositoryId()))) {
+            throw IntegrationException.conflict("GITHUB_RECONNECT_REQUIRES_INSTALLATION",
+                    "Reconnect the GitHub installation before reconnecting this repository");
+        }
+        repository.setConnectionStatus(IntegrationStatus.BACKFILLING);
+        repository.setConsecutiveFailures(0);
+        GitRepo saved = gitRepoRepository.saveAndFlush(repository);
+        dispatchAfterCommit(() -> syncDispatcher.initialGitHubBackfill(saved.getId()));
+        auditService.recordIntegrationEvent(principal, "PROJECT_GITHUB_REPOSITORY_RECONNECTED",
+                "PROJECT", projectId, "BACKFILLING", remoteAddress);
+    }
+
     public SyncStatusResponse syncStatus(
             SagaPrincipal principal,
             UUID projectId
     ) {
         authorization.requireProjectManager(principal, projectId);
-        Set<UUID> targetIds = gitRepoRepository
-                .findByProjectIdOrderByFullName(projectId)
-                .stream()
-                .map(GitRepo::getId)
-                .collect(Collectors.toSet());
-        targetIds.add(projectId);
-        jiraBoardRepository.findByProjectId(projectId)
-                .map(JiraBoard::getId)
-                .ifPresent(targetIds::add);
+        Set<UUID> targetIds = syncTargetIds(projectId);
         return new SyncStatusResponse(
                 projectId,
                 syncJobLogRepository
@@ -754,6 +878,43 @@ public class ProjectIntegrationService {
                         .map(SyncStatusResponse.Job::from)
                         .toList()
         );
+    }
+
+    @Transactional(readOnly = true)
+    public SyncHistoryResponse syncHistory(
+            SagaPrincipal principal,
+            UUID projectId,
+            int page,
+            int size,
+            String targetSystem,
+            com.saga.be.entity.enums.SyncJobStatus status,
+            com.saga.be.entity.enums.SyncJobType jobType
+    ) {
+        authorization.requireProjectManager(principal, projectId);
+        String normalizedTargetSystem = targetSystem == null || targetSystem.isBlank()
+                ? null : targetSystem.trim().toUpperCase(java.util.Locale.ROOT);
+        if (normalizedTargetSystem != null && !normalizedTargetSystem.equals("JIRA")
+                && !normalizedTargetSystem.equals("GITHUB")) {
+            throw IntegrationException.invalid("SYNC_HISTORY_TARGET_INVALID",
+                    "targetSystem must be JIRA or GITHUB");
+        }
+        return SyncHistoryResponse.from(projectId, syncJobLogRepository.findHistoryByTargetIds(
+                syncTargetIds(projectId), normalizedTargetSystem, status, jobType,
+                PageRequest.of(page, size)
+        ));
+    }
+
+    private Set<UUID> syncTargetIds(UUID projectId) {
+        Set<UUID> targetIds = gitRepoRepository
+                .findByProjectIdOrderByFullName(projectId)
+                .stream()
+                .map(GitRepo::getId)
+                .collect(Collectors.toSet());
+        targetIds.add(projectId);
+        jiraBoardRepository.findByProjectId(projectId)
+                .map(JiraBoard::getId)
+                .ifPresent(targetIds::add);
+        return targetIds;
     }
 
     private void requireInstallationOwner(
@@ -799,34 +960,66 @@ public class ProjectIntegrationService {
                 .toUri();
     }
 
-    private void requireJiraWebhookScopes(Set<String> grantedScopes) {
-        Set<String> configuredScopes = java.util.Arrays.stream(
-                        jiraProperties.scopes() == null
-                                ? new String[0]
-                                : jiraProperties.scopes().trim().split("\\s+")
-                )
-                .filter(scope -> !scope.isBlank())
-                .collect(Collectors.toSet());
-        requireJiraWebhookScopeSet(configuredScopes);
-        Set<String> scopes = grantedScopes == null ? Set.of() : grantedScopes;
-        // OAuth may omit `scope` from the token response when it is unchanged
-        // from the requested scope. In that case the provider's explicit 403
-        // mapping remains the authoritative signal rather than blocking a
-        // valid grant locally.
-        if (!scopes.isEmpty()) {
-            requireJiraWebhookScopeSet(scopes);
+    private void requireConfiguredJiraScopes() {
+        Set<String> required = new HashSet<>(JiraWriteScope.projectIntegrationScopes());
+        required.add(JiraWriteScope.OFFLINE_ACCESS_SCOPE);
+        JiraWriteScope.requireGranted(
+                JiraWriteScope.scopes(jiraProperties.scopes()),
+                required.toArray(String[]::new)
+        );
+    }
+
+    private void requireJiraLinkScopes(Set<String> resourceScopes) {
+        JiraWriteScope.requireGranted(
+                resourceScopes,
+                JiraWriteScope.linkScopes().toArray(String[]::new)
+        );
+    }
+
+    private void logJiraLinkFailure(
+            UUID projectId,
+            JiraLinkStage stage,
+            String verifiedCloudId,
+            Set<String> missingScopeNames,
+            IntegrationException exception
+    ) {
+        log.warn("Jira link failed: projectId={}, stage={}, providerOperation={}, cloudId={}, "
+                        + "upstreamHttpStatus={}, providerErrorCategory={}, requiredScopeCount={}, missingScopeNames={}",
+                projectId, stage, stage.providerOperation, verifiedCloudId,
+                exception.getStatus().value(), exception.getCode(),
+                JiraWriteScope.linkScopes().size(), missingScopeNames);
+    }
+
+    private enum JiraLinkStage {
+        LOAD_FRESH_GRANT("sessionGrant"),
+        VERIFY_ACCESSIBLE_RESOURCE("accessibleResources"),
+        SCOPE_PREFLIGHT("scopePreflight"),
+        RESOLVE_PROJECT("resolveProject"),
+        RESOLVE_SPRINT_CAPABILITY("resolveSprintCapability"),
+        UPSERT_JIRA_BOARD("upsertJiraBoard"),
+        REGISTER_WEBHOOK("registerWebhook");
+
+        private final String providerOperation;
+
+        JiraLinkStage(String providerOperation) {
+            this.providerOperation = providerOperation;
         }
     }
 
-    private void requireJiraWebhookScopeSet(Set<String> scopes) {
-        boolean classicGranted = scopes.containsAll(CLASSIC_WEBHOOK_SCOPES);
-        boolean granularGranted = scopes.containsAll(GRANULAR_WEBHOOK_SCOPES);
-        if (!classicGranted && !granularGranted) {
-            throw new IntegrationException(
-                    org.springframework.http.HttpStatus.FORBIDDEN,
-                    "JIRA_WEBHOOK_SCOPE_MISSING",
-                    "Reconnect Jira with read:jira-work and manage:jira-webhook"
-            );
+    private JiraBoard upsertJiraBoard(JiraBoardLinkCommand command, UUID projectId) {
+        try {
+            return jiraBoardLinkPersistenceService.upsert(command);
+        } catch (DataIntegrityViolationException firstRace) {
+            log.warn("Jira board link race reconciled: projectId={}, stage=UPSERT_JIRA_BOARD, "
+                    + "conflictType=SAME_PROJECT_RELINK_OR_PROVIDER_CONFLICT", projectId);
+            try {
+                return jiraBoardLinkPersistenceService.upsert(command);
+            } catch (DataIntegrityViolationException secondRace) {
+                throw IntegrationException.conflict(
+                        "JIRA_BOARD_UPSERT_CONFLICT",
+                        "The Jira project link could not be reconciled"
+                );
+            }
         }
     }
 

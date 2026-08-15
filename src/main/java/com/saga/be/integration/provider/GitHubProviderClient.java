@@ -37,6 +37,13 @@ public interface GitHubProviderClient {
             LocalDateTime since
     );
 
+    GitHubCommitDetailSnapshot commitDetail(
+            long installationId,
+            String owner,
+            String repository,
+            String commitSha
+    );
+
     List<GitHubPullRequestSnapshot> pullRequests(
             long installationId,
             String owner,
@@ -68,4 +75,9 @@ public interface GitHubProviderClient {
     String installationAccessToken(long installationId);
 
     void invalidateInstallationToken(long installationId);
+
+    List<GitHubBranchInfo> branches(long installationId, String owner, String repository);
+
+    List<GitHubBranchCommitInfo> branchCommits(long installationId, String owner,
+            String repository, String branch);
 }

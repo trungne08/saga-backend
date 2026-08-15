@@ -4,6 +4,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.net.URI;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
@@ -11,7 +13,6 @@ import org.springframework.security.oauth2.client.registration.ClientRegistratio
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
 import org.springframework.security.web.authentication.logout.LogoutSuccessHandler;
 import org.springframework.stereotype.Component;
-import org.springframework.web.util.UriComponentsBuilder;
 
 @Component
 public class CognitoLogoutSuccessHandler implements LogoutSuccessHandler {
@@ -50,13 +51,16 @@ public class CognitoLogoutSuccessHandler implements LogoutSuccessHandler {
             URI cognitoDomain = configuredCognitoDomain == null
                     ? domainFromAuthorizationUri(registration)
                     : configuredCognitoDomain;
-            String target = UriComponentsBuilder.fromUri(cognitoDomain)
-                    .path("/logout")
-                    .queryParam("client_id", registration.getClientId())
-                    .queryParam("logout_uri", logoutRedirectUri.toString())
-                    .build()
-                    .encode()
-                    .toUriString();
+            String target = cognitoDomain + "/logout?client_id="
+                    + URLEncoder.encode(
+                            registration.getClientId(),
+                            StandardCharsets.UTF_8
+                    )
+                    + "&logout_uri="
+                    + URLEncoder.encode(
+                            logoutRedirectUri.toString(),
+                            StandardCharsets.UTF_8
+                    );
             response.sendRedirect(target);
         } catch (RuntimeException exception) {
             responseWriter.write(

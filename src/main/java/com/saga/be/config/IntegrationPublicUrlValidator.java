@@ -14,6 +14,7 @@ public class IntegrationPublicUrlValidator {
     private final String publicBaseUrl;
     private final JiraIntegrationProperties jiraProperties;
     private final GitHubIntegrationProperties gitHubProperties;
+    private final IntegrationCallbackProperties callbackProperties;
     private final IntegrationUrlResolver urlResolver;
     private final boolean allowInsecureLocalUrl;
 
@@ -21,12 +22,14 @@ public class IntegrationPublicUrlValidator {
             @Value("${app.public-base-url}") String publicBaseUrl,
             JiraIntegrationProperties jiraProperties,
             GitHubIntegrationProperties gitHubProperties,
+            IntegrationCallbackProperties callbackProperties,
             IntegrationUrlResolver urlResolver,
             Environment environment
     ) {
         this.publicBaseUrl = publicBaseUrl;
         this.jiraProperties = jiraProperties;
         this.gitHubProperties = gitHubProperties;
+        this.callbackProperties = callbackProperties;
         this.urlResolver = urlResolver;
         this.allowInsecureLocalUrl = environment.acceptsProfiles(
                 Profiles.of("local", "test")
@@ -35,6 +38,7 @@ public class IntegrationPublicUrlValidator {
 
     @PostConstruct
     public void validate() {
+        requireFrontendCallbackUrl();
         URI base = absoluteUrl("PUBLIC_BASE_URL", publicBaseUrl);
         if (
             base.getUserInfo() != null
@@ -127,6 +131,30 @@ public class IntegrationPublicUrlValidator {
                     urlResolver.gitHubWebhookPublicUrl(),
                     origin + "/api/webhooks/github"
             );
+        }
+    }
+
+    private void requireFrontendCallbackUrl() {
+        URI callback = absoluteUrl(
+                "INTEGRATION_CALLBACK_REDIRECT_URI",
+                callbackProperties.callbackRedirectUri()
+        );
+        if (!"https".equalsIgnoreCase(callback.getScheme())
+                && !"http".equalsIgnoreCase(callback.getScheme())) {
+            throw invalid(
+                    "INTEGRATION_CALLBACK_REDIRECT_URI must use HTTP or HTTPS"
+            );
+        }
+        if (callback.getUserInfo() != null || callback.getFragment() != null
+                || callback.getQuery() != null) {
+            throw invalid(
+                    "INTEGRATION_CALLBACK_REDIRECT_URI must not contain user info, a query, or a fragment"
+            );
+        }
+        if (callbackProperties.callbackResultTtl() == null
+                || callbackProperties.callbackResultTtl().isZero()
+                || callbackProperties.callbackResultTtl().isNegative()) {
+            throw invalid("INTEGRATION_CALLBACK_RESULT_TTL must be positive");
         }
     }
 

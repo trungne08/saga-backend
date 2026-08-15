@@ -22,6 +22,9 @@ public class JiraBoardStateWriteService {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void complete(UUID boardId, LocalDateTime cursor) {
         JiraBoard board = latestBoard(boardId);
+        if (board.getConnectionStatus() == IntegrationStatus.DISCONNECTED) {
+            return;
+        }
         board.setSyncCursor(cursor);
         board.setLastSyncedAt(LocalDateTime.now());
         board.setConnectionStatus(IntegrationStatus.ACTIVE);
@@ -32,6 +35,9 @@ public class JiraBoardStateWriteService {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void degrade(UUID boardId) {
         JiraBoard board = latestBoard(boardId);
+        if (board.getConnectionStatus() == IntegrationStatus.DISCONNECTED) {
+            return;
+        }
         board.setConsecutiveFailures(board.getConsecutiveFailures() + 1);
         board.setConnectionStatus(IntegrationStatus.DEGRADED);
         boardRepository.saveAndFlush(board);

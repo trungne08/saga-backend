@@ -10,6 +10,17 @@ public record AuthenticatedProfile(
         String fullName,
         ApplicationRole role,
         UUID localProfileId,
-        AccountStatus accountStatus
+        AccountStatus accountStatus,
+        String avatarUrl
 ) {
+    public AuthenticatedProfile(
+            String cognitoSub,
+            String email,
+            String fullName,
+            ApplicationRole role,
+            UUID localProfileId,
+            AccountStatus accountStatus
+    ) {
+        this(cognitoSub, email, fullName, role, localProfileId, accountStatus, null);
+    }
 }

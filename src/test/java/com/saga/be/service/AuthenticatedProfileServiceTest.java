@@ -23,6 +23,7 @@ import com.saga.be.repository.AdminRepository;
 import com.saga.be.repository.LecturerRepository;
 import com.saga.be.repository.StudentRepository;
 import com.saga.be.security.ApplicationRole;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -32,6 +33,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
+import jakarta.persistence.EntityManager;
 
 @ExtendWith(MockitoExtension.class)
 class AuthenticatedProfileServiceTest {
@@ -45,6 +47,9 @@ class AuthenticatedProfileServiceTest {
     @Mock
     private StudentRepository studentRepository;
 
+    @Mock
+    private EntityManager entityManager;
+
     @Spy
     private StudentCodeExtractor studentCodeExtractor = new StudentCodeExtractor();
 
@@ -52,7 +57,7 @@ class AuthenticatedProfileServiceTest {
     private AuthenticatedProfileService profileService;
 
     @Test
-    void createsANewPendingStudentWithExtractedStudentCode() {
+    void createsANewActiveStudentAfterSuccessfulAuthentication() {
         String subject = "new-student-subject";
         String email = "trungtdse170506@fpt.edu.vn";
         UUID profileId = UUID.randomUUID();
@@ -78,10 +83,10 @@ class AuthenticatedProfileServiceTest {
         assertEquals(email, savedStudent.getEmail());
         assertEquals("New Student", savedStudent.getFullName());
         assertEquals("SE170506", savedStudent.getStudentCode());
-        assertEquals(AccountStatus.PENDING, savedStudent.getAccountStatus());
+        assertEquals(AccountStatus.ACTIVE, savedStudent.getAccountStatus());
         assertEquals(profileId, profile.localProfileId());
         assertEquals(ApplicationRole.STUDENT, profile.role());
-        assertEquals(AccountStatus.PENDING, profile.accountStatus());
+        assertEquals(AccountStatus.ACTIVE, profile.accountStatus());
         verify(adminRepository, never()).saveAndFlush(any(Admin.class));
         verify(lecturerRepository, never()).saveAndFlush(any(Lecturer.class));
     }
@@ -102,9 +107,7 @@ class AuthenticatedProfileServiceTest {
         when(adminRepository.findByCognitoSub(subject)).thenReturn(Optional.empty());
         when(lecturerRepository.findByCognitoSub(subject)).thenReturn(Optional.empty());
         when(studentRepository.findByCognitoSub(subject)).thenReturn(Optional.of(existing));
-        when(adminRepository.findByEmailIgnoreCase(email)).thenReturn(Optional.empty());
-        when(lecturerRepository.findByEmailIgnoreCase(email)).thenReturn(Optional.empty());
-        when(studentRepository.findByEmailIgnoreCase(email))
+        when(studentRepository.findForIdentityBindingById(existing.getId()))
                 .thenReturn(Optional.of(existing));
         when(studentRepository.saveAndFlush(existing)).thenReturn(existing);
 
@@ -135,9 +138,7 @@ class AuthenticatedProfileServiceTest {
         when(adminRepository.findByCognitoSub(subject)).thenReturn(Optional.empty());
         when(lecturerRepository.findByCognitoSub(subject)).thenReturn(Optional.empty());
         when(studentRepository.findByCognitoSub(subject)).thenReturn(Optional.of(existing));
-        when(adminRepository.findByEmailIgnoreCase(email)).thenReturn(Optional.empty());
-        when(lecturerRepository.findByEmailIgnoreCase(email)).thenReturn(Optional.empty());
-        when(studentRepository.findByEmailIgnoreCase(email))
+        when(studentRepository.findForIdentityBindingById(existing.getId()))
                 .thenReturn(Optional.of(existing));
         when(studentRepository.saveAndFlush(existing)).thenReturn(existing);
 
@@ -169,11 +170,8 @@ class AuthenticatedProfileServiceTest {
         when(adminRepository.findByCognitoSub(subject)).thenReturn(Optional.empty());
         when(lecturerRepository.findByCognitoSub(subject)).thenReturn(Optional.empty());
         when(studentRepository.findByCognitoSub(subject)).thenReturn(Optional.of(existing));
-        when(adminRepository.findByEmailIgnoreCase(email)).thenReturn(Optional.empty());
-        when(lecturerRepository.findByEmailIgnoreCase(email)).thenReturn(Optional.empty());
-        when(studentRepository.findByEmailIgnoreCase(email))
+        when(studentRepository.findForIdentityBindingById(existing.getId()))
                 .thenReturn(Optional.of(existing));
-
         StudentCodeConflictException exception = assertThrows(
                 StudentCodeConflictException.class,
                 () -> profileService.synchronize(new AuthenticatedIdentity(
@@ -244,7 +242,37 @@ class AuthenticatedProfileServiceTest {
         assertEquals("Updated Name", existing.getFullName());
         assertEquals(profileId, profile.localProfileId());
         assertEquals(ApplicationRole.LECTURER, profile.role());
-        assertNull(profile.accountStatus());
+        assertEquals(AccountStatus.ACTIVE, profile.accountStatus());
+    }
+
+    @Test
+    void reLoginDoesNotReactivateAnInactiveLecturer() {
+        String subject = "inactive-lecturer-subject";
+        String email = "inactive-lecturer@fpt.edu.vn";
+        Lecturer existing = Lecturer.builder()
+                .cognitoSub(subject)
+                .email(email)
+                .fullName("Inactive Lecturer")
+                .accountStatus(AccountStatus.INACTIVE)
+                .build();
+        existing.setId(UUID.randomUUID());
+        when(adminRepository.findByCognitoSub(subject)).thenReturn(Optional.empty());
+        when(lecturerRepository.findByCognitoSub(subject)).thenReturn(Optional.of(existing));
+        when(studentRepository.findByCognitoSub(subject)).thenReturn(Optional.empty());
+        when(adminRepository.findByEmailIgnoreCase(email)).thenReturn(Optional.empty());
+        when(lecturerRepository.findByEmailIgnoreCase(email)).thenReturn(Optional.of(existing));
+        when(studentRepository.findByEmailIgnoreCase(email)).thenReturn(Optional.empty());
+        when(lecturerRepository.saveAndFlush(existing)).thenReturn(existing);
+
+        AuthenticatedProfile profile = profileService.synchronize(new AuthenticatedIdentity(
+                subject,
+                email,
+                "Inactive Lecturer",
+                ApplicationRole.LECTURER
+        ));
+
+        assertEquals(AccountStatus.INACTIVE, existing.getAccountStatus());
+        assertEquals(AccountStatus.INACTIVE, profile.accountStatus());
     }
 
     @Test
@@ -311,6 +339,233 @@ class AuthenticatedProfileServiceTest {
                 exception.getReason()
         );
         verify(lecturerRepository, never()).saveAndFlush(any(Lecturer.class));
+    }
+
+    @Test
+    void bindsImportedStudentOnlyWhenEmailAndStudentCodeMatchTheSameRecord() {
+        String subject = "first-login-subject";
+        String email = "importedse170506@fpt.edu.vn";
+        Student imported = student(email, "SE170506", AccountStatus.PENDING, null);
+        stubNoSubjectMatches(subject);
+        when(adminRepository.findByEmailIgnoreCase(email)).thenReturn(Optional.empty());
+        when(lecturerRepository.findByEmailIgnoreCase(email)).thenReturn(Optional.empty());
+        when(studentRepository.findByEmailIgnoreCase(email)).thenReturn(Optional.of(imported));
+        when(studentRepository.findByStudentCodeIgnoreCase("SE170506"))
+                .thenReturn(Optional.of(imported));
+        when(studentRepository.findForIdentityBindingById(imported.getId()))
+                .thenReturn(Optional.of(imported));
+        when(studentRepository.saveAndFlush(imported)).thenReturn(imported);
+
+        AuthenticatedProfile profile = profileService.synchronize(new AuthenticatedIdentity(
+                subject, email, "Cognito Name", ApplicationRole.STUDENT
+        ));
+
+        assertEquals(imported.getId(), profile.localProfileId());
+        assertEquals(subject, imported.getCognitoSub());
+        assertEquals(AccountStatus.ACTIVE, imported.getAccountStatus());
+        assertEquals(email, imported.getEmail());
+        assertEquals("SE170506", imported.getStudentCode());
+        verify(studentRepository).saveAndFlush(imported);
+    }
+
+    @Test
+    void rejectsPartialEmailMatchDuringImportedStudentBinding() {
+        String subject = "first-login-subject";
+        String email = "importedse170506@fpt.edu.vn";
+        Student imported = student(email, "SE170506", AccountStatus.PENDING, null);
+        stubNoSubjectMatches(subject);
+        when(adminRepository.findByEmailIgnoreCase(email)).thenReturn(Optional.empty());
+        when(lecturerRepository.findByEmailIgnoreCase(email)).thenReturn(Optional.empty());
+        when(studentRepository.findByEmailIgnoreCase(email)).thenReturn(Optional.of(imported));
+        when(studentRepository.findByStudentCodeIgnoreCase("SE170506"))
+                .thenReturn(Optional.empty());
+
+        assertThrows(IdentityConflictException.class, () -> profileService.synchronize(
+                new AuthenticatedIdentity(subject, email, "Cognito Name", ApplicationRole.STUDENT)
+        ));
+        verify(studentRepository, never()).saveAndFlush(any(Student.class));
+    }
+
+    @Test
+    void rejectsPartialStudentCodeMatchDuringImportedStudentBinding() {
+        String subject = "first-login-subject";
+        String email = "differentse170506@fpt.edu.vn";
+        Student imported = student("importedse170506@fpt.edu.vn", "SE170506", AccountStatus.PENDING, null);
+        stubNoSubjectMatches(subject);
+        stubNoEmailMatches(email);
+        when(studentRepository.findByStudentCodeIgnoreCase("SE170506"))
+                .thenReturn(Optional.of(imported));
+
+        assertThrows(IdentityConflictException.class, () -> profileService.synchronize(
+                new AuthenticatedIdentity(subject, email, "Cognito Name", ApplicationRole.STUDENT)
+        ));
+        verify(studentRepository, never()).saveAndFlush(any(Student.class));
+    }
+
+    @Test
+    void rejectsEmailAndStudentCodeThatPointToDifferentStudents() {
+        String subject = "first-login-subject";
+        String email = "emailse170506@fpt.edu.vn";
+        Student emailStudent = student(email, "SE170506", AccountStatus.PENDING, null);
+        Student codeStudent = student("codese170506@fpt.edu.vn", "SE170506", AccountStatus.PENDING, null);
+        stubNoSubjectMatches(subject);
+        when(adminRepository.findByEmailIgnoreCase(email)).thenReturn(Optional.empty());
+        when(lecturerRepository.findByEmailIgnoreCase(email)).thenReturn(Optional.empty());
+        when(studentRepository.findByEmailIgnoreCase(email)).thenReturn(Optional.of(emailStudent));
+        when(studentRepository.findByStudentCodeIgnoreCase("SE170506"))
+                .thenReturn(Optional.of(codeStudent));
+
+        assertThrows(IdentityConflictException.class, () -> profileService.synchronize(
+                new AuthenticatedIdentity(subject, email, "Cognito Name", ApplicationRole.STUDENT)
+        ));
+        verify(studentRepository, never()).saveAndFlush(any(Student.class));
+    }
+
+    @Test
+    void keepsActiveImportedStudentActiveWhenBinding() {
+        String subject = "first-login-subject";
+        String email = "importedse170506@fpt.edu.vn";
+        Student imported = student(email, "SE170506", AccountStatus.ACTIVE, null);
+        stubImportedStudentForBinding(subject, email, imported);
+        when(studentRepository.saveAndFlush(imported)).thenReturn(imported);
+
+        profileService.synchronize(new AuthenticatedIdentity(
+                subject, email, "Cognito Name", ApplicationRole.STUDENT
+        ));
+
+        assertEquals(AccountStatus.ACTIVE, imported.getAccountStatus());
+    }
+
+    @Test
+    void doesNotActivateInactiveOrSuspendedImportedStudent() {
+        for (AccountStatus status : List.of(AccountStatus.INACTIVE, AccountStatus.SUSPENDED)) {
+            String subject = "first-login-" + status;
+            String email = "importedse170506@fpt.edu.vn";
+            Student imported = student(email, "SE170506", status, null);
+            stubImportedStudentForBinding(subject, email, imported);
+
+            assertThrows(IdentityConflictException.class, () -> profileService.synchronize(
+                    new AuthenticatedIdentity(subject, email, "Cognito Name", ApplicationRole.STUDENT)
+            ));
+            assertNull(imported.getCognitoSub());
+            assertEquals(status, imported.getAccountStatus());
+        }
+    }
+
+    @Test
+    void persistsAvatarWhenPictureIsPresentOnCreate() {
+        String subject = "avatar-student-subject";
+        String email = "avatartdse170506@fpt.edu.vn";
+        UUID profileId = UUID.randomUUID();
+        stubNoSubjectMatches(subject);
+        stubNoEmailMatches(email);
+        when(studentRepository.saveAndFlush(any(Student.class))).thenAnswer(invocation -> {
+            Student student = invocation.getArgument(0);
+            student.setId(profileId);
+            return student;
+        });
+
+        AuthenticatedProfile profile = profileService.synchronize(new AuthenticatedIdentity(
+                subject,
+                email,
+                "Avatar Student",
+                ApplicationRole.STUDENT,
+                "https://cdn.example.test/student.png"
+        ));
+
+        ArgumentCaptor<Student> studentCaptor = ArgumentCaptor.forClass(Student.class);
+        verify(studentRepository).saveAndFlush(studentCaptor.capture());
+        assertEquals("https://cdn.example.test/student.png", studentCaptor.getValue().getAvatarUrl());
+        assertEquals("https://cdn.example.test/student.png", profile.avatarUrl());
+        assertEquals(AccountStatus.ACTIVE, profile.accountStatus());
+        assertEquals(profileId, profile.localProfileId());
+    }
+
+    @Test
+    void updatesAvatarWhenPictureChangesOnNextLogin() {
+        String subject = "existing-avatar-subject";
+        String email = "studenthe123456@fpt.edu.vn";
+        Student existing = Student.builder()
+                .cognitoSub(subject)
+                .email(email)
+                .fullName("Existing Student")
+                .studentCode("HE123456")
+                .avatarUrl("https://cdn.example.test/old.png")
+                .accountStatus(AccountStatus.ACTIVE)
+                .build();
+        existing.setId(UUID.randomUUID());
+        when(adminRepository.findByCognitoSub(subject)).thenReturn(Optional.empty());
+        when(lecturerRepository.findByCognitoSub(subject)).thenReturn(Optional.empty());
+        when(studentRepository.findByCognitoSub(subject)).thenReturn(Optional.of(existing));
+        when(studentRepository.findForIdentityBindingById(existing.getId()))
+                .thenReturn(Optional.of(existing));
+        when(studentRepository.saveAndFlush(existing)).thenReturn(existing);
+
+        AuthenticatedProfile profile = profileService.synchronize(new AuthenticatedIdentity(
+                subject,
+                email,
+                "Existing Student",
+                ApplicationRole.STUDENT,
+                "https://cdn.example.test/new.png"
+        ));
+
+        assertEquals("https://cdn.example.test/new.png", existing.getAvatarUrl());
+        assertEquals("https://cdn.example.test/new.png", profile.avatarUrl());
+        assertEquals(AccountStatus.ACTIVE, existing.getAccountStatus());
+        assertEquals(subject, existing.getCognitoSub());
+    }
+
+    @Test
+    void keepsStoredAvatarWhenPictureIsAbsentOnNextLogin() {
+        String subject = "keep-avatar-subject";
+        String email = "studenthe123456@fpt.edu.vn";
+        Student existing = Student.builder()
+                .cognitoSub(subject)
+                .email(email)
+                .fullName("Existing Student")
+                .studentCode("HE123456")
+                .avatarUrl("https://cdn.example.test/keep.png")
+                .accountStatus(AccountStatus.ACTIVE)
+                .build();
+        existing.setId(UUID.randomUUID());
+        when(adminRepository.findByCognitoSub(subject)).thenReturn(Optional.empty());
+        when(lecturerRepository.findByCognitoSub(subject)).thenReturn(Optional.empty());
+        when(studentRepository.findByCognitoSub(subject)).thenReturn(Optional.of(existing));
+        when(studentRepository.findForIdentityBindingById(existing.getId()))
+                .thenReturn(Optional.of(existing));
+        when(studentRepository.saveAndFlush(existing)).thenReturn(existing);
+
+        AuthenticatedProfile profile = profileService.synchronize(new AuthenticatedIdentity(
+                subject,
+                email,
+                "Existing Student",
+                ApplicationRole.STUDENT
+        ));
+
+        assertEquals("https://cdn.example.test/keep.png", existing.getAvatarUrl());
+        assertEquals("https://cdn.example.test/keep.png", profile.avatarUrl());
+    }
+
+    private void stubImportedStudentForBinding(String subject, String email, Student imported) {
+        stubNoSubjectMatches(subject);
+        when(adminRepository.findByEmailIgnoreCase(email)).thenReturn(Optional.empty());
+        when(lecturerRepository.findByEmailIgnoreCase(email)).thenReturn(Optional.empty());
+        when(studentRepository.findByEmailIgnoreCase(email)).thenReturn(Optional.of(imported));
+        when(studentRepository.findByStudentCodeIgnoreCase("SE170506"))
+                .thenReturn(Optional.of(imported));
+        when(studentRepository.findForIdentityBindingById(imported.getId()))
+                .thenReturn(Optional.of(imported));
+    }
+
+    private Student student(String email, String code, AccountStatus status, String subject) {
+        Student student = Student.builder()
+                .email(email)
+                .studentCode(code)
+                .accountStatus(status)
+                .cognitoSub(subject)
+                .build();
+        student.setId(UUID.randomUUID());
+        return student;
     }
 
     private void stubNoSubjectMatches(String subject) {

@@ -1,0 +1,2 @@
+ALTER TABLE lecturer
+    ADD COLUMN account_status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE';

@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -14,27 +15,41 @@ import static org.mockito.Mockito.when;
 import com.saga.be.entity.JiraBoard;
 import com.saga.be.entity.Project;
 import com.saga.be.entity.Student;
+import com.saga.be.entity.Sprint;
 import com.saga.be.entity.Task;
+import com.saga.be.entity.TaskAttachment;
+import com.saga.be.entity.value.TaskComponentSnapshot;
 import com.saga.be.entity.enums.Priority;
 import com.saga.be.entity.enums.TaskStatus;
 import com.saga.be.entity.enums.TaskType;
 import com.saga.be.integration.identity.IdentityMappingService;
+import com.saga.be.integration.provider.JiraAttachmentSnapshot;
 import com.saga.be.integration.provider.JiraIssueSnapshot;
 import com.saga.be.repository.JiraBoardRepository;
 import com.saga.be.repository.SprintRepository;
+import com.saga.be.repository.TaskAttachmentRepository;
 import com.saga.be.repository.TaskRepository;
+import com.saga.be.service.TeamContributionRefreshService;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.TransactionStatus;
 
 class JiraIssueUpsertServiceTest {
 
     private JiraBoardRepository boardRepository;
     private TaskRepository taskRepository;
     private IdentityMappingService mappingService;
+    private TeamContributionRefreshService teamContributionRefreshService;
+    private SprintRepository sprintRepository;
+    private TaskAttachmentRepository taskAttachmentRepository;
     private JiraIssueUpsertService service;
     private UUID boardId;
     private UUID projectId;
@@ -44,11 +59,19 @@ class JiraIssueUpsertServiceTest {
         boardRepository = mock(JiraBoardRepository.class);
         taskRepository = mock(TaskRepository.class);
         mappingService = mock(IdentityMappingService.class);
+        teamContributionRefreshService = mock(TeamContributionRefreshService.class);
+        sprintRepository = mock(SprintRepository.class);
+        taskAttachmentRepository = mock(TaskAttachmentRepository.class);
+        PlatformTransactionManager transactionManager = mock(PlatformTransactionManager.class);
+        when(transactionManager.getTransaction(any(TransactionDefinition.class))).thenReturn(mock(TransactionStatus.class));
         service = new JiraIssueUpsertService(
                 boardRepository,
                 taskRepository,
-                mock(SprintRepository.class),
-                mappingService
+                sprintRepository,
+                mappingService,
+                teamContributionRefreshService,
+                taskAttachmentRepository,
+                transactionManager
         );
         boardId = UUID.randomUUID();
         projectId = UUID.randomUUID();
@@ -84,6 +107,28 @@ class JiraIssueUpsertServiceTest {
         assertEquals(TaskStatus.DONE, saved.getStatus());
         assertEquals(TaskType.BUG, saved.getType());
         assertEquals(Priority.HIGH, saved.getPriority());
+    }
+
+    @Test
+    void canonicalRequestIssueTypeMapsToBusinessRequest() {
+        Task existing = new Task();
+        existing.setExternalId("jira-request");
+        when(taskRepository.findByProjectIdAndExternalId(projectId, "jira-request"))
+                .thenReturn(Optional.of(existing));
+        when(taskRepository.saveAndFlush(any(Task.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        LocalDateTime updatedAt = LocalDateTime.parse("2026-07-29T10:00:00");
+        JiraIssueSnapshot request = new JiraIssueSnapshot(
+                "jira-request", "SAGA-2", "request title", "Request", "To Do", "High", 3,
+                "atlassian-id-1", null, null, LocalDateTime.parse("2026-07-28T10:00:00"),
+                updatedAt, null, null, null, null, updatedAt.toInstant(java.time.ZoneOffset.UTC)
+        );
+
+        assertTrue(service.upsert(boardId, request));
+
+        ArgumentCaptor<Task> captor = ArgumentCaptor.forClass(Task.class);
+        verify(taskRepository).saveAndFlush(captor.capture());
+        assertEquals(TaskType.REQUEST, captor.getValue().getType());
     }
 
     @Test
@@ -131,10 +176,288 @@ class JiraIssueUpsertServiceTest {
         verifyNoInteractions(mappingService);
     }
 
+    @Test
+    void newTaskStoresEveryLabelFromTheSnapshot() {
+        when(taskRepository.findByProjectIdAndExternalId(projectId, "jira-10001"))
+                .thenReturn(Optional.empty());
+        when(taskRepository.saveAndFlush(any(Task.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.upsert(boardId, snapshot(
+                "jira-10001",
+                "To Do",
+                LocalDateTime.parse("2026-07-29T10:00:00"),
+                List.of("Backend", "Sprint 1")
+        ));
+
+        ArgumentCaptor<Task> captor = ArgumentCaptor.forClass(Task.class);
+        verify(taskRepository).saveAndFlush(captor.capture());
+        assertEquals(List.of("Backend", "Sprint 1"), captor.getValue().getLabels());
+    }
+
+    @Test
+    void existingTaskReplacesLabelsAndClearsThemForAnEmptySnapshot() {
+        Task existing = new Task();
+        existing.setLabels(List.of("obsolete"));
+        when(taskRepository.findByProjectIdAndExternalId(projectId, "jira-10001"))
+                .thenReturn(Optional.of(existing));
+        when(taskRepository.saveAndFlush(any(Task.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.upsert(boardId, snapshot(
+                "jira-10001",
+                "To Do",
+                LocalDateTime.parse("2026-07-29T10:00:00"),
+                List.of("new-one", "new-two")
+        ));
+        assertEquals(List.of("new-one", "new-two"), existing.getLabels());
+
+        existing.setLabels(List.of("prior-one", "prior-two"));
+        service.upsert(boardId, snapshot(
+                "jira-10001",
+                "To Do",
+                LocalDateTime.parse("2026-07-29T10:30:00"),
+                List.of("replacement")
+        ));
+        assertEquals(List.of("replacement"), existing.getLabels());
+
+        service.upsert(boardId, snapshot(
+                "jira-10001",
+                "To Do",
+                LocalDateTime.parse("2026-07-29T11:00:00"),
+                List.of()
+        ));
+        assertEquals(List.of(), existing.getLabels());
+        assertEquals("jira-10001", existing.getExternalId());
+        assertEquals("SAGA-1", existing.getExternalKey());
+    }
+
+    @Test
+    void repeatedSnapshotDoesNotDuplicateLabels() {
+        Task existing = new Task();
+        when(taskRepository.findByProjectIdAndExternalId(projectId, "jira-10001"))
+                .thenReturn(Optional.of(existing));
+        when(taskRepository.saveAndFlush(any(Task.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        JiraIssueSnapshot snapshot = snapshot(
+                "jira-10001",
+                "To Do",
+                LocalDateTime.parse("2026-07-29T10:00:00"),
+                List.of("stable", "stable-again")
+        );
+
+        service.upsert(boardId, snapshot);
+        service.upsert(boardId, snapshot);
+
+        assertEquals(List.of("stable", "stable-again"), existing.getLabels());
+    }
+
+    @Test
+    void existingTaskReplacesDescriptionAndComponentsAndClearsComponents() {
+        Task existing = new Task();
+        existing.setDescription("obsolete description");
+        existing.setComponents(List.of(new TaskComponentSnapshot("1", "obsolete")));
+        when(taskRepository.findByProjectIdAndExternalId(projectId, "jira-10001"))
+                .thenReturn(Optional.of(existing));
+        when(taskRepository.saveAndFlush(any(Task.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.upsert(boardId, snapshot(
+                "jira-10001",
+                "To Do",
+                LocalDateTime.parse("2026-07-29T10:00:00"),
+                List.of(),
+                "canonical description",
+                List.of(new TaskComponentSnapshot("10", "Backend"))
+        ));
+        assertEquals("canonical description", existing.getDescription());
+        assertEquals(List.of(new TaskComponentSnapshot("10", "Backend")), existing.getComponents());
+
+        service.upsert(boardId, snapshot(
+                "jira-10001",
+                "To Do",
+                LocalDateTime.parse("2026-07-29T11:00:00"),
+                List.of(),
+                null,
+                List.of()
+        ));
+        assertEquals(null, existing.getDescription());
+        assertEquals(List.of(), existing.getComponents());
+        assertEquals("jira-10001", existing.getExternalId());
+        assertEquals("SAGA-1", existing.getExternalKey());
+    }
+
+    @Test
+    void authoritativeNullStoryPointClearsLocalValue() {
+        Task existing = Task.builder().storyPoint(8).build();
+        when(taskRepository.findByProjectIdAndExternalId(projectId, "jira-10001"))
+                .thenReturn(Optional.of(existing));
+        when(taskRepository.saveAndFlush(existing)).thenReturn(existing);
+
+        service.upsert(boardId, storyPointSnapshot(null, true));
+
+        assertEquals(null, existing.getStoryPoint());
+    }
+
+    @Test
+    void omittedStoryPointProjectionPreservesLocalValue() {
+        Task existing = Task.builder().storyPoint(8).build();
+        when(taskRepository.findByProjectIdAndExternalId(projectId, "jira-10001"))
+                .thenReturn(Optional.of(existing));
+        when(taskRepository.saveAndFlush(existing)).thenReturn(existing);
+
+        service.upsert(boardId, storyPointSnapshot(null, false));
+
+        assertEquals(8, existing.getStoryPoint());
+    }
+
+    @Test
+    void canonicalSnapshotCannotResurrectWebhookTombstone() {
+        LocalDateTime deletedAt = LocalDateTime.parse("2026-08-13T04:05:06");
+        Task existing = Task.builder()
+                .externalId("jira-10001")
+                .deletedAt(deletedAt)
+                .build();
+        when(taskRepository.findByProjectIdAndExternalId(projectId, "jira-10001"))
+                .thenReturn(Optional.of(existing));
+        when(taskRepository.saveAndFlush(existing)).thenReturn(existing);
+
+        service.upsert(boardId, snapshot(
+                "jira-10001",
+                "In Progress",
+                LocalDateTime.parse("2026-08-13T04:06:00")
+        ));
+
+        assertEquals(deletedAt, existing.getDeletedAt());
+    }
+
+    @Test
+    void duplicateInsertFromConcurrentReconciliationReloadsAndAppliesCanonicalSnapshot() {
+        Task raced = new Task();
+        when(taskRepository.findByProjectIdAndExternalId(projectId, "jira-10001"))
+                .thenReturn(Optional.empty(), Optional.of(raced));
+        when(taskRepository.saveAndFlush(any(Task.class)))
+                .thenThrow(new DataIntegrityViolationException("Duplicate entry for key uk_task_project_external"))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        assertTrue(service.upsert(boardId, snapshot(
+                "jira-10001", "Done", LocalDateTime.parse("2026-07-29T12:00:00")
+        )));
+
+        assertEquals("jira-10001", raced.getExternalId());
+        assertEquals(TaskStatus.DONE, raced.getStatus());
+        verify(taskRepository, org.mockito.Mockito.times(2)).saveAndFlush(any(Task.class));
+    }
+
+    @Test
+    void partialIssueSprintAssociationNeverClearsCanonicalDates() {
+        LocalDateTime start = LocalDateTime.parse("2026-08-01T02:00:00");
+        LocalDateTime end = LocalDateTime.parse("2026-08-15T02:00:00");
+        Sprint canonical = Sprint.builder()
+                .externalSprintId("42")
+                .name("Canonical name")
+                .startDate(start)
+                .endDate(end)
+                .build();
+        Task task = new Task();
+        when(taskRepository.findByProjectIdAndExternalId(projectId, "jira-10001"))
+                .thenReturn(Optional.of(task));
+        when(taskRepository.saveAndFlush(task)).thenReturn(task);
+        when(sprintRepository.findByBoardIdAndExternalSprintId(boardId, "42"))
+                .thenReturn(Optional.of(canonical));
+        when(sprintRepository.save(canonical)).thenReturn(canonical);
+        LocalDateTime updatedAt = LocalDateTime.parse("2026-08-04T05:00:00");
+        JiraIssueSnapshot partial = new JiraIssueSnapshot(
+                "jira-10001", "SAGA-1", "task title", "Task", "To Do",
+                "Medium", null, null, null, null, updatedAt.minusDays(1),
+                updatedAt, null, null, "42", "Embedded name"
+        );
+
+        service.upsert(boardId, partial);
+
+        assertSame(canonical, task.getSprint());
+        assertEquals("Embedded name", canonical.getName());
+        assertEquals(start, canonical.getStartDate());
+        assertEquals(end, canonical.getEndDate());
+    }
+
+    @Test
+    void replacesTaskAttachmentsFromJiraMetadataWithoutDownloadingContent() {
+        UUID taskId = UUID.randomUUID();
+        Task existing = new Task();
+        existing.setId(taskId);
+        existing.setExternalId("jira-10001");
+        TaskAttachment kept = TaskAttachment.builder()
+                .task(existing)
+                .externalId("att-1")
+                .filename("old-name.pdf")
+                .build();
+        kept.setId(UUID.randomUUID());
+        TaskAttachment stale = TaskAttachment.builder()
+                .task(existing)
+                .externalId("att-stale")
+                .filename("gone.docx")
+                .build();
+        stale.setId(UUID.randomUUID());
+        when(taskRepository.findByProjectIdAndExternalId(projectId, "jira-10001"))
+                .thenReturn(Optional.of(existing));
+        when(taskRepository.saveAndFlush(any(Task.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(taskAttachmentRepository.findByTaskIdAndExternalId(taskId, "att-1"))
+                .thenReturn(Optional.of(kept));
+        when(taskAttachmentRepository.findByTaskIdAndExternalId(taskId, "att-2"))
+                .thenReturn(Optional.empty());
+        when(taskAttachmentRepository.findByTaskId(taskId)).thenReturn(List.of(kept, stale));
+
+        assertTrue(service.upsert(boardId, snapshotWithAttachments(
+                "jira-10001",
+                List.of(
+                        new JiraAttachmentSnapshot("att-1", "spec.pdf", "application/pdf", 12L, "account-1"),
+                        new JiraAttachmentSnapshot("att-2", "notes.txt", "text/plain", 4L, "account-2")
+                )
+        )));
+
+        ArgumentCaptor<TaskAttachment> saved = ArgumentCaptor.forClass(TaskAttachment.class);
+        verify(taskAttachmentRepository, org.mockito.Mockito.times(2)).save(saved.capture());
+        assertEquals("spec.pdf", kept.getFilename());
+        assertEquals("application/pdf", kept.getMimeType());
+        assertEquals(12L, kept.getSizeBytes());
+        assertEquals("account-1", kept.getAuthorExternalId());
+        TaskAttachment created = saved.getAllValues().stream()
+                .filter(attachment -> "att-2".equals(attachment.getExternalId()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("notes.txt", created.getFilename());
+        assertEquals("text/plain", created.getMimeType());
+        assertEquals(4L, created.getSizeBytes());
+        assertEquals("account-2", created.getAuthorExternalId());
+        verify(taskAttachmentRepository).delete(stale);
+        verify(taskAttachmentRepository, never()).delete(eq(kept));
+    }
+
     private JiraIssueSnapshot snapshot(
             String id,
             String status,
             LocalDateTime updatedAt
+    ) {
+        return snapshot(id, status, updatedAt, List.of());
+    }
+
+    private JiraIssueSnapshot snapshot(
+            String id,
+            String status,
+            LocalDateTime updatedAt,
+            List<String> labels
+    ) {
+        return snapshot(id, status, updatedAt, labels, null, List.of());
+    }
+
+    private JiraIssueSnapshot snapshot(
+            String id,
+            String status,
+            LocalDateTime updatedAt,
+            List<String> labels,
+            String description,
+            List<TaskComponentSnapshot> components
     ) {
         return new JiraIssueSnapshot(
                 id,
@@ -152,7 +475,72 @@ class JiraIssueUpsertServiceTest {
                 null,
                 null,
                 null,
-                null
+                null,
+                updatedAt.toInstant(java.time.ZoneOffset.UTC),
+                labels,
+                description,
+                components
+        );
+    }
+
+    private JiraIssueSnapshot storyPointSnapshot(
+            Integer storyPoints,
+            boolean authoritative
+    ) {
+        LocalDateTime updatedAt = LocalDateTime.parse("2026-08-13T04:05:06");
+        return new JiraIssueSnapshot(
+                "jira-10001",
+                "SAGA-1",
+                "task title",
+                "Task",
+                "To Do",
+                "Medium",
+                storyPoints,
+                null,
+                null,
+                null,
+                updatedAt.minusDays(1),
+                updatedAt,
+                null,
+                null,
+                null,
+                null,
+                updatedAt.toInstant(java.time.ZoneOffset.UTC),
+                List.of(),
+                null,
+                List.of(),
+                authoritative
+        );
+    }
+
+    private JiraIssueSnapshot snapshotWithAttachments(
+            String id,
+            List<JiraAttachmentSnapshot> attachments
+    ) {
+        LocalDateTime updatedAt = LocalDateTime.parse("2026-07-29T10:00:00");
+        return new JiraIssueSnapshot(
+                id,
+                "SAGA-1",
+                "task title",
+                "Bug",
+                "Done",
+                "High",
+                3,
+                "atlassian-id-1",
+                null,
+                null,
+                LocalDateTime.parse("2026-07-28T10:00:00"),
+                updatedAt,
+                null,
+                null,
+                null,
+                null,
+                updatedAt.toInstant(java.time.ZoneOffset.UTC),
+                List.of(),
+                null,
+                List.of(),
+                attachments,
+                true
         );
     }
 }
