@@ -2,6 +2,7 @@ package com.saga.be.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -10,7 +11,9 @@ import static org.mockito.Mockito.when;
 
 import com.saga.be.entity.CommitData;
 import com.saga.be.entity.CommitReviewIntent;
+import com.saga.be.entity.CommitReviewResult;
 import com.saga.be.entity.GitRepo;
+import com.saga.be.entity.Project;
 import com.saga.be.repository.CommitDataRepository;
 import com.saga.be.repository.CommitReviewIntentRepository;
 import com.saga.be.repository.CommitReviewResultRepository;
@@ -52,5 +55,38 @@ class ExtraMasterHistoricalDiscoveryTest {
         verify(intents, times(1)).enqueueNewCanonicalCommit(repo, fresh);
         verify(intents, never()).enqueueNewCanonicalCommit(repo, already);
         verify(commits, never()).findAll();
+    }
+
+    @Test
+    void historicalDigestPublishInvokesWarningWritePath() {
+        CommitReviewResultRepository results = mock(CommitReviewResultRepository.class);
+        GitRepoRepository repos = mock(GitRepoRepository.class);
+        CommitReviewWarningPublisher publisher = mock(CommitReviewWarningPublisher.class);
+        UUID repoId = UUID.randomUUID();
+        Project project = new Project();
+        project.setId(UUID.randomUUID());
+        GitRepo repo = GitRepo.builder().name("backend").fullName("saga/backend").project(project).build();
+        repo.setId(repoId);
+        CommitReviewResult row = CommitReviewResult.builder()
+                .codeQuality("RISKS")
+                .messageQuality("POOR")
+                .overallStatus("NEEDS_CHANGES")
+                .findingsJson("{\"severity\":\"ERROR\"}")
+                .build();
+        when(results.findHistoricalRepoIdsInWindow(any(), any())).thenReturn(List.of(repoId));
+        when(repos.findById(repoId)).thenReturn(Optional.of(repo));
+        when(results.findHistoricalCompletedInWindow(eq(repoId), any(), any())).thenReturn(List.of(row));
+        CommitReviewHistoricalDiscoveryService service = new CommitReviewHistoricalDiscoveryService(
+                mock(CommitDataRepository.class),
+                mock(CommitReviewIntentService.class),
+                mock(CommitReviewIntentRepository.class),
+                results,
+                repos,
+                publisher
+        );
+
+        service.publishBoundedDigests();
+
+        verify(publisher).publishHistoricalDigest(eq(repo), any());
     }
 }

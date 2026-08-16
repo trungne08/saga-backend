@@ -63,7 +63,7 @@ public class CommitReviewHistoricalDiscoveryService {
         return created;
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public void publishBoundedDigests() {
         LocalDate day = LocalDate.now(ZoneOffset.UTC);
         LocalDateTime from = day.atStartOfDay();

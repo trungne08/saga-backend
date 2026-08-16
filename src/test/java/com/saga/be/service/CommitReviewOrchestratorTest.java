@@ -72,17 +72,20 @@ class CommitReviewOrchestratorTest {
                 "AI_AGENT_UNAVAILABLE",
                 "The AI Agent service is unavailable"
         )).when(client).runBounded();
+        CommitReviewHistoricalDiscoveryService discovery = mock(CommitReviewHistoricalDiscoveryService.class);
         CommitReviewOrchestrator orchestrator = new CommitReviewOrchestrator(
                 intents, mock(CommitReviewIntentRepository.class), client,
                 mock(CommitReviewResultPersistenceService.class),
                 mock(CommitReviewWarningPublisher.class),
-                mock(CommitReviewHistoricalDiscoveryService.class)
+                discovery
         );
 
         orchestrator.drainPendingAndPoll();
 
+        verify(discovery).discoverBoundedPage();
         verify(client).runBounded();
         verify(intents).nextInFlight(anyInt());
+        verify(discovery).publishBoundedDigests();
     }
 
     @Test
