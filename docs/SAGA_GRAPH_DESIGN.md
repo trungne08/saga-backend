@@ -394,6 +394,8 @@ Sơ đồ node/edge: tiêu chí → sinh viên → (P) → `%` cuối. Dùng đ�
 
 `GET /api/v1/teams/{teamId}/contribution-graph`
 
+Query `sprintId` tùy chọn: không có = cả Project; có = đúng Sprint thuộc Project (404 nếu không).
+
 Cùng auth evaluation (DEC-095). **Không** copy hệ số mockup. Công thức SAGA DEC-092:
 
 `slice = Σ(SP_criterion × weightRatio); P = stars_i / teamStars; pct = (slice × P) / Σadjust × 100`
@@ -401,6 +403,7 @@ Cùng auth evaluation (DEC-095). **Không** copy hệ số mockup. Công thức 
 ### 9.3 Payload
 
 - `weights`: ratio + percent bốn tiêu chí CODE / TEST / DOCUMENT / RESEARCH
+- `sprintId` / `sprintName`: `null` khi xem cả Project; có giá trị khi query `sprintId`
 - `nodes`: `CRITERION` (luôn 4) và `STUDENT` (kể cả slice 0)
 - `edges`: tiêu chí → sinh viên khi Σ SP > 0; `weightedSlice` = SP × weightRatio; `tasks[]` drill-down
 - Warnings hiện có trên student node. Không GHOSTING, không publish/snapshot.

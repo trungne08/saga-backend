@@ -76,8 +76,9 @@
 - Ngày: 2026-08-16; trạng thái: ACCEPTED / CONFIRMED_SOURCE_TEST.
 - Context: mockup flowchart (tiêu chí → SP → student → peer → %) cần API node/edge. Không copy hệ số mockup (CODE×2.0 / DESIGN / DOCS). Công thức giữ DEC-092.
 - Quyết định: `GET /api/v1/teams/{teamId}/contribution-graph`. Cùng auth DEC-095 (LECTURER exact Course instructor, STUDENT exact Team LEADER). ADMIN/MEMBER/MENTOR 403. Node `CRITERION` (CODE/TEST/DOCUMENT/RESEARCH) + `STUDENT`; cạnh tiêu chí→sinh viên kèm `storyPoints`, `weightedSlice = SP × weightRatio`, `tasks[]` (title/externalKey/sprint) để drill-down. `P` = `stars_i / teamStars`. Không GHOSTING, không publish/snapshot, không `/api/analytics/*`.
+- Query `sprintId` tùy chọn (additive, không thêm route): bỏ trống = cả Project; có = flowchart đúng Sprint thuộc Project của Team. Node STUDENT dùng slice / `P_s` / `%` của Sprint đó, không dùng override giảng viên cả dự án. Sprint không thuộc Project → 404 `Sprint not found`.
 - Radar/bar/line vẫn đọc evaluation (DEC-094). Mixer, Peer Review, override, activity graphs không đổi.
-- OpenAPI **149 → 150**. Không migration.
+- OpenAPI **149 → 150**; query `sprintId` giữ OpenAPI **152**. Không migration.
 
 ## DEC-095 — Contribution evaluation / graph is Lecturer and Student Leader only; ADMIN cannot read
 

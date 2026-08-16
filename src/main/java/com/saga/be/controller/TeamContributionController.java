@@ -19,6 +19,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -56,6 +57,8 @@ public class TeamContributionController {
             summary = "View a team's contribution flowchart",
             description = "Same authorization as contribution-evaluation: LECTURER of the Course "
                     + "and STUDENT exact Team LEADER. ADMIN, MEMBER and MENTOR are not permitted. "
+                    + "Optional sprintId filters the flowchart to that Sprint on the Team Project "
+                    + "(slice, P_s, % and edges). Omit sprintId for the whole Project. "
                     + "Nodes and edges use the SAGA mixer (CODE/TEST/DOCUMENT/RESEARCH weight "
                     + "ratios and peer as team-star share), not mockup multipliers."
     )
@@ -63,13 +66,14 @@ public class TeamContributionController {
             @ApiResponse(responseCode = "200", description = "Contribution flowchart nodes and edges"),
             @ApiResponse(responseCode = "401", description = "Authentication is required"),
             @ApiResponse(responseCode = "403", description = "Not permitted to read this Team's contribution"),
-            @ApiResponse(responseCode = "404", description = "Team does not exist")
+            @ApiResponse(responseCode = "404", description = "Team or Sprint does not exist")
     })
     public ResponseEntity<TeamContributionGraphResponse> getContributionGraph(
             @AuthenticationPrincipal SagaPrincipal principal,
-            @PathVariable UUID teamId
+            @PathVariable UUID teamId,
+            @RequestParam(value = "sprintId", required = false) UUID sprintId
     ) {
-        return ResponseEntity.ok(teamContributionService.graph(principal, teamId));
+        return ResponseEntity.ok(teamContributionService.graph(principal, teamId, sprintId));
     }
 
     @PostMapping("/{teamId}/contribution-override")

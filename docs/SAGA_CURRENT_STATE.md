@@ -41,8 +41,8 @@
 - **Foundation giữ nguyên:** intent + `review_cutover_at` sau canonical persist; dedup; historical/live cutover. Early Warning V2 ngoài OVERDUE **không ship**. DEC-095 mới gọi AI start/poll/result. OpenAPI **149**. V40 + V41.
 ## Contribution flowchart graph (DEC-096) — 2026-08-16
 
-- **Đã hoàn thành / CONFIRMED_SOURCE_TEST:** `GET /api/v1/teams/{teamId}/contribution-graph` trả node/edge flowchart. Công thức SAGA (DEC-092), không hệ số mockup. Cùng auth evaluation (DEC-095).
-- **Contracts:** OpenAPI **150**. Không migration.
+- **Đã hoàn thành / CONFIRMED_SOURCE_TEST:** `GET /api/v1/teams/{teamId}/contribution-graph` trả node/edge flowchart. Công thức SAGA (DEC-092), không hệ số mockup. Cùng auth evaluation (DEC-095). Query `sprintId` tùy chọn: không có = cả Project; có = đúng Sprint (404 nếu không thuộc Project).
+- **Contracts:** OpenAPI **152**. Không migration.
 
 ## Contribution evaluation is Lecturer + Student Leader only (DEC-095) — 2026-08-15
 

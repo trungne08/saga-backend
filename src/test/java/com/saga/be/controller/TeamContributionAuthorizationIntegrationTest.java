@@ -239,7 +239,8 @@ class TeamContributionAuthorizationIntegrationTest {
                 .andExpect(jsonPath(operation + ".responses['200']").exists())
                 .andExpect(jsonPath(operation + ".responses['401']").exists())
                 .andExpect(jsonPath(operation + ".responses['403']").exists())
-                .andExpect(jsonPath(operation + ".responses['404']").exists());
+                .andExpect(jsonPath(operation + ".responses['404']").exists())
+                .andExpect(jsonPath(operation + ".parameters[*].name", org.hamcrest.Matchers.hasItem("sprintId")));
     }
 
     private org.springframework.test.web.servlet.ResultActions request(

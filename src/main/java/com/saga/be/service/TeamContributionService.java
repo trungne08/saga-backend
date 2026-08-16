@@ -89,23 +89,29 @@ public class TeamContributionService {
     }
 
     @Transactional(readOnly = true)
-    public TeamContributionGraphResponse graph(SagaPrincipal principal, UUID teamId) {
+    public TeamContributionGraphResponse graph(SagaPrincipal principal, UUID teamId, UUID sprintId) {
         Team team = teamRepository.findWithCourseAndInstructorById(teamId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Team not found"));
         requireContributionReadAccess(principal, team);
-        return graph(teamId, team);
+        return graph(teamId, team, sprintId);
     }
 
     @Transactional(readOnly = true)
     TeamContributionGraphResponse graph(UUID teamId) {
-        Team team = teamRepository.findWithCourseAndInstructorById(teamId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Team not found"));
-        return graph(teamId, team);
+        return graph(teamId, (UUID) null);
     }
 
-    private TeamContributionGraphResponse graph(UUID teamId, Team team) {
+    @Transactional(readOnly = true)
+    TeamContributionGraphResponse graph(UUID teamId, UUID sprintId) {
+        Team team = teamRepository.findWithCourseAndInstructorById(teamId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Team not found"));
+        return graph(teamId, team, sprintId);
+    }
+
+    private TeamContributionGraphResponse graph(UUID teamId, Team team, UUID sprintId) {
         TeamContributionEvaluationResponse evaluation = evaluate(teamId, team);
         UUID projectId = evaluation.projectId();
+        Sprint sprintFilter = resolveGraphSprint(projectId, sprintId);
         ContributionSliceWeights weights = team.getCourse() == null
                 ? ContributionSliceWeights.fromCourse(null)
                 : sliceWeightResolver.resolve(team);
@@ -140,9 +146,9 @@ public class TeamContributionService {
                     List.of()
             ));
         }
+        UUID sprintFilterId = sprintFilter == null ? null : sprintFilter.getId();
         for (TeamContributionMemberResponse member : evaluation.members()) {
-            double slice = member.sliceScore();
-            double peer = member.peerReviewScore();
+            StudentGraphScores scores = scoresForGraph(member, sprintFilterId);
             nodes.add(new TeamContributionGraphResponse.ContributionGraphNode(
                     studentNodeId(member.studentId()),
                     "STUDENT",
@@ -153,17 +159,17 @@ public class TeamContributionService {
                     member.fullName(),
                     member.studentCode(),
                     roleByStudent.get(member.studentId()),
-                    slice,
-                    peer,
-                    slice * peer,
-                    member.finalContributionPercentage(),
+                    scores.sliceScore(),
+                    scores.peerCoefficient(),
+                    scores.adjustedScore(),
+                    scores.finalContributionPercentage(),
                     member.warnings()
             ));
         }
 
         List<TeamContributionGraphResponse.ContributionGraphEdge> edges = List.of();
         if (projectId != null) {
-            edges = buildCriterionEdges(projectId, weights);
+            edges = buildCriterionEdges(projectId, weights, sprintFilterId);
         }
         return new TeamContributionGraphResponse(
                 teamId,
@@ -180,14 +186,65 @@ public class TeamContributionService {
                         weights.documentValue(),
                         weights.researchValue()
                 ),
+                sprintFilter == null ? null : sprintFilter.getId(),
+                sprintFilter == null ? null : sprintFilter.getName(),
                 nodes,
                 edges
         );
     }
 
+    private Sprint resolveGraphSprint(UUID projectId, UUID sprintId) {
+        if (sprintId == null) {
+            return null;
+        }
+        if (projectId == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Sprint not found");
+        }
+        return sprintRepository.findByIdAndBoardProjectIdAndDeletedAtIsNull(sprintId, projectId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Sprint not found"));
+    }
+
+    private static StudentGraphScores scoresForGraph(
+            TeamContributionMemberResponse member,
+            UUID sprintId
+    ) {
+        if (sprintId == null) {
+            double slice = member.sliceScore();
+            double peer = member.peerReviewScore();
+            return new StudentGraphScores(
+                    slice,
+                    peer,
+                    slice * peer,
+                    member.finalContributionPercentage()
+            );
+        }
+        for (TeamContributionMemberResponse.SprintContributionBreakdown breakdown : member.sprintBreakdowns()) {
+            if (sprintId.equals(breakdown.sprintId())) {
+                double slice = breakdown.sliceScore();
+                double peer = breakdown.retrospectiveMultiplier();
+                return new StudentGraphScores(
+                        slice,
+                        peer,
+                        slice * peer,
+                        breakdown.contributionPercentage()
+                );
+            }
+        }
+        return new StudentGraphScores(0.0, 1.0, 0.0, 0.0);
+    }
+
+    private record StudentGraphScores(
+            double sliceScore,
+            double peerCoefficient,
+            double adjustedScore,
+            double finalContributionPercentage
+    ) {
+    }
+
     private List<TeamContributionGraphResponse.ContributionGraphEdge> buildCriterionEdges(
             UUID projectId,
-            ContributionSliceWeights weights
+            ContributionSliceWeights weights,
+            UUID sprintFilterId
     ) {
         List<Task> tasks = taskRepository.findByProjectId(projectId);
         Map<UUID, Integer> evidenceByTask = evidenceCounts(projectId);
@@ -202,7 +259,8 @@ public class TeamContributionService {
                     || task.getAssignee() == null
                     || task.getAssignee().getId() == null
                     || task.getSprint() == null
-                    || task.getSprint().getId() == null) {
+                    || task.getSprint().getId() == null
+                    || (sprintFilterId != null && !sprintFilterId.equals(task.getSprint().getId()))) {
                 continue;
             }
             Optional<ContributionCriterion> classified = TaskContributionClassifier.classify(task);

@@ -14,6 +14,8 @@ public record TeamContributionGraphResponse(
         LocalDateTime evaluatedAt,
         String formula,
         ContributionGraphWeights weights,
+        UUID sprintId,
+        String sprintName,
         List<ContributionGraphNode> nodes,
         List<ContributionGraphEdge> edges
 ) {
