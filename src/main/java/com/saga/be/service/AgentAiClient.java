@@ -8,7 +8,6 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.Map;
 import java.util.UUID;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -178,15 +177,15 @@ public class AgentAiClient {
             }
             T response = request.body(body).retrieve().body(type);
             if (response == null) {
-                throw unavailable("AI_AGENT_RESPONSE_INVALID");
+                throw invalidResponse("POST", path);
             }
             return response;
         } catch (IntegrationException exception) {
             throw exception;
         } catch (RestClientResponseException exception) {
-            throw translate(exception);
+            throw translate("POST", path, exception);
         } catch (RestClientException exception) {
-            throw unavailable("AI_AGENT_UNAVAILABLE");
+            throw transportUnavailable("POST", path, exception);
         }
     }
 
@@ -198,15 +197,15 @@ public class AgentAiClient {
                     .header(SERVICE_TOKEN_HEADER, requireServiceToken())
                     .retrieve().body(type);
             if (response == null) {
-                throw unavailable("AI_AGENT_RESPONSE_INVALID");
+                throw invalidResponse("GET", path);
             }
             return response;
         } catch (IntegrationException exception) {
             throw exception;
         } catch (RestClientResponseException exception) {
-            throw translate(exception);
+            throw translate("GET", path, exception);
         } catch (RestClientException exception) {
-            throw unavailable("AI_AGENT_UNAVAILABLE");
+            throw transportUnavailable("GET", path, exception);
         }
     }
 
@@ -237,36 +236,68 @@ public class AgentAiClient {
         return token;
     }
 
-    private IntegrationException translate(RestClientResponseException exception) {
+    private IntegrationException translate(
+            String operation, String path, RestClientResponseException exception
+    ) {
+        IntegrationException mapped = mappedResponse(exception);
+        AgentAiHttpFailureLogger.logResponse(operation, path, exception, mapped.getCode());
+        return mapped;
+    }
+
+    private IntegrationException mappedResponse(RestClientResponseException exception) {
         int status = exception.getStatusCode().value();
         if (status == 401 || status == 403) {
             return new IntegrationException(
                     HttpStatus.BAD_GATEWAY,
                     "AI_AGENT_SERVICE_AUTH_FAILED",
-                    "AI Agent service authentication failed"
+                    "AI Agent service authentication failed",
+                    exception
             );
         }
         if (status == 404) {
             return new IntegrationException(
-                    HttpStatus.NOT_FOUND, "AI_AGENT_RESOURCE_NOT_FOUND", "AI Agent resource not found"
+                    HttpStatus.NOT_FOUND, "AI_AGENT_RESOURCE_NOT_FOUND", "AI Agent resource not found",
+                    exception
             );
         }
         if (status == 409) {
-            return IntegrationException.conflict(
-                    "AI_AGENT_CONFLICT", "The AI Agent request conflicts with current state"
+            return new IntegrationException(
+                    HttpStatus.CONFLICT,
+                    "AI_AGENT_CONFLICT",
+                    "The AI Agent request conflicts with current state",
+                    exception
             );
         }
         if (status >= 400 && status < 500) {
-            return IntegrationException.invalid(
-                    "AI_AGENT_REQUEST_INVALID", "The AI Agent request is invalid"
+            return new IntegrationException(
+                    HttpStatus.BAD_REQUEST,
+                    "AI_AGENT_REQUEST_INVALID",
+                    "The AI Agent request is invalid",
+                    exception
             );
         }
-        return unavailable("AI_AGENT_UNAVAILABLE");
+        return unavailable("AI_AGENT_UNAVAILABLE", exception);
+    }
+
+    private IntegrationException transportUnavailable(
+            String operation, String path, RestClientException exception
+    ) {
+        AgentAiHttpFailureLogger.logTransport(operation, path, exception, "AI_AGENT_UNAVAILABLE");
+        return unavailable("AI_AGENT_UNAVAILABLE", exception);
+    }
+
+    private IntegrationException invalidResponse(String operation, String path) {
+        AgentAiHttpFailureLogger.logInvalidResponse(operation, path, "AI_AGENT_RESPONSE_INVALID");
+        return unavailable("AI_AGENT_RESPONSE_INVALID");
     }
 
     private IntegrationException unavailable(String code) {
+        return unavailable(code, null);
+    }
+
+    private IntegrationException unavailable(String code, Throwable cause) {
         return new IntegrationException(
-                HttpStatus.SERVICE_UNAVAILABLE, code, "The AI Agent service is unavailable"
+                HttpStatus.SERVICE_UNAVAILABLE, code, "The AI Agent service is unavailable", cause
         );
     }
 

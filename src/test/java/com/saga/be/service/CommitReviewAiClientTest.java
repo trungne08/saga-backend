@@ -1,5 +1,6 @@
 package com.saga.be.service;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -8,14 +9,21 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.saga.be.config.AgentAiProperties;
 import com.saga.be.dto.response.CommitReviewJobResponses;
+import com.saga.be.exception.IntegrationException;
 import java.time.Duration;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
@@ -156,6 +164,50 @@ class CommitReviewAiClientTest {
                         com.saga.be.entity.enums.CommitReviewPriority.HIGH
                 )
         );
+    }
+
+    @Test
+    void runBoundedFiveXxMapsToUnavailableAndLogsPathWithoutToken() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        String token = "TOKEN_MUST_NOT_APPEAR_" + "x".repeat(16);
+        CommitReviewAiClient client = new CommitReviewAiClient(
+                new AgentAiProperties(
+                        "https://ai.example", token,
+                        Duration.ofSeconds(1), Duration.ofSeconds(5), Duration.ofMinutes(5)
+                ),
+                builder.build()
+        );
+        Logger logger = (Logger) LoggerFactory.getLogger(AgentAiHttpFailureLogger.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            server.expect(once(), requestTo("https://ai.example/internal/backend/v1/commit-reviews/execution/run-bounded"))
+                    .andExpect(method(HttpMethod.POST))
+                    .andRespond(withStatus(HttpStatus.SERVICE_UNAVAILABLE)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .body("{\"detail\":\"AI_JOB_PERSISTENCE_UNAVAILABLE\"}"));
+
+            IntegrationException failure = assertThrows(IntegrationException.class, client::runBounded);
+
+            assertEquals("AI_AGENT_UNAVAILABLE", failure.getCode());
+            String logged = appender.list.stream()
+                    .map(ILoggingEvent::getFormattedMessage)
+                    .filter(value -> value.startsWith("AI agent downstream failed"))
+                    .findFirst()
+                    .orElseThrow();
+            assertThat(logged)
+                    .contains("path=/internal/backend/v1/commit-reviews/execution/run-bounded")
+                    .contains("kind=HTTP_STATUS")
+                    .contains("downstreamStatus=503")
+                    .contains("downstreamSafeCode=AI_JOB_PERSISTENCE_UNAVAILABLE")
+                    .contains("mappedCode=AI_AGENT_UNAVAILABLE")
+                    .doesNotContain(token);
+        } finally {
+            logger.detachAppender(appender);
+        }
+        server.verify();
     }
 
     private AgentAiProperties properties() {

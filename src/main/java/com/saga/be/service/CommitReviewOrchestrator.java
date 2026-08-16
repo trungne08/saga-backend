@@ -136,6 +136,13 @@ public class CommitReviewOrchestrator {
         String code = exception instanceof IntegrationException integration
                 ? integration.getCode()
                 : exception.getClass().getSimpleName();
-        log.warn("commit-review orchestration: {} code={}", message, code);
+        Throwable root = exception.getCause();
+        log.warn(
+                "commit-review orchestration: {} code={} exceptionClass={} rootCauseClass={}",
+                message,
+                code,
+                exception.getClass().getSimpleName(),
+                root == null ? "NONE" : root.getClass().getSimpleName()
+        );
     }
 }

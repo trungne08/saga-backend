@@ -1,8 +1,10 @@
 package com.saga.be.service;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -14,10 +16,13 @@ import com.saga.be.entity.CommitReviewIntent;
 import com.saga.be.entity.GitRepo;
 import com.saga.be.entity.Project;
 import com.saga.be.entity.enums.CommitReviewMode;
+import com.saga.be.exception.IntegrationException;
 import com.saga.be.repository.CommitReviewIntentRepository;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpStatus;
 import org.springframework.test.util.ReflectionTestUtils;
 
 class CommitReviewOrchestratorTest {
@@ -53,6 +58,31 @@ class CommitReviewOrchestratorTest {
         verify(client, times(1)).start(any(), eq(42L), any(), eq(CommitReviewPolicyVersion.LIVE_TASK_AWARE_V1));
         verify(intents).markStarted(intentId, jobId, "commit-review-live-task-aware-v1", "PENDING");
         verify(client, times(1)).runBounded();
+    }
+
+    @Test
+    void boundedExecutionFailureIsSwallowedAndPollingContinues() {
+        CommitReviewIntentService intents = mock(CommitReviewIntentService.class);
+        CommitReviewAiClient client = mock(CommitReviewAiClient.class);
+        when(client.isConfigured()).thenReturn(true);
+        when(intents.nextWorkAvoidingHistoricalStarvation()).thenReturn(List.of());
+        when(intents.nextInFlight(anyInt())).thenReturn(List.of());
+        doThrow(new IntegrationException(
+                HttpStatus.SERVICE_UNAVAILABLE,
+                "AI_AGENT_UNAVAILABLE",
+                "The AI Agent service is unavailable"
+        )).when(client).runBounded();
+        CommitReviewOrchestrator orchestrator = new CommitReviewOrchestrator(
+                intents, mock(CommitReviewIntentRepository.class), client,
+                mock(CommitReviewResultPersistenceService.class),
+                mock(CommitReviewWarningPublisher.class),
+                mock(CommitReviewHistoricalDiscoveryService.class)
+        );
+
+        orchestrator.drainPendingAndPoll();
+
+        verify(client).runBounded();
+        verify(intents).nextInFlight(anyInt());
     }
 
     @Test
