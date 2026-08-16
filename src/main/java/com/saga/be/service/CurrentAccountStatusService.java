@@ -34,8 +34,8 @@ public class CurrentAccountStatusService {
         }
         return currentStatus(principal)
                 .map(status -> status == AccountStatus.ACTIVE)
-                // Existing authorization remains authoritative when the local profile is absent.
-                // Normal browser sessions always have a local profile created by OIDC synchronization.
+                // Normal browser sessions have a profile created by OIDC synchronization. Preserve
+                // the established authorization behavior for a profile that has since disappeared.
                 .orElse(true);
     }
 

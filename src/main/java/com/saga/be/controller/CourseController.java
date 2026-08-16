@@ -7,6 +7,7 @@ import com.saga.be.dto.response.CourseStudentRosterResponse;
 import com.saga.be.dto.response.CourseStudentBasicInfoResponse;
 import com.saga.be.dto.response.CourseStudentImportResponse;
 import com.saga.be.dto.response.CourseStudentMutationResponse;
+import com.saga.be.dto.response.CourseResponse;
 import com.saga.be.dto.response.LecturerOptionResponse;
 import com.saga.be.entity.Course;
 import com.saga.be.service.CourseService;
@@ -51,7 +52,7 @@ public class CourseController {
     private final CourseStudentManagementService courseStudentManagementService;
 
     @GetMapping("/{id}")
-    public ResponseEntity<Course> getCourseById(@PathVariable UUID id) {
+    public ResponseEntity<CourseResponse> getCourseById(@PathVariable UUID id) {
         return ResponseEntity.ok(courseService.getCourseById(id));
     }
 
@@ -78,7 +79,7 @@ public class CourseController {
     }
 
     @GetMapping
-    public ResponseEntity<Page<Course>> getCourses(
+    public ResponseEntity<Page<CourseResponse>> getCourses(
             @RequestParam(required = false) UUID subjectId,
             @RequestParam(required = false) UUID semesterId,
             @RequestParam(required = false) UUID instructorId,

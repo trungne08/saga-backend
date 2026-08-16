@@ -2,11 +2,14 @@ package com.saga.be.service;
 
 import com.saga.be.dto.request.InternalAgentToolRequests;
 import com.saga.be.dto.response.InternalAgentToolResponses.ActionValidation;
+import com.saga.be.entity.Sprint;
 import com.saga.be.exception.IntegrationException;
 import com.saga.be.integration.security.ProjectIntegrationAuthorizationService;
+import com.saga.be.repository.SprintRepository;
 import com.saga.be.security.SagaPrincipal;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -14,13 +17,16 @@ public class AgentTaskProposalValidationService {
 
     private final ProjectIntegrationAuthorizationService authorization;
     private final ProjectTaskReadService taskReads;
+    private final SprintRepository sprints;
 
     public AgentTaskProposalValidationService(
             ProjectIntegrationAuthorizationService authorization,
-            ProjectTaskReadService taskReads
+            ProjectTaskReadService taskReads,
+            SprintRepository sprints
     ) {
         this.authorization = authorization;
         this.taskReads = taskReads;
+        this.sprints = sprints;
     }
 
     public ActionValidation validateCreate(
@@ -37,10 +43,28 @@ public class AgentTaskProposalValidationService {
         put(payload, "labels", request.labels());
         put(payload, "componentIds", request.componentIds());
         put(payload, "assigneeId", request.assigneeId() == null ? null : request.assigneeId().toString());
+        String sprintName = null;
+        if (request.sprintId() != null) {
+            Sprint sprint = sprints.findByIdAndBoardProjectIdAndDeletedAtIsNull(
+                    request.sprintId(), request.projectId()
+            ).orElseThrow(() -> new IntegrationException(
+                    HttpStatus.NOT_FOUND,
+                    "JIRA_RESOURCE_NOT_FOUND",
+                    "Sprint not found"
+            ));
+            sprintName = normalize(sprint.getName());
+            if (sprintName == null) {
+                throw IntegrationException.invalid(
+                        "AI_AGENT_ACTION_PAYLOAD_INVALID",
+                        "The proposed action payload is invalid"
+                );
+            }
+            payload.put("sprintId", request.sprintId().toString());
+        }
         return new ActionValidation(
                 true,
                 Map.copyOf(payload),
-                createSummary(request, payload)
+                createSummary(request, payload, sprintName)
         );
     }
 
@@ -78,7 +102,9 @@ public class AgentTaskProposalValidationService {
     }
 
     private String createSummary(
-            InternalAgentToolRequests.TaskCreate request, Map<String, Object> payload
+            InternalAgentToolRequests.TaskCreate request,
+            Map<String, Object> payload,
+            String sprintName
     ) {
         StringBuilder summary = new StringBuilder("Create Task '")
                 .append(request.title().trim())
@@ -95,6 +121,9 @@ public class AgentTaskProposalValidationService {
         }
         if (payload.containsKey("description")) {
             summary.append(", description prepared");
+        }
+        if (sprintName != null) {
+            summary.append(", sprint '").append(sprintName).append("'");
         }
         return summary.toString();
     }

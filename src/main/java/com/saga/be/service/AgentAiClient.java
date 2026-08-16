@@ -95,6 +95,14 @@ public class AgentAiClient {
         );
     }
 
+    public AgentApiResponses.PendingAction inspectAction(SagaPrincipal actor, UUID actionId) {
+        return get(
+                "/internal/backend/v1/agent/pending-actions/" + actionId,
+                Map.of("ownerId", ownerId(actor)),
+                AgentApiResponses.PendingAction.class
+        );
+    }
+
     public AgentApiResponses.PendingAction claimAction(SagaPrincipal actor, UUID actionId) {
         return post(
                 "/internal/backend/v1/agent/pending-actions/" + actionId + "/claim",

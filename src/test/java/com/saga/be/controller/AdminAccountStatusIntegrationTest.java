@@ -2,6 +2,7 @@ package com.saga.be.controller;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -152,25 +153,34 @@ class AdminAccountStatusIntegrationTest {
     }
 
     @Test
-    void currentDatabaseStatusBlocksExistingStudentAndLecturerSessionsButAuthRoutesRemainAvailable() throws Exception {
+    void disabledAccountsInvalidateTheCurrentSessionAndCannotBootstrapAgain() throws Exception {
         Student student = student("session-student", AccountStatus.ACTIVE);
         MockHttpSession studentSession = session(authenticationFor(ApplicationRole.STUDENT, student.getId(), AccountStatus.ACTIVE));
         mockMvc.perform(get("/api/v1/subjects").session(studentSession)).andExpect(status().isOk());
-        student.setAccountStatus(AccountStatus.SUSPENDED); studentRepository.saveAndFlush(student);
-        mockMvc.perform(get("/api/v1/subjects").session(studentSession)).andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.error").value("ACCOUNT_STATUS_ACCESS_DENIED"));
-        mockMvc.perform(get("/api/auth/me").session(studentSession)).andExpect(status().isOk())
-                .andExpect(jsonPath("$.accountStatus").value("SUSPENDED"));
-        logoutWithCsrf(studentSession).andExpect(status().is3xxRedirection());
+        patchAsAdmin(student.getId(), "INACTIVE").andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/subjects").session(studentSession)).andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error").value("ACCOUNT_DISABLED"));
+        assertTrue(studentSession.isInvalid());
+
+        MockHttpSession studentMeSession = session(authenticationFor(
+                ApplicationRole.STUDENT, student.getId(), AccountStatus.ACTIVE
+        ));
+        mockMvc.perform(get("/api/auth/me").session(studentMeSession)).andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error").value("ACCOUNT_DISABLED"));
+        assertTrue(studentMeSession.isInvalid());
+
+        mockMvc.perform(get("/api/v1/subjects")).andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error").value("AUTHENTICATION_REQUIRED"));
+        patchAsAdmin(student.getId(), "ACTIVE").andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/subjects")).andExpect(status().isUnauthorized());
 
         Lecturer lecturer = lecturer("session-lecturer", AccountStatus.ACTIVE);
         MockHttpSession lecturerSession = session(authenticationFor(ApplicationRole.LECTURER, lecturer.getId(), AccountStatus.ACTIVE));
         mockMvc.perform(get("/api/v1/subjects").session(lecturerSession)).andExpect(status().isOk());
-        lecturer.setAccountStatus(AccountStatus.INACTIVE); lecturerRepository.saveAndFlush(lecturer);
-        mockMvc.perform(get("/api/v1/subjects").session(lecturerSession)).andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.error").value("ACCOUNT_STATUS_ACCESS_DENIED"));
-        mockMvc.perform(get("/api/auth/me").session(lecturerSession)).andExpect(status().isOk())
-                .andExpect(jsonPath("$.accountStatus").value("INACTIVE"));
+        patchAsAdmin(lecturer.getId(), "SUSPENDED").andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/subjects").session(lecturerSession)).andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error").value("ACCOUNT_DISABLED"));
+        assertTrue(lecturerSession.isInvalid());
     }
 
     private org.springframework.test.web.servlet.ResultActions patchAsAdmin(UUID targetId, String statusValue) throws Exception {

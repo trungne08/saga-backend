@@ -42,9 +42,22 @@ class AgentGatewayServiceTest {
         SagaPrincipal actor = actor(ApplicationRole.STUDENT);
         UUID actionId = UUID.randomUUID();
         UUID projectId = UUID.randomUUID();
+        AgentApiResponses.PendingAction pending = action(
+                actionId,
+                "TASK_CREATE",
+                "PENDING",
+                Map.of(
+                        "projectId", projectId.toString(),
+                        "title", "Fix login",
+                        "type", "BUG",
+                        "priority", "HIGH"
+                )
+        );
+        when(ai.inspectAction(actor, actionId)).thenReturn(pending);
         when(ai.claimAction(actor, actionId)).thenReturn(action(
                 actionId,
                 "TASK_CREATE",
+                "EXECUTING",
                 Map.of(
                         "projectId", projectId.toString(),
                         "title", "Fix login",
@@ -74,16 +87,14 @@ class AgentGatewayServiceTest {
         UUID actionId = UUID.randomUUID();
         UUID projectId = UUID.randomUUID();
         UUID taskId = UUID.randomUUID();
-        when(ai.claimAction(actor, actionId)).thenReturn(action(
-                actionId,
-                "TASK_UPDATE",
-                Map.of(
-                        "projectId", projectId.toString(),
-                        "taskId", taskId.toString(),
-                        "title", "Updated title",
-                        "type", "REQUEST"
-                )
-        ));
+        Map<String, Object> payload = Map.of(
+                "projectId", projectId.toString(),
+                "taskId", taskId.toString(),
+                "title", "Updated title",
+                "type", "REQUEST"
+        );
+        when(ai.inspectAction(actor, actionId)).thenReturn(action(actionId, "TASK_UPDATE", "PENDING", payload));
+        when(ai.claimAction(actor, actionId)).thenReturn(action(actionId, "TASK_UPDATE", "EXECUTING", payload));
 
         service.confirm(actor, actionId);
 
@@ -101,7 +112,7 @@ class AgentGatewayServiceTest {
         AgentGatewayService service = service(ai, writes);
         SagaPrincipal actor = actor(ApplicationRole.ADMIN);
         UUID actionId = UUID.randomUUID();
-        when(ai.rejectAction(actor, actionId)).thenReturn(action(actionId, "TASK_CREATE", null));
+        when(ai.rejectAction(actor, actionId)).thenReturn(action(actionId, "TASK_CREATE", "PENDING", null));
 
         service.reject(actor, actionId);
 
@@ -119,7 +130,8 @@ class AgentGatewayServiceTest {
                 mock(com.saga.be.repository.StudentRepository.class),
                 mock(LecturerAnalyticsAuthorizationService.class),
                 mock(com.saga.be.repository.TeamMemberRepository.class),
-                mock(AgentConversationScopeService.class)
+                mock(AgentConversationScopeService.class),
+                mock(AgentTaskCreateSprintRecoveryGate.class)
         );
         SagaPrincipal actor = actor(ApplicationRole.STUDENT);
         UUID artifactId = UUID.randomUUID();
@@ -148,7 +160,8 @@ class AgentGatewayServiceTest {
                 mock(com.saga.be.repository.StudentRepository.class),
                 mock(LecturerAnalyticsAuthorizationService.class),
                 mock(com.saga.be.repository.TeamMemberRepository.class),
-                mock(AgentConversationScopeService.class)
+                mock(AgentConversationScopeService.class),
+                mock(AgentTaskCreateSprintRecoveryGate.class)
         );
         SagaPrincipal actor = actor(ApplicationRole.STUDENT);
         UUID artifactId = UUID.randomUUID();
@@ -174,7 +187,8 @@ class AgentGatewayServiceTest {
                 mock(JiraTaskWriteService.class), mock(ProjectDetailService.class),
                 mock(StudentRepository.class), authorization,
                 mock(com.saga.be.repository.TeamMemberRepository.class),
-                mock(AgentConversationScopeService.class)
+                mock(AgentConversationScopeService.class),
+                mock(AgentTaskCreateSprintRecoveryGate.class)
         );
         UUID artifactId = UUID.randomUUID();
         UUID courseId = UUID.randomUUID();
@@ -240,7 +254,8 @@ class AgentGatewayServiceTest {
                 mock(JiraTaskWriteService.class), mock(ProjectDetailService.class),
                 mock(StudentRepository.class), mock(LecturerAnalyticsAuthorizationService.class),
                 mock(com.saga.be.repository.TeamMemberRepository.class),
-                mock(AgentConversationScopeService.class)
+                mock(AgentConversationScopeService.class),
+                mock(AgentTaskCreateSprintRecoveryGate.class)
         );
         UUID artifactId = UUID.randomUUID();
         SagaPrincipal admin = actor(ApplicationRole.ADMIN);
@@ -269,7 +284,8 @@ class AgentGatewayServiceTest {
                 ai, mock(AgentDelegationService.class),
                 mock(JiraTaskWriteService.class), mock(ProjectDetailService.class),
                 mock(StudentRepository.class), mock(LecturerAnalyticsAuthorizationService.class),
-                teamMembers, mock(AgentConversationScopeService.class)
+                teamMembers, mock(AgentConversationScopeService.class),
+                mock(AgentTaskCreateSprintRecoveryGate.class)
         );
         UUID artifactId = UUID.randomUUID();
         UUID teamId = UUID.randomUUID();
@@ -306,7 +322,8 @@ class AgentGatewayServiceTest {
                 ai, mock(AgentDelegationService.class),
                 mock(JiraTaskWriteService.class), mock(ProjectDetailService.class),
                 mock(StudentRepository.class), mock(LecturerAnalyticsAuthorizationService.class),
-                mock(TeamMemberRepository.class), scopes
+                mock(TeamMemberRepository.class), scopes,
+                mock(AgentTaskCreateSprintRecoveryGate.class)
         );
         SagaPrincipal student = actor(ApplicationRole.STUDENT);
         UUID courseId = UUID.randomUUID();
@@ -336,7 +353,8 @@ class AgentGatewayServiceTest {
         AgentGatewayService service = new AgentGatewayService(
                 ai, delegations, mock(JiraTaskWriteService.class), mock(ProjectDetailService.class),
                 mock(StudentRepository.class), mock(LecturerAnalyticsAuthorizationService.class),
-                mock(TeamMemberRepository.class), scopes
+                mock(TeamMemberRepository.class), scopes,
+                mock(AgentTaskCreateSprintRecoveryGate.class)
         );
         SagaPrincipal student = actor(ApplicationRole.STUDENT);
         UUID conversationId = UUID.randomUUID();
@@ -365,7 +383,8 @@ class AgentGatewayServiceTest {
         AgentGatewayService service = new AgentGatewayService(
                 ai, delegations, mock(JiraTaskWriteService.class), mock(ProjectDetailService.class),
                 mock(StudentRepository.class), mock(LecturerAnalyticsAuthorizationService.class),
-                mock(TeamMemberRepository.class), scopes
+                mock(TeamMemberRepository.class), scopes,
+                mock(AgentTaskCreateSprintRecoveryGate.class)
         );
         SagaPrincipal student = actor(ApplicationRole.STUDENT);
         UUID conversationId = UUID.randomUUID();
@@ -393,15 +412,16 @@ class AgentGatewayServiceTest {
                 mock(StudentRepository.class),
                 mock(LecturerAnalyticsAuthorizationService.class),
                 mock(com.saga.be.repository.TeamMemberRepository.class),
-                mock(AgentConversationScopeService.class)
+                mock(AgentConversationScopeService.class),
+                mock(AgentTaskCreateSprintRecoveryGate.class)
         );
     }
 
     private AgentApiResponses.PendingAction action(
-            UUID id, String type, Map<String, Object> payload
+            UUID id, String type, String status, Map<String, Object> payload
     ) {
         return new AgentApiResponses.PendingAction(
-                id, UUID.randomUUID().toString(), type, "EXECUTING", "summary",
+                id, UUID.randomUUID().toString(), type, status, "summary",
                 "saga-agent-stable", "2026-08-14T12:00:00Z", null, payload
         );
     }

@@ -13,7 +13,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
-/** Enforces the current local status for browser-session business requests only. */
+/** Enforces the current local status for authenticated browser sessions. */
 @Component
 public class AccountStatusEnforcementFilter extends OncePerRequestFilter {
 
@@ -32,7 +32,6 @@ public class AccountStatusEnforcementFilter extends OncePerRequestFilter {
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String path = request.getRequestURI();
         return !path.startsWith("/api/")
-                || path.equals("/api/auth/me")
                 || path.equals("/api/auth/csrf")
                 || path.equals("/api/auth/logout");
     }
@@ -50,12 +49,14 @@ public class AccountStatusEnforcementFilter extends OncePerRequestFilter {
             return;
         }
         if (!accountStatusService.isAllowedForBusinessApi(principal)) {
+            session.invalidate();
+            SecurityContextHolder.clearContext();
             responseWriter.write(
                     request,
                     response,
-                    HttpStatus.FORBIDDEN.value(),
-                    "ACCOUNT_STATUS_ACCESS_DENIED",
-                    "Account is not active"
+                    HttpStatus.UNAUTHORIZED.value(),
+                    "ACCOUNT_DISABLED",
+                    "Tài khoản của bạn đã bị vô hiệu hóa."
             );
             return;
         }

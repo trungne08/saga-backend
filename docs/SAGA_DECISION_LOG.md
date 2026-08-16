@@ -1,3 +1,78 @@
+## DEC-102 — Course read status is computed from the Course Semester
+
+- Date: 2026-08-17; status: **ACCEPTED / IMPLEMENTED_SOURCE_TEST**.
+- `GET /api/v1/courses` and `GET /api/v1/courses/{id}` return the stable `CourseResponse`. `academicClass` is the canonical nested Class JSON name; `clazz` remains a deprecated compatibility alias. `academicClazz` is not exposed. The JPA field remains `Course.clazz` mapped through `class_id`; the Class entity/table remains in use.
+- `courseStatus` is a computed-only enum: `OPEN` or `CLOSED`. It is not persisted, has no scheduler, and requires no migration.
+- The only status authority is the Course's Semester `startDate`/`endDate`. Its business timezone is `Asia/Ho_Chi_Minh`; an injected `Clock` is converted from `instant` to that zone and then to `LocalDateTime`. Do not use the system-default timezone or the Jira timezone.
+- Both boundaries are inclusive: `OPEN` iff Semester and both dates are non-null and `startDate <= now <= endDate`; otherwise (including a missing Semester or either legacy null date) the response is `CLOSED` without an error.
+- The Admin Active Semester setting is not consulted and is not a Course-status authority. Authentication/session/CSRF and Course write behavior are unchanged.
+
+## DEC-100 — Agent TASK_CREATE Confirm may compose TASK_SPRINT; EXECUTING re-entry is recovery-only
+
+- Date: 2026-08-17; status: **ACCEPTED / IMPLEMENTED_SOURCE_TEST**. `SAGA_CURRENT_STATE.md` still must not claim this until an explicit CURRENT_STATE update after this source/test snapshot.
+- **Does not rewrite DEC-099** (Course isolation), DEC-061/J1F (TASK_SPRINT remote-success recovery), or MEMBER/LEADER permission. No Bearer. No Contribution. No public endpoint. No Jira delete rollback. No auto-select active Sprint. ZERO/MULTIPLE Sprint match must not pick-first.
+- **PUBLIC_API_OPERATION_CHANGED = NO.** Confirm remains `POST /api/v1/ai/pending-actions/{actionId}/confirm` with empty body, session + CSRF.
+- **PUBLIC_API_SCHEMA_CHANGED = NO.** `ActionExecution` and `ApiErrorResponse` are unchanged. Confirm errors stay `ApiErrorResponse` (no Task on 409). Do not invent `AGENT_TASK_CREATED_SPRINT_FAILED`.
+- **PUBLIC_CONFIRM_BEHAVIOR_CHANGED = YES** (narrow supersession of DEC-081 + FE “disable repeated confirmation”):
+  - Normal `PENDING` Confirm is still atomic claim once. `TASK_UPDATE` and arbitrary `EXECUTING` actions are **not** confirmable.
+  - `EXECUTING` may be re-entered **only** for composite `TASK_CREATE` whose payload has `sprintId` **and** Backend durable Jira evidence is recovery-safe (below). Same `actionId`, same actor, same payload. Reauthorization still runs. This is not a generic duplicate Confirm.
+
+### Product / AI proposal rules
+
+- User omits Sprint → omit `sprintId` → Confirm create-only → Backlog.
+- User names Sprint + SINGLE_MATCH → proposal payload `sprintId` (UUID) and immutable `pendingAction.summary` includes canonical **Sprint name** (not UUID-only).
+- Explicit Sprint + ZERO_MATCH → no proposal (not-found/clarification). **Never** omit `sprintId` to dump Backlog.
+- Explicit Sprint + MULTIPLE_MATCH → no proposal; ask the user to choose. No pick-first. No active-Sprint default.
+
+### Confirm compose (Design A)
+
+- `K_create` = existing `pendingAction.idempotencyKey`.
+- `K_sprint` = `idempotencyKey + ":sprint"` (distinct because `uk_jira_write_operation_project_key` is `(project_id, idempotency_key)`).
+- Confirm: `JiraTaskWriteService.create(K_create)` then, if `sprintId` present, `JiraTaskWriteService.sprint(K_sprint)` with existing XOR `sprintId` / `backlog`. Reuse those services; do not copy provider calls. Permission remains `requireProjectManager`.
+
+### J1F / Agent pending / HTTP (do not lump sprint failures)
+
+| Branch | Jira TASK_SPRINT | Agent pending | Confirm HTTP |
+| --- | --- | --- | --- |
+| A pre-remote failure | `FAILED` or `UNKNOWN`; no replay of move on same `K_sprint` | `FAILED` via existing `finalizeFailure` | Existing IntegrationException status/code; `ApiErrorResponse` only |
+| B remote success, canonical pending | `REMOTE_SUCCEEDED`; same `K_sprint` canonical recovery only; never `FAILED`; never replay move | Stay `EXECUTING`; **do not** `finalizeFailure` | `409 JIRA_WRITE_RECOVERY_REQUIRED` or `409 JIRA_WRITE_OPERATION_IN_PROGRESS` |
+| C completed | `COMPLETED` after fresh local Sprint/backlog confirm | `COMPLETED` | `200 ActionExecution` + `TaskReadResponse` |
+
+Do not describe local Task as Backlog on branch B: Jira may already have moved.
+
+### Durable evidence: in-flight vs recovery EXECUTING
+
+`agent_pending_action.status=EXECUTING` **alone is not evidence.** There is no recovery flag on the pending row. Opening every `EXECUTING` action is **forbidden**.
+
+Recovery re-entry is allowed only when **all** hold:
+
+1. `actionType=TASK_CREATE`
+2. `payload.sprintId != null`
+3. pending status is already `EXECUTING` (normal claim already happened)
+4. `jira_write_operation(projectId, K_create)` exists, type `TASK_CREATE`, status `COMPLETED`
+5. `jira_write_operation(projectId, K_sprint)` exists, type `TASK_SPRINT`, status `REMOTE_SUCCEEDED` or `COMPLETED` (completed replay only finalizes Agent pending; it must not POST move again)
+
+In-flight / fail-closed (no EXECUTING re-entry): missing `K_create`; `K_create` in `PENDING`/`UNKNOWN`/`REMOTE_SUCCEEDED`; missing `K_sprint`; `K_sprint` in `PENDING`/`UNKNOWN`/`FAILED`; `TASK_UPDATE`; payload without `sprintId`. Concurrent second Confirm in those states must not become a second normal claim and must not duplicate Jira create or sprint move (`JIRA_WRITE_OPERATION_IN_PROGRESS` / `PENDING_ACTION_NOT_CONFIRMABLE`).
+
+Implementation must inspect the pending action **without** a second normal claim, then evaluate `JiraWriteOperation` **before** compose. Existing public/internal claim is PENDING-only; `require_pending_action` can already read `EXECUTING`. Do **not** add a public GET. An internal Backend→AI inspect (no status mutation) is in scope if needed. If an implementation cannot apply the predicate above, **stop** — do not fail open.
+
+### Concurrency regression (mandatory before CURRENT_STATE)
+
+Two concurrent `POST .../confirm` on the same initially `PENDING` action:
+
+- exactly one normal claim
+- no duplicate Jira `TASK_CREATE` POST
+- no duplicate remote `TASK_SPRINT` move
+- stable `K_create` / `K_sprint`
+- in-flight second request fail-safe (`PENDING_ACTION_NOT_CONFIRMABLE` and/or `JIRA_WRITE_OPERATION_IN_PROGRESS`)
+- branch B retry uses the same `K_sprint`
+- Agent pending `COMPLETED` at most once
+- no Agent/`TASK_SPRINT` `COMPLETED` unless fresh local Task sprint target matches `payload.sprintId`
+
+### DEC-081 supersession (narrow)
+
+DEC-081 remains: browser session+CSRF, Backend reauthorize, `JiraTaskWriteService` owns writes, no AI-direct Jira, no delete/account/role/Course mutation. **Superseded only:** (1) V1 Confirm of `TASK_CREATE` **may compose** existing `TASK_SPRINT` when `sprintId` is on the proposal; (2) repeated Confirm stays disabled except the EXECUTING recovery re-entry defined here.
+
 ## DEC-099 — Active Course is conversation-bound AI chat resource scope
 
 - Ngày: 2026-08-16; trạng thái: **CONFIRMED_SOURCE_TEST**. Không rewrite DEC-081. Không đổi permission MEMBER/LEADER/Lecturer/Admin. Không Bearer. Không expose `/internal/**`. Không sửa Contribution. Không sửa commit-review lane.
@@ -1156,7 +1231,16 @@ Không có secret hoặc thông tin đăng nhập thật trong decision log này
 - Date: 2026-08-14; status: ACCEPTED / IMPLEMENTED_SOURCE_TEST; deployment runtime **TBD_DEPLOYMENT_SMOKE**.
 - Browser communicates only with `/api/v1/ai/**` through the existing session and CSRF contract. Backend→AI has a distinct `X-SAGA-Backend-Service-Token`; AI→Backend keeps the M5 token and adds a short-lived opaque conversation-bound actor context. Directional service credentials are not browser credentials and are not interchangeable by design.
 - AI stores conversation/tool/pending-action/generated-artifact state but does not read Backend business tables or receive Jira/GitHub credentials. Backend reloads current actor/account status and applies existing domain authorization for every typed tool. Role snapshots and model claims never authorize.
-- Task Create and the existing sparse Task Update are the only V1 business write capabilities. Both are two-phase proposals; the browser confirms through session + CSRF, Backend reauthorizes, and existing `JiraTaskWriteService` owns canonical provider write, recovery, notification, and idempotency behavior. No delete or Sprint/account/role/Course mutation is exposed.
+- Task Create and the existing sparse Task Update are the only V1 business write capabilities. Both are two-phase proposals; the browser confirms through session + CSRF, Backend reauthorizes, and existing `JiraTaskWriteService` owns canonical provider write, recovery, notification, and idempotency behavior. No delete or account/role/Course mutation is exposed. **DEC-100 (narrow):** `TASK_CREATE` Confirm may compose existing `TASK_SPRINT` when the proposal has `sprintId`; normal Confirm claim stays one-shot; `EXECUTING` re-entry is recovery-only for that composite, not a generic repeated Confirm.
 - Commit Review is reused as an asynchronous chat skill without changing its durable runner, fencing, checkpoint, provider, structured-output, or evidence contracts. SRS canonical source is AI-durable, evidence-mapped, and regenerated as DOCX in memory after current Backend authorization.
 - N8N and vector DB are not introduced. Hugging Face Docker Space is the AI deployment target, with external AI DB as durable truth and no local-disk durability assumption. Actual deployment, frontend implementation, and browser smoke remain TBD.
 - Verification: Backend Agent targeted tests pass **21/21**. Full clean runs **944 tests / 5 failures / 0 errors / 0 skipped**; four are the stable pre-milestone OpenAPI/DEC-023/Lecturer Analytics baselines and the previously documented notification ordering assertion passes immediate isolated rerun **1/1**. AI full deterministic suite passes **194 tests**, with four real-provider tests deselected.
+
+## DEC-101 — AccountStatus disables the current browser session at the request boundary
+
+- Date: 2026-08-17; status: ACCEPTED / IMPLEMENTED / CONFIRMED_SOURCE_TEST.
+- This narrowly supersedes the AccountStatus enforcement part of DEC-049/M3B. For an authenticated STUDENT or LECTURER, each `/api/**` request reads the current local DB status. `INACTIVE` or `SUSPENDED` invalidates the current `HttpSession`, clears `SecurityContext`, and returns the existing `ApiErrorResponse` with `401 ACCOUNT_DISABLED` before a controller or business mutation runs. ADMIN is not status-filtered.
+- `GET /api/auth/me` is also gated, so a disabled session cannot bootstrap authenticated FE state. `GET /api/auth/csrf` and `POST /api/auth/logout` remain exempt to preserve the existing CSRF/logout flow; a CSRF token does not bypass the status gate for `/me` or business APIs, and a CSRF failure is not rewritten as `ACCOUNT_DISABLED`.
+- OIDC synchronization remains local-DB authority. When an existing Student or Lecturer resolves as `INACTIVE`/`SUSPENDED`, the success handler clears/invalidate any callback session and returns `401 ACCOUNT_DISABLED` without saving a SAGA authentication. PENDING Student provisioning behavior is unchanged. There is no Cognito Admin call, role mutation, or status reset on re-login.
+- This is current-request-session invalidation only. The application still has no SessionRegistry/shared Spring Session infrastructure, therefore it does not claim immediate global or cross-instance revocation.
+- Verification: `AdminAccountStatusIntegrationTest` and `CognitoAuthenticationSuccessHandlerTest` pass (10 tests). No migration, public operation, or public response schema changed.

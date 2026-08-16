@@ -15,6 +15,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.saga.be.OAuth2TestConfiguration;
 import com.saga.be.entity.Course;
+import com.saga.be.entity.ActiveSemesterSetting;
 import com.saga.be.entity.Lecturer;
 import com.saga.be.entity.Project;
 import com.saga.be.entity.Semester;
@@ -27,6 +28,7 @@ import com.saga.be.entity.enums.AccountStatus;
 import com.saga.be.entity.enums.StudentInvitationStatus;
 import com.saga.be.entity.enums.StudentInvitationType;
 import com.saga.be.repository.CourseRepository;
+import com.saga.be.repository.ActiveSemesterSettingRepository;
 import com.saga.be.repository.LecturerRepository;
 import com.saga.be.repository.SemesterRepository;
 import com.saga.be.repository.StudentCourseInvitationRepository;
@@ -64,6 +66,7 @@ import org.springframework.transaction.annotation.Transactional;
 class CourseUpdateSoftDeleteIntegrationTest {
     @Autowired private MockMvc mockMvc;
     @Autowired private CourseRepository courseRepository;
+    @Autowired private ActiveSemesterSettingRepository activeSemesterSettingRepository;
     @Autowired private SubjectRepository subjectRepository;
     @Autowired private ClassRepository classRepository;
     @Autowired private SemesterRepository semesterRepository;
@@ -149,6 +152,43 @@ class CourseUpdateSoftDeleteIntegrationTest {
     }
 
     @Test
+    void readEndpointsReturnStableCourseResponseWithAcademicClassAndDeprecatedClazzAlias() throws Exception {
+        References matchingReferences = references();
+        Course matching = course("READ-MATCH", matchingReferences);
+        Course other = course("READ-OTHER", references());
+        Semester differentActiveSemester = semesterRepository.saveAndFlush(Semester.builder()
+                .code(unique("ACTIVE-SEM")).name("Different active semester")
+                .startDate(LocalDateTime.of(2200, 1, 1, 0, 0))
+                .endDate(LocalDateTime.of(2200, 5, 1, 0, 0))
+                .build());
+        activeSemesterSettingRepository.saveAndFlush(
+                new ActiveSemesterSetting(ActiveSemesterSetting.SINGLETON_ID, differentActiveSemester));
+        long courseCountBeforeRead = courseRepository.count();
+
+        mockMvc.perform(get("/api/v1/courses")
+                        .param("instructorId", matchingReferences.lecturer().getId().toString())
+                        .param("size", "100")
+                        .with(authentication(authenticationFor(ApplicationRole.ADMIN))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].id").value(matching.getId().toString()))
+                .andExpect(jsonPath("$.content[0].academicClass.id").value(matchingReferences.clazz().getId().toString()))
+                .andExpect(jsonPath("$.content[0].clazz.id").value(matchingReferences.clazz().getId().toString()))
+                .andExpect(jsonPath("$.content[0].subject.id").value(matchingReferences.subject().getId().toString()))
+                .andExpect(jsonPath("$.content[0].semester.id").value(matchingReferences.semester().getId().toString()))
+                .andExpect(jsonPath("$.content[0].courseStatus").value("OPEN"))
+                .andExpect(jsonPath("$.content[0].instructor.id").value(matchingReferences.lecturer().getId().toString()))
+                .andExpect(jsonPath("$.content[*].id", not(hasItem(other.getId().toString()))));
+
+        mockMvc.perform(get("/api/v1/courses/{id}", matching.getId())
+                        .with(authentication(authenticationFor(ApplicationRole.ADMIN))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.academicClass.classCode").value(matchingReferences.clazz().getClassCode()))
+                .andExpect(jsonPath("$.clazz.classCode").value(matchingReferences.clazz().getClassCode()))
+                .andExpect(jsonPath("$.courseStatus").value("OPEN"));
+        assertEquals(courseCountBeforeRead, courseRepository.count());
+    }
+
+    @Test
     void deleteRequiresAdminCsrfAndGuardsEveryDirectDependencyWithoutCascade() throws Exception {
         Course teamCourse = course("TEAM", references());
         Team team = teamRepository.saveAndFlush(Team.builder().course(teamCourse).name("Team").build());
@@ -185,7 +225,7 @@ class CourseUpdateSoftDeleteIntegrationTest {
         Subject subject = subjectRepository.saveAndFlush(Subject.builder().subjectCode(unique("SUBJECT")).name("Subject").build());
         com.saga.be.entity.Class clazz = classRepository.saveAndFlush(com.saga.be.entity.Class.builder().classCode(unique("CLASS")).name("Class").build());
         Semester semester = semesterRepository.saveAndFlush(Semester.builder().code(unique("SEM")).name("Semester")
-                .startDate(LocalDateTime.of(2026, 1, 1, 0, 0)).endDate(LocalDateTime.of(2026, 5, 1, 0, 0)).build());
+                .startDate(LocalDateTime.of(2000, 1, 1, 0, 0)).endDate(LocalDateTime.of(2100, 5, 1, 0, 0)).build());
         Lecturer lecturer = lecturerRepository.saveAndFlush(Lecturer.builder().cognitoSub(unique("LECTURER-SUB"))
                 .email(unique("lecturer") + "@test").fullName("Lecturer").build());
         return new References(subject, clazz, semester, lecturer);

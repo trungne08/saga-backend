@@ -84,7 +84,8 @@ public final class InternalAgentToolRequests {
             LocalDate dueDate,
             @Size(max = 20) List<@Size(max = 255) String> labels,
             @Size(max = 20) List<@Size(max = 255) String> componentIds,
-            UUID assigneeId
+            UUID assigneeId,
+            UUID sprintId
     ) {
     }
 

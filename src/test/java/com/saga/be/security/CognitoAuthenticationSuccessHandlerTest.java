@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -289,6 +290,60 @@ class CognitoAuthenticationSuccessHandlerTest {
                 409,
                 "Conflict",
                 conflict.getMessage()
+        );
+    }
+
+    @Test
+    void rejectsInactiveAndSuspendedProfilesWithoutCreatingAUsableSession() throws Exception {
+        OidcIdentityService identityService = mock(OidcIdentityService.class);
+        AuthenticatedProfileService profileService = mock(AuthenticatedProfileService.class);
+        AuthenticationAuditService auditService = mock(AuthenticationAuditService.class);
+        SecurityErrorResponseWriter errorWriter = mock(SecurityErrorResponseWriter.class);
+        CognitoAuthenticationSuccessHandler handler = new CognitoAuthenticationSuccessHandler(
+                identityService,
+                profileService,
+                auditService,
+                new HttpSessionSecurityContextRepository(),
+                errorWriter,
+                "http://localhost:8080/api/auth/me"
+        );
+        OidcUser oidcUser = mock(OidcUser.class);
+        Authentication authentication = new OAuth2AuthenticationToken(oidcUser, List.of(), "cognito");
+
+        for (ApplicationRole role : List.of(ApplicationRole.STUDENT, ApplicationRole.LECTURER)) {
+            for (AccountStatus accountStatus : List.of(AccountStatus.INACTIVE, AccountStatus.SUSPENDED)) {
+                AuthenticatedIdentity identity = new AuthenticatedIdentity(
+                        role.name().toLowerCase() + "-subject-" + accountStatus,
+                        role.name().toLowerCase() + "@fpt.edu.vn",
+                        role.name(),
+                        role
+                );
+                AuthenticatedProfile profile = new AuthenticatedProfile(
+                        identity.cognitoSub(), identity.email(), identity.fullName(), role,
+                        UUID.randomUUID(), accountStatus
+                );
+                when(identityService.extract(oidcUser)).thenReturn(identity);
+                when(profileService.synchronize(identity)).thenReturn(profile);
+
+                MockHttpServletRequest request = new MockHttpServletRequest();
+                MockHttpSession session = new MockHttpSession();
+                request.setSession(session);
+                MockHttpServletResponse response = new MockHttpServletResponse();
+
+                handler.onAuthenticationSuccess(request, response, authentication);
+
+                assertTrue(session.isInvalid());
+                verify(errorWriter).write(
+                        request,
+                        response,
+                        401,
+                        "ACCOUNT_DISABLED",
+                        "Tài khoản của bạn đã bị vô hiệu hóa."
+                );
+            }
+        }
+        verify(auditService, never()).recordSuccessfulLogin(
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString()
         );
     }
 }

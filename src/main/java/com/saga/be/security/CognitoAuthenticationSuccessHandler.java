@@ -2,6 +2,7 @@ package com.saga.be.security;
 
 import com.saga.be.auth.AuthenticatedIdentity;
 import com.saga.be.auth.AuthenticatedProfile;
+import com.saga.be.entity.enums.AccountStatus;
 import com.saga.be.exception.IdentityConflictException;
 import com.saga.be.exception.IdentityServiceException;
 import com.saga.be.exception.InvalidIdentityException;
@@ -77,6 +78,10 @@ public class CognitoAuthenticationSuccessHandler implements AuthenticationSucces
             OidcUser oidcUser = requireOidcUser(authentication);
             identity = identityService.extract(oidcUser);
             AuthenticatedProfile profile = profileService.synchronize(identity);
+            if (isDisabled(profile)) {
+                rejectAccountDisabled(request, response);
+                return;
+            }
             auditService.recordSuccessfulLogin(profile, request.getRemoteAddr());
             replaceWithTokenFreeSessionAuthentication(
                     request,
@@ -172,6 +177,30 @@ public class CognitoAuthenticationSuccessHandler implements AuthenticationSucces
                 status.value(),
                 status.getReasonPhrase(),
                 message
+        );
+    }
+
+    private boolean isDisabled(AuthenticatedProfile profile) {
+        return profile.role() != ApplicationRole.ADMIN
+                && (profile.accountStatus() == AccountStatus.INACTIVE
+                || profile.accountStatus() == AccountStatus.SUSPENDED);
+    }
+
+    private void rejectAccountDisabled(
+            HttpServletRequest request,
+            HttpServletResponse response
+    ) throws IOException {
+        SecurityContextHolder.clearContext();
+        HttpSession session = request.getSession(false);
+        if (session != null) {
+            session.invalidate();
+        }
+        errorResponseWriter.write(
+                request,
+                response,
+                HttpStatus.UNAUTHORIZED.value(),
+                "ACCOUNT_DISABLED",
+                "Tài khoản của bạn đã bị vô hiệu hóa."
         );
     }
 

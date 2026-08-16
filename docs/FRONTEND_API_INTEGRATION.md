@@ -924,9 +924,25 @@ Tất cả endpoint trong phần này cần session. `page` là zero-based; mặ
 | GET | `/api/v1/semesters` | `keyword?`, `page?`, `size?` | Session | 200 `Page<Semester>` |
 | GET | `/api/v1/semesters/{id}` | — | Session | 200 `Semester` |
 | POST | `/api/v1/semesters` | — | ADMIN + CSRF | 201 `Semester` |
-| GET | `/api/v1/courses` | `subjectId?`, `semesterId?`, `instructorId?`, `page?`, `size?` | Session | 200 `Page<Course>` |
-| GET | `/api/v1/courses/{id}` | — | Session | 200 `Course` |
+| GET | `/api/v1/courses` | `subjectId?`, `semesterId?`, `instructorId?`, `page?`, `size?` | Session | 200 `Page<CourseResponse>` |
+| GET | `/api/v1/courses/{id}` | — | Session | 200 `CourseResponse` |
 | POST | `/api/v1/courses` | — | ADMIN + CSRF | 201 `Course` |
+
+### Course read response
+
+`GET /api/v1/courses` returns `Page<CourseResponse>` and `GET /api/v1/courses/{id}`
+returns `CourseResponse`. The stable fields include `id`, `createdAt`, `updatedAt`,
+`courseCode`, `name`, `subject`, `academicClass`, `semester`, `instructor`, and
+computed `courseStatus`.
+
+`academicClass` is the canonical nested Class field. `clazz` is still returned as a
+deprecated compatibility alias with the same value; `academicClazz` is not exposed.
+
+`courseStatus` is `OPEN` or `CLOSED`, computed by Backend from the Course Semester in
+`Asia/Ho_Chi_Minh`, inclusively between `startDate` and `endDate`. Frontend must not
+calculate the status using browser timezone. If the Semester, `startDate`, or `endDate`
+is missing, Backend returns `CLOSED`; the read request does not fail merely due to a
+legacy null Semester date.
 
 ### Request body
 
@@ -1576,6 +1592,14 @@ Backend chỉ cho origin explicit từ `FRONTEND_ORIGINS`; credentials=true, COR
 
 `GET /api/admin/audit-logs` trả `timestamp` theo ISO-8601 UTC, ví dụ `2026-08-09T16:30:00Z`. FE phải parse bằng `new Date(timestamp)` rồi format bằng `Intl.DateTimeFormat`; khuyến nghị `timeZone: "Asia/Ho_Chi_Minh"`. Không cắt chuỗi timestamp hoặc cộng `+7` thủ công.
 
+## Agent TASK_CREATE into Sprint — Confirm recovery (DEC-100) — 2026-08-17
+
+Public operation and schema are unchanged: `POST /api/v1/ai/pending-actions/{actionId}/confirm` still has no body. `PUBLIC_CONFIRM_BEHAVIOR_CHANGED=YES` only for this recovery retry.
+
+Normal Confirm: one click, atomic claim. FE still disables a second Confirm for `TASK_UPDATE` and for Task create without Sprint.
+
+Composite create-into-Sprint: one Confirm. Backend may create the Task then move it with the existing sprint write. If Confirm returns `409 JIRA_WRITE_RECOVERY_REQUIRED` or `409 JIRA_WRITE_OPERATION_IN_PROGRESS`, Jira may already have moved the issue; local list filters must not be treated as “still Backlog”. Retry the same Confirm so Backend can canonical-recover with the same sprint idempotency key. Do not invent a 409+Task shape. Do not send Bearer or identity fields.
+
 ## J1F Task Sprint recovery — 2026-08-10
 
 Với `PUT /api/v1/projects/{projectId}/tasks/{taskId}/sprint`, FE gửi đúng một trong `sprintId` hoặc `backlog=true` và giữ nguyên `Idempotency-Key` khi retry cùng intent. Sau remote success, backend chỉ canonical recover và xác nhận Task local phản ánh Sprint/backlog trước khi trả success; FE không tạo key mới hay gửi mutation khác để “sửa” trạng thái.
@@ -1942,15 +1966,33 @@ Unsafe calls (session plus the existing CSRF header/cookie contract):
 
 - `POST /api/v1/ai/conversations` with `{ "title": "optional, max 160", "courseId": "optional UUID resource scope when chat is opened inside a Course" }`
 - `POST /api/v1/ai/conversations/{conversationId}/messages` with `{ "content": "required, max 8000", "courseId": "optional UUID; must match the conversation's bound Course" }`
-- `POST /api/v1/ai/pending-actions/{actionId}/confirm` with no mutable action body
+- `POST /api/v1/ai/pending-actions/{actionId}/confirm` with no mutable action body (DEC-100: same path/body; behavior change is recovery-only, below)
 - `POST /api/v1/ai/pending-actions/{actionId}/reject` with no mutable action body
 
 Do not send `actorId`, `ownerId`, `applicationRole`, `studentId`, `lecturerId`, provider, model, Backend path, or tool name. `courseId` is a Course resource-scope hint, not actor identity. When the user is chatting inside an open Course, send that Course's `courseId` on create and every message. Backend validates current access and binds the conversation to that Course. Reusing a Course A conversation while the UI is on Course B returns `409 AI_AGENT_COURSE_SCOPE_MISMATCH` — create a new conversation for Course B instead of keeping history A. Conversation list/detail may include `courseId`. Do not render TOOL-role rows such as `discover_resource_context:COMPLETED`; Backend/AI filter those from the public conversation payload. Backend derives the current local owner and role from the session. Do not ask the user for name/MSSV to identify who is chatting; resource-selection questions (which Team/Project inside the open Course) are allowed when more than one valid resource remains.
 
 A chat response includes `conversationId`, `messageId`, `text`, `status`, citations, optional `pendingAction`, optional `generatedArtifact`, optional `jobReference`, suggested follow-ups, and safe provider/model metadata. Render factual errors as unavailable/forbidden/not found; do not convert a failed tool or mutation into success text.
 
-For `pendingAction`, show the immutable summary and expiry with explicit **Confirm** and **Cancel** controls. No Task exists before Confirm. Disable repeated confirmation after the first request; Backend/AI also enforce atomic claim and stable idempotency. Expired/rejected/completed actions require a new proposal.
+For `pendingAction`, show the immutable summary and expiry with explicit **Confirm** and **Cancel** controls. No Task exists before Confirm. If the proposal includes a Sprint, the summary must show the resolved Sprint **name**, not only a UUID. Confirm/Cancel still send no actor fields and no Sprint mutation body.
+
+Disable repeated confirmation after the first request. Backend/AI still enforce atomic `PENDING` claim once and stable idempotency. Expired/rejected/completed/failed actions require a new proposal. **DEC-100 exception (narrow):** if this `TASK_CREATE` proposal had a Sprint and Confirm returns `409 JIRA_WRITE_RECOVERY_REQUIRED` or `409 JIRA_WRITE_OPERATION_IN_PROGRESS`, retry the **same** Confirm (`same actionId`, empty body, session + CSRF). Do not send a new proposal, do not derive keys, and do not call `PUT /api/v1/projects/{projectId}/tasks/{taskId}/sprint` for the happy path or this recovery. Do not retry Confirm for `TASK_UPDATE`, for create-only proposals, or for other 4xx/5xx. A concurrent double-submit may return `409`; that is fail-safe, not a second Confirm. Success remains `200` `{ actionId, status: "COMPLETED", task }`. Error bodies stay `ApiErrorResponse` without a Task.
 
 For `generatedArtifact`, use only the Backend download endpoint. Do not construct AI URLs. For `jobReference`, render `PENDING`, `RUNNING`, `WAITING_RETRY`, `COMPLETED`, or `FAILED`; the chat can ask for the latest conversation-scoped result without requiring the user to know a job ID.
 
 Logout destroys the Backend session and therefore Agent access. Chat delete/retention UI is deferred until product data policy is defined.
+
+## Account disabled session handling (DEC-101) — 2026-08-17
+
+All browser API calls continue to use `credentials: "include"`; do not use Bearer tokens. When a currently authenticated Student or Lecturer is changed to `INACTIVE` or `SUSPENDED`, the next request using that session can return the existing error shape:
+
+```json
+{
+  "status": 401,
+  "error": "ACCOUNT_DISABLED",
+  "message": "Tài khoản của bạn đã bị vô hiệu hóa."
+}
+```
+
+Treat `401 ACCOUNT_DISABLED` as terminal for the local auth UI: clear authenticated state/CSRF state and show the disabled-account message, then use the normal logout/login UI flow. Do not retry the original request. `GET /api/auth/me` uses the same behavior for a disabled session, so it cannot bootstrap the app. `GET /api/auth/csrf` remains available solely for the CSRF-protected logout flow; it does not bypass the disabled gate for `/me` or business APIs. `POST /api/auth/logout` remains CSRF-protected and usable/idempotent; missing or invalid CSRF remains its normal `403`, not `ACCOUNT_DISABLED`.
+
+The backend invalidates only the session that reaches it. It does not claim instant global cross-browser/cross-instance revocation, and re-enabling an account does not revive an already invalidated session; the user must authenticate again.

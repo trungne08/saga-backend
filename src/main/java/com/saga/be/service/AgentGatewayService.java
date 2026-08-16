@@ -3,6 +3,7 @@ package com.saga.be.service;
 import com.saga.be.dto.request.AgentConversationCreateRequest;
 import com.saga.be.dto.request.AgentMessageSendRequest;
 import com.saga.be.dto.request.JiraTaskCreateRequest;
+import com.saga.be.dto.request.JiraTaskSprintRequest;
 import com.saga.be.dto.request.JiraTaskUpdateRequest;
 import com.saga.be.dto.response.AgentApiResponses;
 import com.saga.be.dto.response.TaskReadResponse;
@@ -31,7 +32,7 @@ public class AgentGatewayService {
 
     private static final Set<String> CREATE_FIELDS = Set.of(
             "projectId", "title", "type", "priority", "description", "dueDate",
-            "labels", "componentIds", "assigneeId"
+            "labels", "componentIds", "assigneeId", "sprintId"
     );
     private static final Set<String> UPDATE_FIELDS = Set.of(
             "projectId", "taskId", "title", "description", "type", "priority",
@@ -46,6 +47,7 @@ public class AgentGatewayService {
     private final LecturerAnalyticsAuthorizationService courseAccess;
     private final TeamMemberRepository teamMembers;
     private final AgentConversationScopeService conversationScopes;
+    private final AgentTaskCreateSprintRecoveryGate sprintRecovery;
 
     public AgentGatewayService(
             AgentAiClient ai,
@@ -55,7 +57,8 @@ public class AgentGatewayService {
             StudentRepository students,
             LecturerAnalyticsAuthorizationService courseAccess,
             TeamMemberRepository teamMembers,
-            AgentConversationScopeService conversationScopes
+            AgentConversationScopeService conversationScopes,
+            AgentTaskCreateSprintRecoveryGate sprintRecovery
     ) {
         this.ai = ai;
         this.delegations = delegations;
@@ -65,6 +68,7 @@ public class AgentGatewayService {
         this.courseAccess = courseAccess;
         this.teamMembers = teamMembers;
         this.conversationScopes = conversationScopes;
+        this.sprintRecovery = sprintRecovery;
     }
 
     public AgentApiResponses.Conversation create(
@@ -119,7 +123,8 @@ public class AgentGatewayService {
     }
 
     public AgentApiResponses.ActionExecution confirm(SagaPrincipal actor, UUID actionId) {
-        AgentApiResponses.PendingAction action = ai.claimAction(actor, actionId);
+        AgentApiResponses.PendingAction inspected = ai.inspectAction(actor, actionId);
+        AgentApiResponses.PendingAction action = claimOrRecover(actor, actionId, inspected);
         try {
             TaskReadResponse result = switch (action.actionType()) {
                 case "TASK_CREATE" -> createTask(actor, action);
@@ -128,13 +133,17 @@ public class AgentGatewayService {
                         "AI_AGENT_ACTION_UNSUPPORTED", "The proposed action type is unsupported"
                 );
             };
-            ai.finalizeAction(actor, actionId, true, null);
+            finalizeCompleted(actor, actionId, result);
             return new AgentApiResponses.ActionExecution(actionId, "COMPLETED", result);
         } catch (IntegrationException exception) {
-            finalizeFailure(actor, actionId, exception.getCode());
+            if (!sprintRecovery.keepExecutingAfterFailure(action)) {
+                finalizeFailure(actor, actionId, exception.getCode());
+            }
             throw exception;
         } catch (RuntimeException exception) {
-            finalizeFailure(actor, actionId, "AI_AGENT_ACTION_EXECUTION_FAILED");
+            if (!sprintRecovery.keepExecutingAfterFailure(action)) {
+                finalizeFailure(actor, actionId, "AI_AGENT_ACTION_EXECUTION_FAILED");
+            }
             throw exception;
         }
     }
@@ -239,11 +248,53 @@ public class AgentGatewayService {
         return students.findById(actor.localProfileId()).map(Student::getStudentCode).orElse(null);
     }
 
+    private AgentApiResponses.PendingAction claimOrRecover(
+            SagaPrincipal actor,
+            UUID actionId,
+            AgentApiResponses.PendingAction inspected
+    ) {
+        if (inspected != null && "PENDING".equals(inspected.status())) {
+            try {
+                return ai.claimAction(actor, actionId);
+            } catch (IntegrationException exception) {
+                if (exception.getStatus() != HttpStatus.CONFLICT) {
+                    throw exception;
+                }
+                AgentApiResponses.PendingAction retry = ai.inspectAction(actor, actionId);
+                if (sprintRecovery.allowsExecutingReentry(retry)) {
+                    return retry;
+                }
+                throw notConfirmable();
+            }
+        }
+        if (sprintRecovery.allowsExecutingReentry(inspected)) {
+            return inspected;
+        }
+        throw notConfirmable();
+    }
+
+    private void finalizeCompleted(
+            SagaPrincipal actor, UUID actionId, TaskReadResponse result
+    ) {
+        try {
+            ai.finalizeAction(actor, actionId, true, null);
+        } catch (IntegrationException exception) {
+            if (exception.getStatus() == HttpStatus.CONFLICT && result != null) {
+                AgentApiResponses.PendingAction current = ai.inspectAction(actor, actionId);
+                if (current != null && "COMPLETED".equals(current.status())) {
+                    return;
+                }
+            }
+            throw exception;
+        }
+    }
+
     private TaskReadResponse createTask(
             SagaPrincipal actor, AgentApiResponses.PendingAction action
     ) {
         Map<String, Object> payload = payload(action, CREATE_FIELDS);
         UUID projectId = uuid(payload.get("projectId"), "projectId");
+        reauthorizeCreateScope(actor, action, projectId);
         JiraTaskCreateRequest request = new JiraTaskCreateRequest(
                 required(payload, "title"),
                 enumValue(TaskType.class, payload.get("type"), "type"),
@@ -256,7 +307,40 @@ public class AgentGatewayService {
                 stringList(payload.get("componentIds"), "componentIds"),
                 optionalUuid(payload.get("assigneeId"), "assigneeId")
         );
-        return taskWrites.create(actor, projectId, action.idempotencyKey(), request);
+        TaskReadResponse created = taskWrites.create(
+                actor, projectId, action.idempotencyKey(), request
+        );
+        UUID sprintId = optionalUuid(payload.get("sprintId"), "sprintId");
+        if (sprintId == null) {
+            return created;
+        }
+        return taskWrites.sprint(
+                actor,
+                projectId,
+                created.id(),
+                sprintRecovery.sprintKey(action.idempotencyKey()),
+                new JiraTaskSprintRequest(sprintId, false)
+        );
+    }
+
+    private void reauthorizeCreateScope(
+            SagaPrincipal actor, AgentApiResponses.PendingAction action, UUID projectId
+    ) {
+        if (action.conversationId() == null || action.conversationId().isBlank()) {
+            return;
+        }
+        UUID conversationId = uuid(action.conversationId(), "conversationId");
+        conversationScopes.courseIdFor(conversationId).ifPresent(courseId -> {
+            conversationScopes.requireAccessibleCourse(actor, courseId);
+            conversationScopes.requireProjectInScope(courseId, projectId);
+        });
+    }
+
+    private IntegrationException notConfirmable() {
+        return IntegrationException.conflict(
+                "PENDING_ACTION_NOT_CONFIRMABLE",
+                "The pending action cannot be confirmed"
+        );
     }
 
     private TaskReadResponse updateTask(

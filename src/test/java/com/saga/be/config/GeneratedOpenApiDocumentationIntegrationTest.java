@@ -112,6 +112,18 @@ class GeneratedOpenApiDocumentationIntegrationTest {
         assertTrue(root.path("paths").has("/api/admin/reports/anomalies"));
         assertTrue(root.path("paths").has("/api/admin/reports/graph-processing"));
         assertTrue(root.path("paths").has("/api/project-types"));
+        assertTrue(root.at("/paths/~1api~1v1~1courses/get/responses/200/content/*~1*/schema")
+                .toString().contains("CourseResponse"));
+        JsonNode courseResponseProperties = root.at("/components/schemas/CourseResponse/properties");
+        assertTrue(courseResponseProperties.has("academicClass"));
+        assertFalse(courseResponseProperties.has("academicClazz"));
+        assertTrue(courseResponseProperties.has("clazz"));
+        assertTrue(courseResponseProperties.path("clazz").path("deprecated").asBoolean());
+        assertTrue(courseResponseProperties.has("courseStatus"));
+        assertTrue(courseResponseProperties.path("courseStatus").path("enum").toString()
+                .contains("OPEN"));
+        assertTrue(courseResponseProperties.path("courseStatus").path("enum").toString()
+                .contains("CLOSED"));
         assertTrue(root.at("/paths/~1api~1projects~1{projectId}~1group-weights/put").isObject());
         assertTrue(root.at("/paths/~1api~1v1~1courses~1{courseId}~1contribution-config-mode/put").isObject());
         assertTrue(root.at("/paths/~1api~1v1~1courses~1{courseId}~1contribution-team-weights/get").isObject());

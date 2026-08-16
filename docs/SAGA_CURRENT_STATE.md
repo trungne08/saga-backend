@@ -1,3 +1,10 @@
+## Course read response + computed status (DEC-102) — 2026-08-17
+
+- **CONFIRMED_SOURCE_TEST:** `GET /api/v1/courses` and `GET /api/v1/courses/{id}` return `CourseResponse` / `Page<CourseResponse>`. `academicClass` is canonical; `clazz` remains the deprecated compatibility alias; `academicClazz` is absent. The JPA `Course.clazz` / `class_id` mapping and Class entity/table remain unchanged.
+- **STATUS CONTRACT:** Computed-only `courseStatus` is `OPEN` iff the Course Semester and both dates are non-null and, in `Asia/Ho_Chi_Minh`, `startDate <= now <= endDate`. Both boundaries are inclusive; missing Semester/date, before, and after are `CLOSED`. It uses injected `Clock` converted from instant to the Semester business timezone, never the system-default or Jira timezone. Active Semester is not consulted.
+- **UNCHANGED:** no persistence column, scheduler, Flyway migration, auth/session/CSRF, Course create/update behavior, or Frontend source change.
+- **VERIFICATION:** fixed-Clock resolver 9 tests + Course read/create-update integration 6 tests + generated OpenAPI 1 test = **16 passed**. OpenAPI contains `courseStatus` enum `OPEN|CLOSED`; read operations use `CourseResponse`. `git diff --check` passes.
+
 ## Active Course chat scope + natural-language Agent (DEC-099) — 2026-08-16
 
 - **CONFIRMED_SOURCE_TEST:** Public create/message accept additive optional `courseId` as Course resource scope, not actor identity. Backend validates session access, binds the conversation, copies scope onto V30 delegation, and filters discovery before ZERO/SINGLE/MULTIPLE. Conversation A cannot be reused in Course B. AI persists the same `courseId`, refuses mismatch, does not reuse a prior `discover_resource_context` from another Course, and hides TOOL traces from GET conversation.
@@ -866,3 +873,10 @@ BASE HEAD của snapshot cũ: `0bc30be`. HEAD audit hiện hành là `4f3dee9`; 
 ## SAGA AI Agent V2 identity/reports/auto-review (DEC-095) — 2026-08-16
 
 - Additive to V1: currentActor on Backend→AI payload; role-aware hidden tools; Lecturer/Admin source-backed report projections; artifact download reauth for Course/SYSTEM scopes; typed commit-review client + AFTER_COMMIT start. Public OpenAPI still **149**. HF/runtime smoke still TBD.
+
+## AccountStatus current-session invalidation (DEC-101) — 2026-08-17
+
+- **CONFIRMED_SOURCE_TEST:** authenticated Student/Lecturer requests read current local DB status. `INACTIVE`/`SUSPENDED` invalidates the current `HttpSession`, clears the `SecurityContext`, and returns `401 ACCOUNT_DISABLED` before controller/business execution. ADMIN is unaffected. `/api/auth/me` is gated; `/api/auth/csrf` and `/api/auth/logout` remain exempt to retain the existing CSRF/logout behavior and cannot bypass the business status gate.
+- **CONFIRMED_SOURCE_TEST:** OIDC sync preserves non-ACTIVE status. The success handler refuses to save a usable SAGA session for existing inactive/suspended Student or Lecturer; no Cognito Admin API/provider call, role mutation, or status reset occurs. PENDING provisioning behavior is unchanged.
+- **VERIFICATION:** targeted `AdminAccountStatusIntegrationTest` + `CognitoAuthenticationSuccessHandlerTest` = **10 passed**. No migration, public operation, or response-schema change.
+- **LIMIT:** supported target is `CURRENT_REQUEST_SESSION_INVALIDATION`; global immediate/cross-instance session revocation remains **TBD** without shared session infrastructure.

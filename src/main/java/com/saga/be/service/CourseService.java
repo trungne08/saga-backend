@@ -3,6 +3,7 @@ package com.saga.be.service;
 import com.saga.be.dto.request.CourseRequest;
 import com.saga.be.dto.response.CourseStudentRosterItem;
 import com.saga.be.dto.response.CourseStudentRosterResponse;
+import com.saga.be.dto.response.CourseResponse;
 import com.saga.be.dto.response.CourseStudentBasicInfoResponse;
 import com.saga.be.dto.response.CourseStudentTeamSummaryResponse;
 import com.saga.be.dto.response.LecturerOptionResponse;
@@ -59,9 +60,12 @@ public class CourseService {
     private final StudentCourseInvitationRepository studentCourseInvitationRepository;
     private final TaskWeightConfigRepository taskWeightConfigRepository;
     private final CourseImportAuthorizationService courseImportAuthorizationService;
+    private final CourseStatusResolver courseStatusResolver;
 
-    public Course getCourseById(UUID id) {
-        return requireActiveCourse(id);
+    @Transactional(readOnly = true)
+    public CourseResponse getCourseById(UUID id) {
+        Course course = requireActiveCourse(id);
+        return CourseResponse.from(course, courseStatusResolver.resolve(course.getSemester()));
     }
 
     private Course requireActiveCourse(UUID id) {
@@ -120,7 +124,8 @@ public class CourseService {
         courseRepository.save(course);
     }
 
-    public Page<Course> getCoursesWithFilters(UUID subjectId, UUID semesterId, UUID instructorId, Pageable pageable) {
+    @Transactional(readOnly = true)
+    public Page<CourseResponse> getCoursesWithFilters(UUID subjectId, UUID semesterId, UUID instructorId, Pageable pageable) {
         Specification<Course> specification = (root, query, criteriaBuilder) ->
                 criteriaBuilder.isNull(root.get("deletedAt"));
 
@@ -137,7 +142,8 @@ public class CourseService {
                     criteriaBuilder.equal(root.get("instructor").get("id"), instructorId));
         }
 
-        return courseRepository.findAll(specification, pageable);
+        return courseRepository.findAll(specification, pageable)
+                .map(course -> CourseResponse.from(course, courseStatusResolver.resolve(course.getSemester())));
     }
 
     private CourseReferences resolveActiveReferences(CourseRequest request) {
