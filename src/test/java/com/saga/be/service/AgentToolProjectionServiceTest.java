@@ -112,6 +112,55 @@ class AgentToolProjectionServiceTest {
     }
 
     @Test
+    void studentActiveCourseFiltersBeforeZeroSingleMultipleAndDoesNotLeakOtherCourse() {
+        SagaPrincipal student = student();
+        TeamMemberRepository memberships = mock(TeamMemberRepository.class);
+        Course courseA = course("SE-A", "Course A");
+        Course courseB = course("SE-B", "Course B");
+        Team teamA = team(courseA, "Team A", project("Project A"));
+        Team teamB = team(courseB, "Team B", project("Project B"));
+        when(memberships.findAgentContextsByStudentId(student.localProfileId())).thenReturn(
+                List.of(membership(teamA), membership(teamB))
+        );
+        AgentToolProjectionService service = contextService(
+                mock(TeamRepository.class), memberships, mock(CourseRepository.class),
+                mock(TeamContributionService.class)
+        );
+
+        InternalAgentToolResponses.ResourceContext scopedA = service.resourceContext(student, courseA.getId());
+        assertEquals("SINGLE_MATCH", scopedA.selectionState());
+        assertEquals(1, scopedA.totalCourses());
+        assertEquals(1, scopedA.totalProjects());
+        assertEquals(courseA.getId(), scopedA.activeCourseId());
+        assertEquals("Project A", scopedA.courses().get(0).teams().get(0).project().projectName());
+        assertEquals(courseA.getId(), scopedA.courses().get(0).courseId());
+
+        InternalAgentToolResponses.ResourceContext scopedB = service.resourceContext(student, courseB.getId());
+        assertEquals("SINGLE_MATCH", scopedB.selectionState());
+        assertEquals("Project B", scopedB.courses().get(0).teams().get(0).project().projectName());
+        assertEquals(courseB.getId(), scopedB.courses().get(0).courseId());
+    }
+
+    @Test
+    void unauthorizedOrEmptyActiveCourseStaysZeroMatchWithoutInventingCrossCourseProject() {
+        SagaPrincipal student = student();
+        TeamMemberRepository memberships = mock(TeamMemberRepository.class);
+        Course courseA = course("SE-A", "Course A");
+        when(memberships.findAgentContextsByStudentId(student.localProfileId())).thenReturn(
+                List.of(membership(team(courseA, "Team A", project("Project A"))))
+        );
+        AgentToolProjectionService service = contextService(
+                mock(TeamRepository.class), memberships, mock(CourseRepository.class),
+                mock(TeamContributionService.class)
+        );
+
+        InternalAgentToolResponses.ResourceContext empty = service.resourceContext(student, UUID.randomUUID());
+        assertEquals("ZERO_MATCH", empty.selectionState());
+        assertEquals(0, empty.totalProjects());
+        assertEquals(0, empty.courses().size());
+    }
+
+    @Test
     void studentContributionFailsClosedForAnotherTeamBeforeAggregateRead() {
         SagaPrincipal student = student();
         TeamMemberRepository memberships = mock(TeamMemberRepository.class);

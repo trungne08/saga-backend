@@ -40,9 +40,15 @@ public class AgentAiClient {
     public AgentApiResponses.Conversation createConversation(
             SagaPrincipal actor, String title, String studentCode
     ) {
+        return createConversation(actor, title, studentCode, null);
+    }
+
+    public AgentApiResponses.Conversation createConversation(
+            SagaPrincipal actor, String title, String studentCode, UUID courseId
+    ) {
         return post(
                 "/internal/backend/v1/agent/conversations",
-                conversationBody(actor, title == null ? "" : title, null),
+                conversationBody(actor, title == null ? "" : title, null, courseId),
                 null,
                 AgentApiResponses.Conversation.class
         );
@@ -71,9 +77,20 @@ public class AgentAiClient {
             String content,
             String studentCode
     ) {
+        return sendMessage(actor, conversationId, delegatedContext, content, studentCode, null);
+    }
+
+    public AgentApiResponses.Chat sendMessage(
+            SagaPrincipal actor,
+            UUID conversationId,
+            String delegatedContext,
+            String content,
+            String studentCode,
+            UUID courseId
+    ) {
         return post(
                 "/internal/backend/v1/agent/conversations/" + conversationId + "/messages",
-                conversationBody(actor, null, content),
+                conversationBody(actor, null, content, courseId),
                 delegatedContext,
                 AgentApiResponses.Chat.class
         );
@@ -134,7 +151,7 @@ public class AgentAiClient {
     }
 
     private Map<String, Object> conversationBody(
-            SagaPrincipal actor, String title, String content
+            SagaPrincipal actor, String title, String content, UUID courseId
     ) {
         Map<String, Object> body = new java.util.LinkedHashMap<>();
         body.put("ownerId", ownerId(actor));
@@ -144,6 +161,9 @@ public class AgentAiClient {
         }
         if (content != null) {
             body.put("content", content);
+        }
+        if (courseId != null) {
+            body.put("courseId", courseId.toString());
         }
         return body;
     }

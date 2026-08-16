@@ -1,3 +1,10 @@
+## Active Course is conversation-bound AI chat resource scope (DEC-099) — 2026-08-16
+
+- **CONFIRMED_SOURCE_TEST:** When chat is used inside an open Course, implicit Team/Project/Sprint/Task references resolve only inside that Course. `courseId` is resource scope, never actor identity. Backend validates current session access and binds the conversation; AI stores the same scope and cannot use it to bypass Backend authorization.
+- Conversation Course A + request Course B = fail closed. FE creates a new conversation for the other Course. Discovery filters the active Course before ZERO/SINGLE/MULTIPLE. Cross-Course project/task tools fail closed.
+- Planner stays semantic/LLM-typed. Task create remains proposal-only (DEC-081). TOOL messages stay internal.
+- **Contracts:** OpenAPI **152**. Flyway **V43**. AI Alembic **20260819_0007**.
+
 ## Extra Master (DEC-097) — 2026-08-16
 
 - **CONFIRMED_SOURCE:** `GIT_ISSUE_COMMIT_WRITER=MANUAL_EXPLICIT_ONLY`. TEXT_INFERENCE_USED=NO. Persist `commit-review-result-v2`. Warning pipeline Bell+FCM+Email. Early Warning V2 Backend-owned. `INACTIVITY_GRACE_PERIOD=TBD_PRODUCT`. Leader Team report `LEADER_TEAM_PROGRESS_REPORT`+`TEAM`.

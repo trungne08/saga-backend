@@ -48,6 +48,13 @@ class AgentDelegationServiceTest {
         org.junit.jupiter.api.Assertions.assertEquals(actor.localProfileId(), stored.getActorProfileId());
         assertTrue(stored.getCapabilities().contains("READ"));
         assertTrue(stored.getCapabilities().contains("PROPOSE_WRITE"));
+        org.junit.jupiter.api.Assertions.assertNull(stored.getCourseId());
+
+        UUID courseId = UUID.randomUUID();
+        service.issue(actor, conversationId, courseId);
+        ArgumentCaptor<AiAgentDelegationContext> scoped = ArgumentCaptor.forClass(AiAgentDelegationContext.class);
+        verify(repository, org.mockito.Mockito.times(2)).saveAndFlush(scoped.capture());
+        org.junit.jupiter.api.Assertions.assertEquals(courseId, scoped.getValue().getCourseId());
     }
 
     @Test

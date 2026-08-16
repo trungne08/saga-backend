@@ -46,6 +46,11 @@ public class AgentDelegationService {
 
     @Transactional
     public String issue(SagaPrincipal actor, UUID conversationId) {
+        return issue(actor, conversationId, null);
+    }
+
+    @Transactional
+    public String issue(SagaPrincipal actor, UUID conversationId, UUID courseId) {
         if (actor == null || actor.localProfileId() == null || conversationId == null
                 || !accountStatuses.isAllowedForBusinessApi(actor)) {
             throw new AccessDeniedException("An active authenticated actor is required");
@@ -62,12 +67,22 @@ public class AgentDelegationService {
         context.setCapabilities(EnumSet.allOf(AgentDelegationCapability.class).stream()
                 .map(Enum::name).sorted().collect(Collectors.joining(",")));
         context.setExpiresAt(LocalDateTime.now().plus(ttl()));
+        context.setCourseId(courseId);
         contexts.saveAndFlush(context);
         return token;
     }
 
     @Transactional(readOnly = true)
     public SagaPrincipal resolve(
+            String token,
+            UUID conversationId,
+            AgentDelegationCapability capability
+    ) {
+        return resolveAccess(token, conversationId, capability).actor();
+    }
+
+    @Transactional(readOnly = true)
+    public AgentDelegatedAccess resolveAccess(
             String token,
             UUID conversationId,
             AgentDelegationCapability capability
@@ -90,10 +105,13 @@ public class AgentDelegationService {
         if (!context.getExpiresAt().isAfter(LocalDateTime.now())) {
             throw invalid("AGENT_CONTEXT_EXPIRED");
         }
-        return actors.resolve(
-                context.getActorCognitoSub(),
-                context.getActorProfileId(),
-                context.getActorApplicationRole()
+        return new AgentDelegatedAccess(
+                actors.resolve(
+                        context.getActorCognitoSub(),
+                        context.getActorProfileId(),
+                        context.getActorApplicationRole()
+                ),
+                context.getCourseId()
         );
     }
 

@@ -7,7 +7,8 @@ import com.saga.be.dto.response.ProjectTraceabilityResponse;
 import com.saga.be.dto.response.LecturerAnalyticsResponses;
 import com.saga.be.dto.response.SprintListResponse;
 import com.saga.be.dto.response.TaskReadResponse;
-import com.saga.be.security.SagaPrincipal;
+import com.saga.be.service.AgentConversationScopeService;
+import com.saga.be.service.AgentDelegatedAccess;
 import com.saga.be.service.AgentDelegationCapability;
 import com.saga.be.service.AgentDelegationService;
 import com.saga.be.service.AgentRoleAwareProjectionService;
@@ -32,17 +33,20 @@ public class InternalAgentToolController {
     private final AgentToolProjectionService projections;
     private final AgentRoleAwareProjectionService roleAware;
     private final AgentTaskProposalValidationService proposals;
+    private final AgentConversationScopeService conversationScopes;
 
     public InternalAgentToolController(
             AgentDelegationService delegations,
             AgentToolProjectionService projections,
             AgentRoleAwareProjectionService roleAware,
-            AgentTaskProposalValidationService proposals
+            AgentTaskProposalValidationService proposals,
+            AgentConversationScopeService conversationScopes
     ) {
         this.delegations = delegations;
         this.projections = projections;
         this.roleAware = roleAware;
         this.proposals = proposals;
+        this.conversationScopes = conversationScopes;
     }
 
     @PostMapping("/resource-context")
@@ -50,7 +54,8 @@ public class InternalAgentToolController {
             @RequestHeader(DELEGATED_CONTEXT_HEADER) String context,
             @Valid @RequestBody InternalAgentToolRequests.Context request
     ) {
-        return projections.resourceContext(actor(context, request.conversationId(), false));
+        AgentDelegatedAccess access = access(context, request.conversationId(), false);
+        return projections.resourceContext(access.actor(), access.courseId());
     }
 
     @PostMapping("/project-summary")
@@ -58,7 +63,9 @@ public class InternalAgentToolController {
             @RequestHeader(DELEGATED_CONTEXT_HEADER) String context,
             @Valid @RequestBody InternalAgentToolRequests.Project request
     ) {
-        return projections.projectSummary(actor(context, request.conversationId(), false), request.projectId());
+        AgentDelegatedAccess access = access(context, request.conversationId(), false);
+        conversationScopes.requireProjectInScope(access.courseId(), request.projectId());
+        return projections.projectSummary(access.actor(), request.projectId());
     }
 
     @PostMapping("/project-tasks")
@@ -66,8 +73,10 @@ public class InternalAgentToolController {
             @RequestHeader(DELEGATED_CONTEXT_HEADER) String context,
             @Valid @RequestBody InternalAgentToolRequests.ProjectTasks request
     ) {
+        AgentDelegatedAccess access = access(context, request.conversationId(), false);
+        conversationScopes.requireProjectInScope(access.courseId(), request.projectId());
         return projections.projectTasks(
-                actor(context, request.conversationId(), false), request.projectId(), request.page(), request.size()
+                access.actor(), request.projectId(), request.page(), request.size()
         );
     }
 
@@ -76,9 +85,9 @@ public class InternalAgentToolController {
             @RequestHeader(DELEGATED_CONTEXT_HEADER) String context,
             @Valid @RequestBody InternalAgentToolRequests.Task request
     ) {
-        return projections.taskDetail(
-                actor(context, request.conversationId(), false), request.projectId(), request.taskId()
-        );
+        AgentDelegatedAccess access = access(context, request.conversationId(), false);
+        conversationScopes.requireProjectInScope(access.courseId(), request.projectId());
+        return projections.taskDetail(access.actor(), request.projectId(), request.taskId());
     }
 
     @PostMapping("/student-progress")
@@ -86,7 +95,9 @@ public class InternalAgentToolController {
             @RequestHeader(DELEGATED_CONTEXT_HEADER) String context,
             @Valid @RequestBody InternalAgentToolRequests.Project request
     ) {
-        return projections.studentProgress(actor(context, request.conversationId(), false), request.projectId());
+        AgentDelegatedAccess access = access(context, request.conversationId(), false);
+        conversationScopes.requireProjectInScope(access.courseId(), request.projectId());
+        return projections.studentProgress(access.actor(), request.projectId());
     }
 
     @PostMapping("/team-progress")
@@ -94,7 +105,9 @@ public class InternalAgentToolController {
             @RequestHeader(DELEGATED_CONTEXT_HEADER) String context,
             @Valid @RequestBody InternalAgentToolRequests.Team request
     ) {
-        return projections.teamProgress(actor(context, request.conversationId(), false), request.teamId());
+        AgentDelegatedAccess access = access(context, request.conversationId(), false);
+        conversationScopes.requireTeamInScope(access.courseId(), request.teamId());
+        return projections.teamProgress(access.actor(), request.teamId());
     }
 
     @PostMapping("/team-contribution")
@@ -102,7 +115,9 @@ public class InternalAgentToolController {
             @RequestHeader(DELEGATED_CONTEXT_HEADER) String context,
             @Valid @RequestBody InternalAgentToolRequests.Team request
     ) {
-        return projections.teamContribution(actor(context, request.conversationId(), false), request.teamId());
+        AgentDelegatedAccess access = access(context, request.conversationId(), false);
+        conversationScopes.requireTeamInScope(access.courseId(), request.teamId());
+        return projections.teamContribution(access.actor(), request.teamId());
     }
 
     @PostMapping("/student-contribution")
@@ -110,7 +125,9 @@ public class InternalAgentToolController {
             @RequestHeader(DELEGATED_CONTEXT_HEADER) String context,
             @Valid @RequestBody InternalAgentToolRequests.Team request
     ) {
-        return projections.studentContribution(actor(context, request.conversationId(), false), request.teamId());
+        AgentDelegatedAccess access = access(context, request.conversationId(), false);
+        conversationScopes.requireTeamInScope(access.courseId(), request.teamId());
+        return projections.studentContribution(access.actor(), request.teamId());
     }
 
     @PostMapping("/team-sprints")
@@ -118,7 +135,9 @@ public class InternalAgentToolController {
             @RequestHeader(DELEGATED_CONTEXT_HEADER) String context,
             @Valid @RequestBody InternalAgentToolRequests.Team request
     ) {
-        return projections.teamSprints(actor(context, request.conversationId(), false), request.teamId());
+        AgentDelegatedAccess access = access(context, request.conversationId(), false);
+        conversationScopes.requireTeamInScope(access.courseId(), request.teamId());
+        return projections.teamSprints(access.actor(), request.teamId());
     }
 
     @PostMapping("/course-warnings")
@@ -126,7 +145,11 @@ public class InternalAgentToolController {
             @RequestHeader(DELEGATED_CONTEXT_HEADER) String context,
             @Valid @RequestBody InternalAgentToolRequests.Course request
     ) {
-        return projections.courseWarnings(actor(context, request.conversationId(), false), request.courseId());
+        AgentDelegatedAccess access = access(context, request.conversationId(), false);
+        return projections.courseWarnings(
+                access.actor(),
+                conversationScopes.effectiveCourseId(access.courseId(), request.courseId())
+        );
     }
 
     @PostMapping("/project-traceability")
@@ -134,7 +157,9 @@ public class InternalAgentToolController {
             @RequestHeader(DELEGATED_CONTEXT_HEADER) String context,
             @Valid @RequestBody InternalAgentToolRequests.Project request
     ) {
-        return projections.projectTraceability(actor(context, request.conversationId(), false), request.projectId());
+        AgentDelegatedAccess access = access(context, request.conversationId(), false);
+        conversationScopes.requireProjectInScope(access.courseId(), request.projectId());
+        return projections.projectTraceability(access.actor(), request.projectId());
     }
 
     @PostMapping("/validate-commit-review")
@@ -142,8 +167,10 @@ public class InternalAgentToolController {
             @RequestHeader(DELEGATED_CONTEXT_HEADER) String context,
             @Valid @RequestBody InternalAgentToolRequests.CommitReview request
     ) {
+        AgentDelegatedAccess access = access(context, request.conversationId(), false);
+        conversationScopes.requireProjectInScope(access.courseId(), request.projectId());
         return projections.commitReviewTarget(
-                actor(context, request.conversationId(), false),
+                access.actor(),
                 request.projectId(),
                 request.repositoryId(),
                 request.commitSha()
@@ -155,7 +182,9 @@ public class InternalAgentToolController {
             @RequestHeader(DELEGATED_CONTEXT_HEADER) String context,
             @Valid @RequestBody InternalAgentToolRequests.Project request
     ) {
-        return projections.srsContext(actor(context, request.conversationId(), false), request.projectId());
+        AgentDelegatedAccess access = access(context, request.conversationId(), false);
+        conversationScopes.requireProjectInScope(access.courseId(), request.projectId());
+        return projections.srsContext(access.actor(), request.projectId());
     }
 
     @PostMapping("/self-progress")
@@ -163,8 +192,12 @@ public class InternalAgentToolController {
             @RequestHeader(DELEGATED_CONTEXT_HEADER) String context,
             @Valid @RequestBody InternalAgentToolRequests.OptionalProject request
     ) {
+        AgentDelegatedAccess access = access(context, request.conversationId(), false);
+        conversationScopes.requireProjectInScope(access.courseId(), request.projectId());
         return roleAware.selfProgress(
-                actor(context, request.conversationId(), false), request.courseId(), request.projectId()
+                access.actor(),
+                conversationScopes.effectiveCourseId(access.courseId(), request.courseId()),
+                request.projectId()
         );
     }
 
@@ -173,7 +206,7 @@ public class InternalAgentToolController {
             @RequestHeader(DELEGATED_CONTEXT_HEADER) String context,
             @Valid @RequestBody InternalAgentToolRequests.Context request
     ) {
-        return roleAware.recentCommits(actor(context, request.conversationId(), false));
+        return roleAware.recentCommits(access(context, request.conversationId(), false).actor());
     }
 
     @PostMapping("/leader-team-context")
@@ -181,7 +214,9 @@ public class InternalAgentToolController {
             @RequestHeader(DELEGATED_CONTEXT_HEADER) String context,
             @Valid @RequestBody InternalAgentToolRequests.OptionalTeam request
     ) {
-        return roleAware.leaderTeamContext(actor(context, request.conversationId(), false), request.teamId());
+        AgentDelegatedAccess access = access(context, request.conversationId(), false);
+        conversationScopes.requireTeamInScope(access.courseId(), request.teamId());
+        return roleAware.leaderTeamContext(access.actor(), request.teamId());
     }
 
     @PostMapping("/leader-team-progress-report")
@@ -189,9 +224,9 @@ public class InternalAgentToolController {
             @RequestHeader(DELEGATED_CONTEXT_HEADER) String context,
             @Valid @RequestBody InternalAgentToolRequests.OptionalTeam request
     ) {
-        return roleAware.leaderTeamProgressReport(
-                actor(context, request.conversationId(), false), request.teamId()
-        );
+        AgentDelegatedAccess access = access(context, request.conversationId(), false);
+        conversationScopes.requireTeamInScope(access.courseId(), request.teamId());
+        return roleAware.leaderTeamProgressReport(access.actor(), request.teamId());
     }
 
     @PostMapping("/lecturer-course-context")
@@ -199,7 +234,11 @@ public class InternalAgentToolController {
             @RequestHeader(DELEGATED_CONTEXT_HEADER) String context,
             @Valid @RequestBody InternalAgentToolRequests.OptionalCourse request
     ) {
-        return roleAware.lecturerCourseContext(actor(context, request.conversationId(), false), request.courseId());
+        AgentDelegatedAccess access = access(context, request.conversationId(), false);
+        return roleAware.lecturerCourseContext(
+                access.actor(),
+                conversationScopes.effectiveCourseId(access.courseId(), request.courseId())
+        );
     }
 
     @PostMapping("/lecturer-progress-report")
@@ -207,7 +246,11 @@ public class InternalAgentToolController {
             @RequestHeader(DELEGATED_CONTEXT_HEADER) String context,
             @Valid @RequestBody InternalAgentToolRequests.OptionalCourse request
     ) {
-        return roleAware.lecturerProgressReport(actor(context, request.conversationId(), false), request.courseId());
+        AgentDelegatedAccess access = access(context, request.conversationId(), false);
+        return roleAware.lecturerProgressReport(
+                access.actor(),
+                conversationScopes.effectiveCourseId(access.courseId(), request.courseId())
+        );
     }
 
     @PostMapping("/admin-system-report")
@@ -215,7 +258,7 @@ public class InternalAgentToolController {
             @RequestHeader(DELEGATED_CONTEXT_HEADER) String context,
             @Valid @RequestBody InternalAgentToolRequests.Context request
     ) {
-        return roleAware.adminSystemReport(actor(context, request.conversationId(), false));
+        return roleAware.adminSystemReport(access(context, request.conversationId(), false).actor());
     }
 
     @PostMapping("/resolve-assignee")
@@ -223,8 +266,10 @@ public class InternalAgentToolController {
             @RequestHeader(DELEGATED_CONTEXT_HEADER) String context,
             @Valid @RequestBody InternalAgentToolRequests.AssigneeResolve request
     ) {
+        AgentDelegatedAccess access = access(context, request.conversationId(), false);
+        conversationScopes.requireProjectInScope(access.courseId(), request.projectId());
         return projections.resolveAssignee(
-                actor(context, request.conversationId(), false),
+                access.actor(),
                 request.projectId(), request.fullName(), request.studentCode()
         );
     }
@@ -234,7 +279,9 @@ public class InternalAgentToolController {
             @RequestHeader(DELEGATED_CONTEXT_HEADER) String context,
             @Valid @RequestBody InternalAgentToolRequests.TaskCreate request
     ) {
-        return proposals.validateCreate(actor(context, request.conversationId(), true), request);
+        AgentDelegatedAccess access = access(context, request.conversationId(), true);
+        conversationScopes.requireProjectInScope(access.courseId(), request.projectId());
+        return proposals.validateCreate(access.actor(), request);
     }
 
     @PostMapping("/validate-task-update")
@@ -242,11 +289,13 @@ public class InternalAgentToolController {
             @RequestHeader(DELEGATED_CONTEXT_HEADER) String context,
             @Valid @RequestBody InternalAgentToolRequests.TaskUpdate request
     ) {
-        return proposals.validateUpdate(actor(context, request.conversationId(), true), request);
+        AgentDelegatedAccess access = access(context, request.conversationId(), true);
+        conversationScopes.requireProjectInScope(access.courseId(), request.projectId());
+        return proposals.validateUpdate(access.actor(), request);
     }
 
-    private SagaPrincipal actor(String token, java.util.UUID conversationId, boolean writeProposal) {
-        return delegations.resolve(
+    private AgentDelegatedAccess access(String token, java.util.UUID conversationId, boolean writeProposal) {
+        return delegations.resolveAccess(
                 token,
                 conversationId,
                 writeProposal ? AgentDelegationCapability.PROPOSE_WRITE : AgentDelegationCapability.READ

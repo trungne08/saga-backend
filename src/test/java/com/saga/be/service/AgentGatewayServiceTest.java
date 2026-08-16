@@ -11,6 +11,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import com.saga.be.dto.request.AgentConversationCreateRequest;
+import com.saga.be.dto.request.AgentMessageSendRequest;
 import com.saga.be.dto.request.JiraTaskCreateRequest;
 import com.saga.be.dto.request.JiraTaskUpdateRequest;
 import com.saga.be.dto.response.AgentApiResponses;
@@ -116,7 +118,8 @@ class AgentGatewayServiceTest {
                 mock(JiraTaskWriteService.class), projects,
                 mock(com.saga.be.repository.StudentRepository.class),
                 mock(LecturerAnalyticsAuthorizationService.class),
-                mock(com.saga.be.repository.TeamMemberRepository.class)
+                mock(com.saga.be.repository.TeamMemberRepository.class),
+                mock(AgentConversationScopeService.class)
         );
         SagaPrincipal actor = actor(ApplicationRole.STUDENT);
         UUID artifactId = UUID.randomUUID();
@@ -144,7 +147,8 @@ class AgentGatewayServiceTest {
                 mock(JiraTaskWriteService.class), projects,
                 mock(com.saga.be.repository.StudentRepository.class),
                 mock(LecturerAnalyticsAuthorizationService.class),
-                mock(com.saga.be.repository.TeamMemberRepository.class)
+                mock(com.saga.be.repository.TeamMemberRepository.class),
+                mock(AgentConversationScopeService.class)
         );
         SagaPrincipal actor = actor(ApplicationRole.STUDENT);
         UUID artifactId = UUID.randomUUID();
@@ -169,7 +173,8 @@ class AgentGatewayServiceTest {
                 ai, mock(AgentDelegationService.class),
                 mock(JiraTaskWriteService.class), mock(ProjectDetailService.class),
                 mock(StudentRepository.class), authorization,
-                mock(com.saga.be.repository.TeamMemberRepository.class)
+                mock(com.saga.be.repository.TeamMemberRepository.class),
+                mock(AgentConversationScopeService.class)
         );
         UUID artifactId = UUID.randomUUID();
         UUID courseId = UUID.randomUUID();
@@ -234,7 +239,8 @@ class AgentGatewayServiceTest {
                 ai, mock(AgentDelegationService.class),
                 mock(JiraTaskWriteService.class), mock(ProjectDetailService.class),
                 mock(StudentRepository.class), mock(LecturerAnalyticsAuthorizationService.class),
-                mock(com.saga.be.repository.TeamMemberRepository.class)
+                mock(com.saga.be.repository.TeamMemberRepository.class),
+                mock(AgentConversationScopeService.class)
         );
         UUID artifactId = UUID.randomUUID();
         SagaPrincipal admin = actor(ApplicationRole.ADMIN);
@@ -263,7 +269,7 @@ class AgentGatewayServiceTest {
                 ai, mock(AgentDelegationService.class),
                 mock(JiraTaskWriteService.class), mock(ProjectDetailService.class),
                 mock(StudentRepository.class), mock(LecturerAnalyticsAuthorizationService.class),
-                teamMembers
+                teamMembers, mock(AgentConversationScopeService.class)
         );
         UUID artifactId = UUID.randomUUID();
         UUID teamId = UUID.randomUUID();
@@ -292,6 +298,92 @@ class AgentGatewayServiceTest {
         verify(ai, never()).artifactContent(eq(member), any());
     }
 
+    @Test
+    void createConversationValidatesCourseScopeAndDoesNotAcceptActorIdentity() {
+        AgentAiClient ai = mock(AgentAiClient.class);
+        AgentConversationScopeService scopes = mock(AgentConversationScopeService.class);
+        AgentGatewayService service = new AgentGatewayService(
+                ai, mock(AgentDelegationService.class),
+                mock(JiraTaskWriteService.class), mock(ProjectDetailService.class),
+                mock(StudentRepository.class), mock(LecturerAnalyticsAuthorizationService.class),
+                mock(TeamMemberRepository.class), scopes
+        );
+        SagaPrincipal student = actor(ApplicationRole.STUDENT);
+        UUID courseId = UUID.randomUUID();
+        UUID conversationId = UUID.randomUUID();
+        when(ai.createConversation(student, "Course A chat", null, courseId)).thenReturn(
+                new AgentApiResponses.Conversation(
+                        conversationId, "Course A chat", null, "STUDENT", false,
+                        "2026-08-16T00:00:00Z", "2026-08-16T00:00:00Z", java.util.List.of()
+                )
+        );
+
+        AgentApiResponses.Conversation created = service.create(
+                student, new AgentConversationCreateRequest("Course A chat", courseId)
+        );
+
+        verify(scopes).requireAccessibleCourse(student, courseId);
+        verify(scopes).bindOnCreate(student, conversationId, courseId);
+        assertEquals(courseId, created.courseId());
+        verify(ai, never()).createConversation(eq(student), any(), any(), eq(student.localProfileId()));
+    }
+
+    @Test
+    void sendRejectsConversationBoundToAnotherCourseAndKeepsActorFromSession() {
+        AgentAiClient ai = mock(AgentAiClient.class);
+        AgentDelegationService delegations = mock(AgentDelegationService.class);
+        AgentConversationScopeService scopes = mock(AgentConversationScopeService.class);
+        AgentGatewayService service = new AgentGatewayService(
+                ai, delegations, mock(JiraTaskWriteService.class), mock(ProjectDetailService.class),
+                mock(StudentRepository.class), mock(LecturerAnalyticsAuthorizationService.class),
+                mock(TeamMemberRepository.class), scopes
+        );
+        SagaPrincipal student = actor(ApplicationRole.STUDENT);
+        UUID conversationId = UUID.randomUUID();
+        UUID courseB = UUID.randomUUID();
+        when(scopes.resolveForMessage(student, conversationId, courseB))
+                .thenThrow(IntegrationException.conflict(
+                        "AI_AGENT_COURSE_SCOPE_MISMATCH",
+                        "This conversation is bound to a different Course. Start a new conversation in the Course you want to use."
+                ));
+
+        IntegrationException failure = assertThrows(
+                IntegrationException.class,
+                () -> service.send(student, conversationId, new AgentMessageSendRequest("project của tôi", courseB))
+        );
+
+        assertEquals("AI_AGENT_COURSE_SCOPE_MISMATCH", failure.getCode());
+        verifyNoInteractions(ai);
+        verify(delegations, never()).issue(any(), any(), any());
+    }
+
+    @Test
+    void sendPropagatesValidatedCourseIntoDelegationAndAiClient() {
+        AgentAiClient ai = mock(AgentAiClient.class);
+        AgentDelegationService delegations = mock(AgentDelegationService.class);
+        AgentConversationScopeService scopes = mock(AgentConversationScopeService.class);
+        AgentGatewayService service = new AgentGatewayService(
+                ai, delegations, mock(JiraTaskWriteService.class), mock(ProjectDetailService.class),
+                mock(StudentRepository.class), mock(LecturerAnalyticsAuthorizationService.class),
+                mock(TeamMemberRepository.class), scopes
+        );
+        SagaPrincipal student = actor(ApplicationRole.STUDENT);
+        UUID conversationId = UUID.randomUUID();
+        UUID courseA = UUID.randomUUID();
+        when(scopes.resolveForMessage(student, conversationId, courseA)).thenReturn(courseA);
+        when(delegations.issue(student, conversationId, courseA)).thenReturn("opaque-context");
+        when(ai.sendMessage(student, conversationId, "opaque-context", "tôi còn task nào", null, courseA))
+                .thenReturn(new AgentApiResponses.Chat(
+                        conversationId, UUID.randomUUID(), "ok", "COMPLETED",
+                        java.util.List.of(), null, null, null, java.util.List.of(), "FAKE", "test"
+                ));
+
+        service.send(student, conversationId, new AgentMessageSendRequest("tôi còn task nào", courseA));
+
+        verify(delegations).issue(student, conversationId, courseA);
+        verify(ai).sendMessage(student, conversationId, "opaque-context", "tôi còn task nào", null, courseA);
+    }
+
     private AgentGatewayService service(AgentAiClient ai, JiraTaskWriteService writes) {
         return new AgentGatewayService(
                 ai,
@@ -300,7 +392,8 @@ class AgentGatewayServiceTest {
                 mock(ProjectDetailService.class),
                 mock(StudentRepository.class),
                 mock(LecturerAnalyticsAuthorizationService.class),
-                mock(com.saga.be.repository.TeamMemberRepository.class)
+                mock(com.saga.be.repository.TeamMemberRepository.class),
+                mock(AgentConversationScopeService.class)
         );
     }
 

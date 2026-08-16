@@ -20,7 +20,8 @@ public final class InternalAgentToolResponses {
             long totalProjects,
             List<CourseContext> courses,
             List<String> dataLimitations,
-            CurrentActor currentActor
+            CurrentActor currentActor,
+            UUID activeCourseId
     ) {
     }
 

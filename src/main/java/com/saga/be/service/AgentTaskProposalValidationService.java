@@ -40,7 +40,7 @@ public class AgentTaskProposalValidationService {
         return new ActionValidation(
                 true,
                 Map.copyOf(payload),
-                "Create Task '" + request.title().trim() + "' as " + request.type().name()
+                createSummary(request, payload)
         );
     }
 
@@ -75,6 +75,28 @@ public class AgentTaskProposalValidationService {
                 Map.copyOf(payload),
                 "Update Task " + request.taskId() + " with " + (payload.size() - 2) + " field(s)"
         );
+    }
+
+    private String createSummary(
+            InternalAgentToolRequests.TaskCreate request, Map<String, Object> payload
+    ) {
+        StringBuilder summary = new StringBuilder("Create Task '")
+                .append(request.title().trim())
+                .append("' as ")
+                .append(request.type().name());
+        if (payload.containsKey("priority")) {
+            summary.append(", priority ").append(payload.get("priority"));
+        }
+        if (payload.containsKey("assigneeId")) {
+            summary.append(", assignee resolved");
+        }
+        if (payload.containsKey("dueDate")) {
+            summary.append(", due ").append(payload.get("dueDate"));
+        }
+        if (payload.containsKey("description")) {
+            summary.append(", description prepared");
+        }
+        return summary.toString();
     }
 
     private String normalize(String value) {

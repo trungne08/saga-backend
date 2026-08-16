@@ -1,3 +1,11 @@
+## Active Course chat scope (DEC-099) — 2026-08-16
+
+- Browser may send optional `courseId` on AI conversation create/message. It must not send actor identity fields. Backend must validate Course access from the session actor before bind.
+- Conversation-bound Course scope is authoritative for that chat. Mismatch is conflict, not pick-first. Delegation may carry `course_id` for tool scoping; AI arguments cannot override it.
+- Discovery filters active Course before ZERO/SINGLE/MULTIPLE. Project/Team tools must fail closed when the resource is outside the bound Course.
+- Do not invent TaskType/Priority/due-date defaults beyond current `JiraTaskWriteService` authority. Do not mutate Jira before Confirm. Do not expand MEMBER task-create permission.
+- OpenAPI **152**. Flyway head **V43**. AI Alembic **20260819_0007**.
+
 ## Extra Master (DEC-097) — 2026-08-16
 
 - GitIssue↔Commit production writer is **manual explicit only**. Do not parse commit messages. Do not invent GitHub relation APIs.

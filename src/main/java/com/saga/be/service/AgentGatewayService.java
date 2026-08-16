@@ -45,6 +45,7 @@ public class AgentGatewayService {
     private final StudentRepository students;
     private final LecturerAnalyticsAuthorizationService courseAccess;
     private final TeamMemberRepository teamMembers;
+    private final AgentConversationScopeService conversationScopes;
 
     public AgentGatewayService(
             AgentAiClient ai,
@@ -53,7 +54,8 @@ public class AgentGatewayService {
             ProjectDetailService projects,
             StudentRepository students,
             LecturerAnalyticsAuthorizationService courseAccess,
-            TeamMemberRepository teamMembers
+            TeamMemberRepository teamMembers,
+            AgentConversationScopeService conversationScopes
     ) {
         this.ai = ai;
         this.delegations = delegations;
@@ -62,20 +64,44 @@ public class AgentGatewayService {
         this.students = students;
         this.courseAccess = courseAccess;
         this.teamMembers = teamMembers;
+        this.conversationScopes = conversationScopes;
     }
 
     public AgentApiResponses.Conversation create(
             SagaPrincipal actor, AgentConversationCreateRequest request
     ) {
-        return ai.createConversation(actor, request == null ? null : request.title(), studentCode(actor));
+        UUID courseId = request == null ? null : request.courseId();
+        if (courseId != null) {
+            conversationScopes.requireAccessibleCourse(actor, courseId);
+        }
+        AgentApiResponses.Conversation created = ai.createConversation(
+                actor, request == null ? null : request.title(), studentCode(actor), courseId
+        );
+        conversationScopes.bindOnCreate(actor, created.id(), courseId);
+        return withCourse(created, courseId != null ? courseId : created.courseId());
     }
 
     public AgentApiResponses.ConversationList list(SagaPrincipal actor) {
-        return ai.listConversations(actor);
+        AgentApiResponses.ConversationList listed = ai.listConversations(actor);
+        if (listed == null || listed.items() == null || listed.items().isEmpty()) {
+            return listed;
+        }
+        Map<UUID, UUID> bound = conversationScopes.courseIdsFor(
+                listed.items().stream().map(AgentApiResponses.Conversation::id).toList()
+        );
+        return new AgentApiResponses.ConversationList(
+                listed.items().stream()
+                        .map(item -> withCourse(item, firstNonNull(bound.get(item.id()), item.courseId())))
+                        .toList()
+        );
     }
 
     public AgentApiResponses.Conversation get(SagaPrincipal actor, UUID conversationId) {
-        return ai.conversation(actor, conversationId);
+        AgentApiResponses.Conversation conversation = ai.conversation(actor, conversationId);
+        return withCourse(
+                conversation,
+                firstNonNull(conversationScopes.courseIdFor(conversationId).orElse(null), conversation.courseId())
+        );
     }
 
     public AgentApiResponses.Chat send(
@@ -83,8 +109,13 @@ public class AgentGatewayService {
             UUID conversationId,
             AgentMessageSendRequest request
     ) {
-        String context = delegations.issue(actor, conversationId);
-        return ai.sendMessage(actor, conversationId, context, request.content().trim(), studentCode(actor));
+        UUID courseId = conversationScopes.resolveForMessage(
+                actor, conversationId, request.courseId()
+        );
+        String context = delegations.issue(actor, conversationId, courseId);
+        return ai.sendMessage(
+                actor, conversationId, context, request.content().trim(), studentCode(actor), courseId
+        );
     }
 
     public AgentApiResponses.ActionExecution confirm(SagaPrincipal actor, UUID actionId) {
@@ -176,6 +207,28 @@ public class AgentGatewayService {
             }
             throw exception;
         }
+    }
+
+    private AgentApiResponses.Conversation withCourse(
+            AgentApiResponses.Conversation conversation, UUID courseId
+    ) {
+        if (conversation == null || java.util.Objects.equals(conversation.courseId(), courseId)) {
+            return conversation;
+        }
+        return new AgentApiResponses.Conversation(
+                conversation.id(),
+                conversation.title(),
+                courseId,
+                conversation.applicationRoleSnapshot(),
+                conversation.archived(),
+                conversation.createdAt(),
+                conversation.updatedAt(),
+                conversation.messages()
+        );
+    }
+
+    private UUID firstNonNull(UUID preferred, UUID fallback) {
+        return preferred != null ? preferred : fallback;
     }
 
     private String studentCode(SagaPrincipal actor) {

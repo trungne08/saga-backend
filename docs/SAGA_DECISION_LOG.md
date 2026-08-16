@@ -1,3 +1,13 @@
+## DEC-099 — Active Course is conversation-bound AI chat resource scope
+
+- Ngày: 2026-08-16; trạng thái: **CONFIRMED_SOURCE_TEST**. Không rewrite DEC-081. Không đổi permission MEMBER/LEADER/Lecturer/Admin. Không Bearer. Không expose `/internal/**`. Không sửa Contribution. Không sửa commit-review lane.
+- **Resource scope ≠ actor identity.** Browser may send additive optional `courseId` on `POST /api/v1/ai/conversations` and `POST /api/v1/ai/conversations/{id}/messages`. Browser still must not send `actorId` / `studentId` / `applicationRole` / `currentActor`. Backend validates the session actor actually has current Course access (Student TeamMember, Lecturer instructor, Admin existing Course) before binding.
+- **Conversation-bound isolation.** Backend persists `ai_agent_conversation_scope` (V43). AI persists `agent_conversation.course_id` (Alembic `20260819_0007`). A conversation bound to Course A reused with Course B is `409 AI_AGENT_COURSE_SCOPE_MISMATCH` / `COURSE_SCOPE_MISMATCH`. FE must start a new conversation for Course B. History of A is never silently reused for B.
+- **Discovery filter-first.** `discover_resource_context` stays NoArgs. Active Course comes from validated delegation, not from AI arguments. Backend filters Course **before** ZERO/SINGLE/MULTIPLE. Cross-Course Project/Team/Task access fail-closes even if the same user is authorized in both Courses. Admin SYSTEM capabilities stay unscoped unless a Course-scoped capability is in use.
+- **Natural language + safe slot filling.** Planner remains LLM/semantic, not an exact-phrase list. `propose_task_create` may generate description from intent; self-reference `tôi/mình/tui` uses Backend `currentActor.localProfileId`; named assignee uses existing Team-scoped resolver (no pick-first). Do not invent Priority. Do not invent TaskType when ambiguous. Relative due dates are not guessed without a deterministic timezone in agent data.
+- **DEC-081 unchanged.** Proposal / pendingAction only. Browser Confirm = session + CSRF → claim → Backend reauthorize → `JiraTaskWriteService`. No Jira mutation before Confirm. TOOL-role traces stay in AI audit storage and are filtered from public conversation messages.
+- OpenAPI **152** (additive fields, no new operation). Flyway **V43**. AI Alembic **20260819_0007**.
+
 ## DEC-098 — Lecturer Course broadcast may include optional HTTPS actionUrl; Admin broadcast does not
 
 - Ngày: 2026-08-16; trạng thái: **CONFIRMED_SOURCE**. Không rewrite DEC-070. Không mở Admin link. Không Bearer. Không expose `/internal/**`. Không đổi Contribution/AI migration.

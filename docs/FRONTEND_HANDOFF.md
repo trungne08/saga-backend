@@ -1,5 +1,14 @@
 # SAGA Frontend Handoff
 
+## Active Course chat scope (DEC-099) — 2026-08-16
+
+- OpenAPI **152**. Flyway **V43**. Public AI still `/api/v1/ai/**` only. **Do not call** `/internal/**`. Session + CSRF + no Bearer.
+- When the user opens AI chat inside a Course, send additive `courseId` on create conversation and each message. Never send `actorId` / `studentId` / `applicationRole` / `currentActor`.
+- One conversation is bound to one Course. If the user switches Course, create a new conversation. Do not reuse Course A history in Course B.
+- Implicit “project/nhóm/task của tôi” is scoped to the open Course. A Project from another Course is not selected silently.
+- Confirm/reject pending Task actions is unchanged. Show the proposal fields before Confirm. Do not treat assistant text as “task already created”.
+- Do not display internal tool traces. Render the assistant `text` only.
+
 ## Extra Master (DEC-097) — 2026-08-16
 
 - OpenAPI **152**. Migration **V42**. Public AI still `/api/v1/ai/**` only. **Do not call** `/internal/**`, Gmail send, FCM provider, or review worker routes.

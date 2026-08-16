@@ -1906,7 +1906,7 @@ Anomalies: `OVERDUE_TASK` supported with real `count`; `MSR` / `DEADLINE_PROCESS
 
 ## AI Agent V1 (public only)
 
-Safe GETs: conversations list/detail, artifact download. Unsafe POSTs: create conversation, send message, confirm/reject pending action. Internal `/internal/ai/**` and Backend→AI `/internal/backend/v1/commit-reviews**` are **not** a frontend contract. AI does not accept browser `JSESSIONID`, does not read SAGA business DB, and does not call Jira/GitHub. Confirm/reject runs through Backend mutation path; no automatic Task mutation. Current actor identity is session/delegation only — FE must not send identity fields and must not ask name/MSSV to identify the logged-in user (DEC-095).
+Safe GETs: conversations list/detail, artifact download. Unsafe POSTs: create conversation, send message, confirm/reject pending action. Internal `/internal/ai/**` and Backend→AI `/internal/backend/v1/commit-reviews**` are **not** a frontend contract. AI does not accept browser `JSESSIONID`, does not read SAGA business DB, and does not call Jira/GitHub. Confirm/reject runs through Backend mutation path; no automatic Task mutation. Current actor identity is session/delegation only — FE must not send identity fields and must not ask name/MSSV to identify the logged-in user (DEC-095). When chat is opened inside a Course, FE sends additive `courseId` as resource scope (DEC-099); Backend validates it and binds the conversation.
 
 ## Verification note for FE
 
@@ -1939,12 +1939,12 @@ Safe GETs (session, no CSRF header):
 
 Unsafe calls (session plus the existing CSRF header/cookie contract):
 
-- `POST /api/v1/ai/conversations` with `{ "title": "optional, max 160" }`
-- `POST /api/v1/ai/conversations/{conversationId}/messages` with `{ "content": "required, max 8000" }`
+- `POST /api/v1/ai/conversations` with `{ "title": "optional, max 160", "courseId": "optional UUID resource scope when chat is opened inside a Course" }`
+- `POST /api/v1/ai/conversations/{conversationId}/messages` with `{ "content": "required, max 8000", "courseId": "optional UUID; must match the conversation's bound Course" }`
 - `POST /api/v1/ai/pending-actions/{actionId}/confirm` with no mutable action body
 - `POST /api/v1/ai/pending-actions/{actionId}/reject` with no mutable action body
 
-Do not send `actorId`, `ownerId`, `applicationRole`, `studentId`, `lecturerId`, provider, model, Backend path, or tool name. Backend derives the current local owner and role from the session. Do not ask the user for name/MSSV to identify who is chatting; resource-selection questions (which Course/Team/commit) are allowed when the actor has more than one valid resource.
+Do not send `actorId`, `ownerId`, `applicationRole`, `studentId`, `lecturerId`, provider, model, Backend path, or tool name. `courseId` is a Course resource-scope hint, not actor identity. When the user is chatting inside an open Course, send that Course's `courseId` on create and every message. Backend validates current access and binds the conversation to that Course. Reusing a Course A conversation while the UI is on Course B returns `409 AI_AGENT_COURSE_SCOPE_MISMATCH` — create a new conversation for Course B instead of keeping history A. Conversation list/detail may include `courseId`. Do not render TOOL-role rows such as `discover_resource_context:COMPLETED`; Backend/AI filter those from the public conversation payload. Backend derives the current local owner and role from the session. Do not ask the user for name/MSSV to identify who is chatting; resource-selection questions (which Team/Project inside the open Course) are allowed when more than one valid resource remains.
 
 A chat response includes `conversationId`, `messageId`, `text`, `status`, citations, optional `pendingAction`, optional `generatedArtifact`, optional `jobReference`, suggested follow-ups, and safe provider/model metadata. Render factual errors as unavailable/forbidden/not found; do not convert a failed tool or mutation into success text.
 

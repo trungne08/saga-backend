@@ -1,5 +1,6 @@
 package com.saga.be.dto.response;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -9,9 +10,11 @@ public final class AgentApiResponses {
     private AgentApiResponses() {
     }
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public record Conversation(
             UUID id,
             String title,
+            UUID courseId,
             String applicationRoleSnapshot,
             boolean archived,
             String createdAt,

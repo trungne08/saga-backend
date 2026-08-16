@@ -1,3 +1,10 @@
+## Active Course chat scope + natural-language Agent (DEC-099) — 2026-08-16
+
+- **CONFIRMED_SOURCE_TEST:** Public create/message accept additive optional `courseId` as Course resource scope, not actor identity. Backend validates session access, binds the conversation, copies scope onto V30 delegation, and filters discovery before ZERO/SINGLE/MULTIPLE. Conversation A cannot be reused in Course B. AI persists the same `courseId`, refuses mismatch, does not reuse a prior `discover_resource_context` from another Course, and hides TOOL traces from GET conversation.
+- **UNCHANGED:** DEC-081 proposal → Confirm → `JiraTaskWriteService`. Session + CSRF + no Bearer. MEMBER/LEADER/Lecturer/Admin permissions. Commit-review lane.
+- **VERIFICATION:** targeted Agent + OpenAPI **PASS** (OpenAPI still **152**). Full deterministic AI **348 passed / 4 deselected** (`real_provider` excluded). `git diff --check` clean on both repos. Browser/HF smoke **TBD**.
+- **Contracts:** OpenAPI **152**. Flyway **V43**. AI Alembic **20260819_0007**.
+
 ## Lecturer Course broadcast optional HTTPS actionUrl (DEC-098) — 2026-08-16
 
 - **CONFIRMED_SOURCE:** Admin broadcast contract unchanged: `{audience, title, message}` only. `ALL` and extra `actionUrl`/`link` remain `400 INVALID_REQUEST` because Jackson fail-on-unknown-properties and enum binding stay fail-closed. Missing `Idempotency-Key` is the same generic `INVALID_REQUEST`.

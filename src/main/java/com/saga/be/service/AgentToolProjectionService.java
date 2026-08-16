@@ -104,22 +104,32 @@ public class AgentToolProjectionService {
 
     @Transactional(readOnly = true)
     public InternalAgentToolResponses.ResourceContext resourceContext(SagaPrincipal actor) {
+        return resourceContext(actor, null);
+    }
+
+    @Transactional(readOnly = true)
+    public InternalAgentToolResponses.ResourceContext resourceContext(
+            SagaPrincipal actor, UUID courseId
+    ) {
         if (actor.applicationRole() == ApplicationRole.STUDENT) {
-            return studentResourceContext(actor);
+            return studentResourceContext(actor, courseId);
         }
         if (actor.applicationRole() == ApplicationRole.LECTURER) {
-            return lecturerResourceContext(actor);
+            return lecturerResourceContext(actor, courseId);
         }
         if (actor.applicationRole() == ApplicationRole.ADMIN) {
+            if (courseId != null) {
+                return adminCourseResourceContext(actor, courseId);
+            }
             return new InternalAgentToolResponses.ResourceContext(
                     actor.applicationRole().name(), "SYSTEM_SCOPE", 0, 0, 0,
-                    List.of(), List.of(), currentActor(actor, "ZERO_MATCH", 0)
+                    List.of(), List.of(), currentActor(actor, "ZERO_MATCH", 0), null
             );
         }
         return new InternalAgentToolResponses.ResourceContext(
                 actor.applicationRole().name(), "ROLE_NOT_SUPPORTED", 0, 0, 0,
                 List.of(), List.of("CONTEXT_DISCOVERY_NOT_AVAILABLE"),
-                currentActor(actor, "ZERO_MATCH", 0)
+                currentActor(actor, "ZERO_MATCH", 0), courseId
         );
     }
 
@@ -381,7 +391,9 @@ public class AgentToolProjectionService {
         return counts;
     }
 
-    private InternalAgentToolResponses.ResourceContext studentResourceContext(SagaPrincipal actor) {
+    private InternalAgentToolResponses.ResourceContext studentResourceContext(
+            SagaPrincipal actor, UUID activeCourseId
+    ) {
         List<TeamMember> memberships = teamMembers.findAgentContextsByStudentId(actor.localProfileId());
         Map<UUID, Course> coursesById = new LinkedHashMap<>();
         Map<UUID, List<InternalAgentToolResponses.ResourceTeamContext>> teamsByCourse = new LinkedHashMap<>();
@@ -392,10 +404,13 @@ public class AgentToolProjectionService {
             if (team == null || team.getCourse() == null || team.getId() == null) {
                 continue;
             }
-            UUID courseId = team.getCourse().getId();
-            coursesById.putIfAbsent(courseId, team.getCourse());
+            UUID membershipCourseId = team.getCourse().getId();
+            if (activeCourseId != null && !activeCourseId.equals(membershipCourseId)) {
+                continue;
+            }
+            coursesById.putIfAbsent(membershipCourseId, team.getCourse());
             if (teamIds.add(team.getId())) {
-                teamsByCourse.computeIfAbsent(courseId, ignored -> new ArrayList<>()).add(
+                teamsByCourse.computeIfAbsent(membershipCourseId, ignored -> new ArrayList<>()).add(
                         resourceTeam(team, membership.getRoleInTeam())
                 );
             }
@@ -405,13 +420,22 @@ public class AgentToolProjectionService {
         }
         return resourceContext(
                 actor.applicationRole(), selectionState(projectIds.size()), coursesById,
-                teamsByCourse, teamIds.size(), projectIds.size(), currentActor(actor, ledState(memberships), ledCount(memberships))
+                teamsByCourse, teamIds.size(), projectIds.size(),
+                currentActor(actor, ledState(memberships), ledCount(memberships)),
+                activeCourseId
         );
     }
 
-    private InternalAgentToolResponses.ResourceContext lecturerResourceContext(SagaPrincipal actor) {
+    private InternalAgentToolResponses.ResourceContext lecturerResourceContext(
+            SagaPrincipal actor, UUID activeCourseId
+    ) {
         List<Course> instructedCourses = courses
                 .findByInstructorIdAndDeletedAtIsNullOrderByCourseCodeAscIdAsc(actor.localProfileId());
+        if (activeCourseId != null) {
+            instructedCourses = instructedCourses.stream()
+                    .filter(course -> activeCourseId.equals(course.getId()))
+                    .toList();
+        }
         Map<UUID, Course> coursesById = new LinkedHashMap<>();
         Map<UUID, List<InternalAgentToolResponses.ResourceTeamContext>> teamsByCourse = new LinkedHashMap<>();
         Set<UUID> teamIds = new LinkedHashSet<>();
@@ -432,7 +456,41 @@ public class AgentToolProjectionService {
         return resourceContext(
                 actor.applicationRole(), selectionState(coursesById.size()), coursesById,
                 teamsByCourse, teamIds.size(), projectIds.size(),
-                currentActor(actor, "ZERO_MATCH", 0)
+                currentActor(actor, "ZERO_MATCH", 0),
+                activeCourseId
+        );
+    }
+
+    private InternalAgentToolResponses.ResourceContext adminCourseResourceContext(
+            SagaPrincipal actor, UUID activeCourseId
+    ) {
+        Course course = courses.findByIdAndDeletedAtIsNull(activeCourseId).orElse(null);
+        if (course == null) {
+            return resourceContext(
+                    actor.applicationRole(), "ZERO_MATCH", Map.of(), Map.of(), 0, 0,
+                    currentActor(actor, "ZERO_MATCH", 0), activeCourseId
+            );
+        }
+        Map<UUID, Course> coursesById = new LinkedHashMap<>();
+        coursesById.put(course.getId(), course);
+        Map<UUID, List<InternalAgentToolResponses.ResourceTeamContext>> teamsByCourse = new LinkedHashMap<>();
+        Set<UUID> teamIds = new LinkedHashSet<>();
+        Set<UUID> projectIds = new LinkedHashSet<>();
+        List<InternalAgentToolResponses.ResourceTeamContext> courseTeams = new ArrayList<>();
+        for (Team team : teams.findByCourseIdOrderByNameAscIdAsc(course.getId())) {
+            if (teamIds.add(team.getId())) {
+                courseTeams.add(resourceTeam(team, null));
+            }
+            if (team.getProject() != null) {
+                projectIds.add(team.getProject().getId());
+            }
+        }
+        teamsByCourse.put(course.getId(), courseTeams);
+        return resourceContext(
+                actor.applicationRole(), selectionState(1), coursesById,
+                teamsByCourse, teamIds.size(), projectIds.size(),
+                currentActor(actor, "ZERO_MATCH", 0),
+                activeCourseId
         );
     }
 
@@ -443,7 +501,8 @@ public class AgentToolProjectionService {
             Map<UUID, List<InternalAgentToolResponses.ResourceTeamContext>> teamsByCourse,
             long totalTeams,
             long totalProjects,
-            InternalAgentToolResponses.CurrentActor currentActor
+            InternalAgentToolResponses.CurrentActor currentActor,
+            UUID activeCourseId
     ) {
         List<String> limitations = new ArrayList<>();
         if (coursesById.size() > MAX_CONTEXT_COURSES) {
@@ -474,7 +533,7 @@ public class AgentToolProjectionService {
         }
         return new InternalAgentToolResponses.ResourceContext(
                 role.name(), selectionState, coursesById.size(), totalTeams, totalProjects,
-                List.copyOf(result), List.copyOf(limitations), currentActor
+                List.copyOf(result), List.copyOf(limitations), currentActor, activeCourseId
         );
     }
 

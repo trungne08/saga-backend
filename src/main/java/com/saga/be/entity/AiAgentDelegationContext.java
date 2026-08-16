@@ -44,5 +44,9 @@ public class AiAgentDelegationContext extends BaseEntity {
 
     @Column(name = "expires_at", nullable = false)
     private LocalDateTime expiresAt;
+
+    @JdbcTypeCode(Types.CHAR)
+    @Column(name = "course_id", columnDefinition = "char(36)")
+    private UUID courseId;
 }
 

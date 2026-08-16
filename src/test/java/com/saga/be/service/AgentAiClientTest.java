@@ -120,6 +120,44 @@ class AgentAiClientTest {
     }
 
     @Test
+    void createConversationSendsCourseIdAsResourceScopeNotActorIdentity() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        AgentAiClient client = new AgentAiClient(properties("b".repeat(40)), builder.build());
+        SagaPrincipal actor = actor();
+        UUID conversationId = UUID.randomUUID();
+        UUID courseId = UUID.randomUUID();
+        server.expect(once(), requestTo("https://ai.example/internal/backend/v1/agent/conversations"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(jsonPath("$.ownerId").value("STUDENT:" + actor.localProfileId()))
+                .andExpect(jsonPath("$.courseId").value(courseId.toString()))
+                .andExpect(jsonPath("$.actorId").doesNotExist())
+                .andExpect(jsonPath("$.currentActor").doesNotExist())
+                .andRespond(withSuccess(
+                        """
+                        {
+                          "id":"%s",
+                          "title":"Course chat",
+                          "courseId":"%s",
+                          "applicationRoleSnapshot":"STUDENT",
+                          "archived":false,
+                          "createdAt":"2026-08-16T00:00:00Z",
+                          "updatedAt":"2026-08-16T00:00:00Z",
+                          "messages":[]
+                        }
+                        """.formatted(conversationId, courseId),
+                        MediaType.APPLICATION_JSON
+                ));
+
+        AgentApiResponses.Conversation created = client.createConversation(
+                actor, "Course chat", "SE123456", courseId
+        );
+
+        assertEquals(courseId, created.courseId());
+        server.verify();
+    }
+
+    @Test
     void missingCredentialFailsClosedBeforeHttp() {
         AgentAiClient client = new AgentAiClient(properties(null), RestClient.create());
 

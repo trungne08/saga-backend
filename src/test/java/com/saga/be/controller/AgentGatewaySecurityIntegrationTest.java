@@ -160,12 +160,12 @@ class AgentGatewaySecurityIntegrationTest {
     void resourceDiscoveryUsesServiceCredentialAndDelegatedCurrentActor() throws Exception {
         SagaPrincipal student = (SagaPrincipal) authFor(ApplicationRole.STUDENT).getPrincipal();
         String opaqueContext = "opaque-delegated-context-value-1234567890";
-        when(delegations.resolve(
+        when(delegations.resolveAccess(
                 opaqueContext, CONVERSATION_ID, AgentDelegationCapability.READ
-        )).thenReturn(student);
-        when(projections.resourceContext(student)).thenReturn(
+        )).thenReturn(new com.saga.be.service.AgentDelegatedAccess(student, null));
+        when(projections.resourceContext(student, null)).thenReturn(
                 new com.saga.be.dto.response.InternalAgentToolResponses.ResourceContext(
-                        "STUDENT", "ZERO_MATCH", 0, 0, 0, List.of(), List.of(), null
+                        "STUDENT", "ZERO_MATCH", 0, 0, 0, List.of(), List.of(), null, null
                 )
         );
 
@@ -184,9 +184,9 @@ class AgentGatewaySecurityIntegrationTest {
         String opaqueContext = "opaque-delegated-context-value-1234567890";
         UUID projectId = UUID.randomUUID();
         UUID studentId = UUID.randomUUID();
-        when(delegations.resolve(
+        when(delegations.resolveAccess(
                 opaqueContext, CONVERSATION_ID, AgentDelegationCapability.READ
-        )).thenReturn(actor);
+        )).thenReturn(new com.saga.be.service.AgentDelegatedAccess(actor, null));
         when(projections.resolveAssignee(actor, projectId, null, "SE123456")).thenReturn(
                 new com.saga.be.dto.response.InternalAgentToolResponses.AssigneeResolution(
                         projectId, UUID.randomUUID(), "MATCHED",
@@ -215,9 +215,9 @@ class AgentGatewaySecurityIntegrationTest {
     void selfProgressRejectsBrowserIdentityFieldsAndUsesDelegatedActor() throws Exception {
         SagaPrincipal student = (SagaPrincipal) authFor(ApplicationRole.STUDENT).getPrincipal();
         String opaqueContext = "opaque-delegated-context-value-1234567890";
-        when(delegations.resolve(
+        when(delegations.resolveAccess(
                 opaqueContext, CONVERSATION_ID, AgentDelegationCapability.READ
-        )).thenReturn(student);
+        )).thenReturn(new com.saga.be.service.AgentDelegatedAccess(student, null));
         when(roleAware.selfProgress(student, null, null)).thenReturn(
                 new com.saga.be.dto.response.InternalAgentToolResponses.SelfProgress(
                         "ZERO_MATCH", null, null, null, null, null, List.of(), List.of(), List.of(), List.of(), List.of()
@@ -261,9 +261,9 @@ class AgentGatewaySecurityIntegrationTest {
     void memberLecturerReportIsForbiddenWithSafeDenial() throws Exception {
         SagaPrincipal student = (SagaPrincipal) authFor(ApplicationRole.STUDENT).getPrincipal();
         String opaqueContext = "opaque-delegated-context-value-1234567890";
-        when(delegations.resolve(
+        when(delegations.resolveAccess(
                 opaqueContext, CONVERSATION_ID, AgentDelegationCapability.READ
-        )).thenReturn(student);
+        )).thenReturn(new com.saga.be.service.AgentDelegatedAccess(student, null));
         when(roleAware.lecturerProgressReport(student, null))
                 .thenThrow(new AccessDeniedException("This tool is available only to the current Lecturer"));
 
@@ -280,9 +280,9 @@ class AgentGatewaySecurityIntegrationTest {
     void nonAdminSystemReportIsForbiddenWithSafeDenial() throws Exception {
         SagaPrincipal lecturer = (SagaPrincipal) authFor(ApplicationRole.LECTURER).getPrincipal();
         String opaqueContext = "opaque-delegated-context-value-1234567890";
-        when(delegations.resolve(
+        when(delegations.resolveAccess(
                 opaqueContext, CONVERSATION_ID, AgentDelegationCapability.READ
-        )).thenReturn(lecturer);
+        )).thenReturn(new com.saga.be.service.AgentDelegatedAccess(lecturer, null));
         when(roleAware.adminSystemReport(lecturer))
                 .thenThrow(new AccessDeniedException("Admin system report is available only to ADMIN"));
 
@@ -297,7 +297,7 @@ class AgentGatewaySecurityIntegrationTest {
 
     private AgentApiResponses.Conversation conversation() {
         return new AgentApiResponses.Conversation(
-                CONVERSATION_ID, "Private", "ADMIN", false,
+                CONVERSATION_ID, "Private", null, "ADMIN", false,
                 "2026-08-14T00:00:00Z", "2026-08-14T00:00:00Z", List.of()
         );
     }
