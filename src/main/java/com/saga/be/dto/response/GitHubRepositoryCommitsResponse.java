@@ -6,6 +6,6 @@ import java.util.UUID;
 
 public record GitHubRepositoryCommitsResponse(UUID repositoryId, String branch, Page commits) {
     public record Commit(String sha, String message, String authorName, String authorLogin,
-                         Instant authoredAt, Instant committedAt, String url) {}
+                         Instant authoredAt, Instant committedAt, String url, CommitReviewSummary review) {}
     public record Page(List<Commit> content, int page, int size, boolean hasNext) {}
 }

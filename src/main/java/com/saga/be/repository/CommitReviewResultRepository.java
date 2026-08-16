@@ -15,6 +15,8 @@ public interface CommitReviewResultRepository extends JpaRepository<CommitReview
 
     Optional<CommitReviewResult> findByIntentId(UUID intentId);
 
+    List<CommitReviewResult> findByIntentIdIn(Collection<UUID> intentIds);
+
     Optional<CommitReviewResult> findByAiJobId(UUID aiJobId);
 
     @EntityGraph(attributePaths = {"intent", "repo", "commit"})

@@ -1,3 +1,32 @@
+## Realtime account disable / forced logout (DEC-106) — 2026-08-17
+
+OpenAPI **154**. No migration. DEC-101 request-level `401 ACCOUNT_DISABLED` is unchanged and remains the hard fallback.
+
+After login/hydrate of an ACTIVE Student or Lecturer, open **one** app-wide EventSource. Do not open per component. Do not poll `/api/auth/me`. Do not use Firebase/FCM or notification permission as the logout channel.
+
+```ts
+const events = new EventSource(
+  `${API_BASE_URL}/api/auth/session-events`,
+  { withCredentials: true }
+);
+
+events.addEventListener("account-disabled", (event) => {
+  events.close();
+  authStore.setAuthError(
+    "Tài khoản của bạn đã bị vô hiệu hóa. Vui lòng liên hệ Quản trị viên."
+  );
+  authStore.logoutLocalOnlyOrClearState();
+  navigate("/", { replace: true });
+});
+```
+
+- Session cookie only. No Bearer, no CSRF, no `actorId` / profile id / session id in the URL or body.
+- Event data is `{"code":"ACCOUNT_DISABLED","occurredAt":"<UTC ISO>"}`. Ignore `heartbeat` (`{}`). Do not parse Admin/INACTIVE/SUSPENDED from this channel.
+- Backend already invalidates the JSESSIONID. FE must not PATCH/POST to confirm. A logout API call after the event is optional and must not create a redirect loop.
+- Disabled reconnect receives `401 ACCOUNT_DISABLED` (DEC-101) and must not become a usable stream.
+- Re-enable never restores the old session; the user logs in again.
+- Cross-replica delivery is bounded by a 5s server-side DB revalidation, not a global event bus. Keep the existing global `401 ACCOUNT_DISABLED` interceptor.
+
 ## Extra Master (DEC-097) — 2026-08-16
 
 OpenAPI **152**. Migration head **V42**. Public AI routes unchanged.
@@ -562,6 +591,7 @@ fetch(`${API_BASE_URL}/api/auth/me`, { credentials: "include" });
 | GET | `/api/auth/login` | Public | `302 Found` đến `/oauth2/authorization/cognito`. |
 | GET | `/api/auth/me` | Session | `200` với `AuthMeResponse`; endpoint này vẫn chạm CSRF token để browser nhận cookie CSRF. |
 | GET | `/api/auth/csrf` | Session | `200` với token CSRF JSON cho frontend khác domain; không trả session id hay OAuth token. |
+| GET | `/api/auth/session-events` | Session | SSE `text/event-stream`. Student/Lecturer nhận `account-disabled`; Admin heartbeat-only. GET, không CSRF, không Bearer. |
 | POST | `/api/auth/logout` | Framework-managed + CSRF | CSRF hợp lệ trả `302` đến Cognito `/logout`; session hiện có bị hủy. Thiếu/sai CSRF trả `403`. |
 
 Khởi tạo login bằng **browser navigation**, không dùng `fetch`:
@@ -2008,7 +2038,7 @@ Do not send `actorId`, `ownerId`, `applicationRole`, `studentId`, `lecturerId`, 
 
 A chat response includes `conversationId`, `messageId`, `text`, `status`, citations, optional `pendingAction`, optional `generatedArtifact`, optional `jobReference`, suggested follow-ups, and safe provider/model metadata. Render factual errors as unavailable/forbidden/not found; do not convert a failed tool or mutation into success text. Always bind Confirm/Cancel to `pendingAction.id` from **this message response**, not a previously cached proposal. Sequential Task proposals in one conversation have different ids.
 
-For `pendingAction`, show the immutable summary and expiry with explicit **Confirm** and **Cancel** controls. No Task exists before Confirm. If the proposal includes a Sprint, the summary must show the resolved Sprint **name**, not only a UUID. Confirm/Cancel still send no actor fields and no Sprint mutation body.
+For `pendingAction`, show the immutable summary and expiry with explicit **Confirm** and **Cancel** controls. No Task exists before Confirm. If the proposal includes a Sprint, the summary must show the resolved Sprint **name**, not only a UUID. Agent Task create also requires exactly one reserved contribution label (`saga:code`, `saga:test`, `saga:document`, or `saga:research`); the Confirm summary includes that exact marker. If the user did not choose one, the assistant asks — it does not invent a label from the title. Confirm/Cancel still send no actor fields and no Sprint mutation body.
 
 Disable repeated confirmation after the first request. Backend/AI still enforce atomic `PENDING` claim once and stable idempotency. Expired/rejected/completed/failed actions require a **new proposal in the same conversation**, not a new conversation. While a currently active `PENDING` or `EXECUTING` action exists, V1 does not open a second parallel Confirm card; keep the current card and ask the user to Confirm or Cancel it first. **DEC-100 exception (narrow):** if this `TASK_CREATE` proposal had a Sprint and Confirm returns `409 JIRA_WRITE_RECOVERY_REQUIRED` or `409 JIRA_WRITE_OPERATION_IN_PROGRESS`, retry the **same** Confirm (`same actionId`, empty body, session + CSRF). Do not send a new proposal, do not derive keys, and do not call `PUT /api/v1/projects/{projectId}/tasks/{taskId}/sprint` for the happy path or this recovery. Do not retry Confirm for `TASK_UPDATE`, for create-only proposals, or for other 4xx/5xx. A concurrent double-submit may return `409`; that is fail-safe, not a second Confirm. Success remains `200` `{ actionId, status: "COMPLETED", task }`. Error bodies stay `ApiErrorResponse` without a Task.
 
@@ -2050,6 +2080,8 @@ Treat `401 ACCOUNT_DISABLED` as terminal for the local auth UI: clear authentica
 
 The backend invalidates only the session that reaches it. It does not claim instant global cross-browser/cross-instance revocation, and re-enabling an account does not revive an already invalidated session; the user must authenticate again.
 
+DEC-106 adds a best-effort same-browser SSE push on `GET /api/auth/session-events` so an open tab can logout without waiting for the next API call. It does not replace this 401 interceptor. If EventSource is missing, disconnected, or the Admin mutation landed on another replica, the next `/api/**` request still returns `401 ACCOUNT_DISABLED` here.
+
 ## Admin graph-processing density (DEC-102) — 2026-08-17
 
 `GET /api/admin/reports/graph-processing` remains an ADMIN-only browser-session GET (`credentials: "include"`), requires no CSRF header, and never accepts Bearer authentication. Backend returns real persisted processing work:
@@ -2067,3 +2099,79 @@ The backend invalidates only the session that reaches it. It does not claim inst
 ```
 
 `date` is bucketed by Backend in `Asia/Ho_Chi_Minh`. Do not recompute day buckets in browser timezone. `points` contains only dates with persisted runs inside the current rolling seven local calendar days; an empty array is normal for pre-cutover/no-activity and must not be padded with synthetic zero or historical values. `coverageStart` is the earliest persisted run overall and is `null` until the first actual run. The former `nodesCreated`, `nodesUpdated`, `edgesCreated`, and `edgesUpdated` fields are removed; use only `nodesBuilt`, `edgesBuilt`, and `runCount`.
+
+## Commit review summary on the public commit list (DEC-105) — 2026-08-17
+
+`GET /api/projects/{projectId}/github/repositories/{repositoryId}/commits` is unchanged as
+an operation — same path, same query params (`branch`, `page`, `size`), same session/CSRF
+rules, same 1..100 `size` bound. Each commit item now additively carries a `review` field.
+No new endpoint was added; do not call any `/internal/**` commit-review route from the browser.
+
+```json
+{
+  "sha": "abc123...",
+  "message": "...",
+  "authorName": "...",
+  "authorLogin": "...",
+  "authoredAt": "2026-08-17T00:00:00Z",
+  "committedAt": "2026-08-17T00:00:00Z",
+  "url": "...",
+  "review": {
+    "intentStatus": "COMPLETED",
+    "reviewMode": "TASK_LINKED",
+    "startedAt": "2026-08-17T00:05:00Z",
+    "completedAt": "2026-08-17T00:06:00Z",
+    "result": {
+      "traceabilityStatus": "VERIFIED",
+      "messageQuality": "GOOD",
+      "codeQuality": "GOOD",
+      "taskAlignment": "ALIGNED",
+      "verdictEligible": true,
+      "verdict": "PASS",
+      "overallStatus": "PASS"
+    }
+  }
+}
+```
+
+`review` is `null` whenever there is no AI review to show yet: the commit has no matching
+local `CommitData` (exact repository + full SHA only — never message/short SHA/author/timestamp
+matching), or a `CommitData` row exists but no review was ever queued for it. Frontend must
+render this exactly as "no AI review yet" and must not infer or display an internal reason.
+
+`intentStatus` is the exact persisted `CommitReviewIntentStatus` value — Backend does not
+synthesize a `QUEUED`/`PROCESSING`/`DONE` public enum. Suggested FE copy:
+
+| `review` shape | Suggested label |
+|---|---|
+| `review == null` | "Chưa có đánh giá AI" |
+| `intentStatus` PENDING / STARTING | "Đang xếp hàng" |
+| `intentStatus` STARTED / RUNNING | "AI đang đánh giá" |
+| `intentStatus` WAITING_RETRY | "Đang thử lại" |
+| `intentStatus` COMPLETED, `result.overallStatus` PASS | "Đạt" |
+| `intentStatus` COMPLETED, `result.overallStatus` NEEDS_CHANGES | "Cần chỉnh sửa" |
+| `intentStatus` COMPLETED, `result.overallStatus` INSUFFICIENT_CONTEXT | "Thiếu ngữ cảnh" |
+| `intentStatus` COMPLETED, `result.verdict` ADVISORY_ONLY | "Khuyến nghị" |
+| `intentStatus` FAILED | "Đánh giá thất bại" |
+| `intentStatus` CANCELLED | "Đã hủy" |
+
+`FAILED` and `CANCELLED` are terminal processing outcomes, not a quality verdict — `result`
+is always `null` for them. **Frontend must never map `FAILED`/`CANCELLED` to
+"Cần chỉnh sửa" (`NEEDS_CHANGES`).** A `COMPLETED` intent can also carry a `null` `result` in
+the rare case the persisted result row is missing (an already-known invariant gap, not a new
+possibility introduced here) — treat it the same as "Chưa có đánh giá AI", never fabricate a verdict.
+
+`reviewMode` is `null` until a `CommitReviewResult` exists (i.e. until `COMPLETED` with a
+persisted result). It is deliberately **not** sourced from the intent's own two-value
+`CommitReviewMode` (`HISTORICAL_LIGHT`/`LIVE_TASK_AWARE`) before that point, because that field's
+`LIVE_TASK_AWARE` value does not resolve into the public `TASK_LINKED`/`UNLINKED_ADVISORY`
+distinction until the AI result actually lands — showing it early would misrepresent an
+undecided outcome as decided. Once populated, `reviewMode` is one of `HISTORICAL_LIGHT`,
+`TASK_LINKED`, `UNLINKED_ADVISORY`.
+
+`findings[]` is intentionally not included in this list projection (it can be large per commit
+across a 20-item page); a future commit-detail endpoint is a separate Product/API decision.
+Backend never exposes `aiJobId`, provider/model identifiers, internal AI URLs, raw error text,
+or OAuth/session/token material through this field. Review enrichment is a pure read
+projection: it never calls AI, enqueues a review, polls a job, or triggers a GitHub sync as a
+side effect of this GET.

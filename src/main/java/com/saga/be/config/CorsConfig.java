@@ -41,7 +41,8 @@ public class CorsConfig {
                         "Content-Type",
                         "X-XSRF-TOKEN",
                         "Accept",
-                        "Idempotency-Key"
+                        "Idempotency-Key",
+                        "Last-Event-ID"
                 )
         );
         configuration.setExposedHeaders(List.of("Location"));

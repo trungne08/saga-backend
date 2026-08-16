@@ -1,3 +1,10 @@
+## Realtime account-disable SSE constraints (DEC-106) — 2026-08-17
+
+- `GET /api/auth/session-events` is session-cookie GET, no CSRF, no Bearer, no client-supplied actor/profile/session identity. SSE registry is ephemeral process-local memory keyed by `ApplicationRole + localProfileId`. Do not persist JSESSIONID, add a session table, Redis, Spring Session, or a security-event table for V1.
+- Immediate push is AFTER_COMMIT in the same JVM only. `GLOBAL_CROSS_INSTANCE_EVENT_BUS = NO`. Cross-instance max delay is the 5s connected-profile DB revalidation (`STATUS_SWEEP_QUERY_COUNT` is 0–2 per sweep, IDs deduplicated). Do not claim global millisecond revocation. Heartbeat must not query DB or write notification/audit rows.
+- DEC-101 remains the hard gate on every `/api/**` request except csrf/logout. Disabled reconnect must not register a usable stream. Re-enable must not resurrect an invalidated session. FCM/Bell stay notification-only and must not become the auth-revocation authority.
+- CORS stays explicit `FRONTEND_ORIGINS` + credentials. `Last-Event-ID` is allowed for EventSource reconnect; wildcards and token-in-URL remain forbidden.
+
 ## Public Course/Contribution legacy field boundary — 2026-08-17
 
 - `CourseResponse` is the public response for Course list/detail/create/update. `academicClass` is present; `clazz`, `academicClazz`, and `designContributionWeight` are absent. This does not rename `Course.clazz`, `class_id`, Class, or `CourseRequest.classId`.
@@ -646,7 +653,7 @@ Bằng chứng: `V2__integration_identity_and_sync.sql`; `BaseEntity.java`; `Sys
 
 - OAuth2/OIDC session: `HttpSessionSecurityContextRepository`, `IF_REQUIRED`, session fixation migrate; logout xoá cookie. Không có Redis/Spring Session dependency/config.
 - Cookie: `JSESSIONID`; CSRF `XSRF-TOKEN` cookie được tạo bằng `CookieCsrfTokenRepository.withHttpOnlyFalse`. Session cookie HttpOnly true; Secure/SameSite theo profile.
-- CORS: explicit origins, `allowCredentials=true`, methods GET/POST/PUT/PATCH/DELETE/OPTIONS; allowed request headers `Authorization`, `Content-Type`, `X-XSRF-TOKEN`, `Accept`, `Idempotency-Key`; FE cross-origin phải `credentials: "include"`. `Idempotency-Key` bắt buộc cho Jira Task/Sprint mutation nên CORS preflight phải allow header này; không dùng wildcard.
+- CORS: explicit origins, `allowCredentials=true`, methods GET/POST/PUT/PATCH/DELETE/OPTIONS; allowed request headers `Authorization`, `Content-Type`, `X-XSRF-TOKEN`, `Accept`, `Idempotency-Key`, `Last-Event-ID`; FE cross-origin phải `credentials: "include"`. `Idempotency-Key` bắt buộc cho Jira Task/Sprint mutation nên CORS preflight phải allow header này; `Last-Event-ID` phục vụ EventSource reconnect trên `GET /api/auth/session-events`; không dùng wildcard.
 - Mutation POST/PUT/PATCH/DELETE phải gửi `X-XSRF-TOKEN` tương ứng cookie; webhook miễn CSRF.
 - `/api/auth/login` nên browser redirect, không fetch/Axios login flow. Swagger cookie `JSESSIONID`; cần login cùng browser và tự thêm CSRF cho mutation.
 - Provider security: GitHub HMAC SHA-256 constant-time comparison; Jira HS256 JWT/time claims và board secret. Cognito provider token không lưu/đưa ra FE; Jira token server-side encrypted; GitHub installation token cache in-memory; refresh token không đưa FE.

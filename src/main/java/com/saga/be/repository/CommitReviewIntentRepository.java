@@ -18,6 +18,8 @@ public interface CommitReviewIntentRepository extends JpaRepository<CommitReview
 
     Optional<CommitReviewIntent> findByRepoIdAndShaHash(UUID repoId, String shaHash);
 
+    List<CommitReviewIntent> findByRepoIdAndShaHashIn(UUID repoId, Collection<String> shaHashes);
+
     Optional<CommitReviewIntent> findByAiJobId(UUID aiJobId);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)

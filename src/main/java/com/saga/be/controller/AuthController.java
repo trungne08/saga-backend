@@ -4,13 +4,17 @@ import com.saga.be.dto.response.AuthMeResponse;
 import com.saga.be.dto.response.CsrfTokenResponse;
 import com.saga.be.dto.request.SelfProfileUpdateRequest;
 import com.saga.be.exception.UnauthenticatedRequestException;
+import com.saga.be.security.AccountSessionEventHub;
 import com.saga.be.security.SagaPrincipal;
 import com.saga.be.service.CurrentAccountStatusService;
 import com.saga.be.service.SelfProfileService;
 import jakarta.validation.Valid;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpSession;
 import java.net.URI;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -20,6 +24,7 @@ import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @RestController
 @io.swagger.v3.oas.annotations.tags.Tag(name = "Xác thực", description = "Đăng nhập, phiên làm việc và CSRF.")
@@ -28,13 +33,16 @@ public class AuthController {
 
     private final CurrentAccountStatusService accountStatusService;
     private final SelfProfileService selfProfileService;
+    private final AccountSessionEventHub accountSessionEventHub;
 
     public AuthController(
             CurrentAccountStatusService accountStatusService,
-            SelfProfileService selfProfileService
+            SelfProfileService selfProfileService,
+            AccountSessionEventHub accountSessionEventHub
     ) {
         this.accountStatusService = accountStatusService;
         this.selfProfileService = selfProfileService;
+        this.accountSessionEventHub = accountSessionEventHub;
     }
 
     @GetMapping("/login")
@@ -89,5 +97,30 @@ public class AuthController {
             return CsrfTokenResponse.from(csrfToken);
         }
         throw new IllegalStateException("Spring Security did not provide a CSRF token");
+    }
+
+    @GetMapping(value = "/session-events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @io.swagger.v3.oas.annotations.Operation(
+            summary = "Nhận sự kiện phiên làm việc",
+            description = "Luồng SSE theo browser session. Student/Lecturer nhận account-disabled khi tài khoản không còn ACTIVE. Không nhận Bearer, CSRF hay định danh từ client."
+    )
+    public SseEmitter sessionEvents(
+            @AuthenticationPrincipal SagaPrincipal principal,
+            HttpServletRequest request,
+            HttpServletResponse response
+    ) {
+        if (principal == null) {
+            throw new UnauthenticatedRequestException();
+        }
+        HttpSession session = request.getSession(false);
+        if (session == null) {
+            throw new UnauthenticatedRequestException();
+        }
+        response.setHeader("Cache-Control", "no-cache");
+        try {
+            return accountSessionEventHub.subscribe(principal, session);
+        } catch (IllegalArgumentException exception) {
+            throw new UnauthenticatedRequestException();
+        }
     }
 }

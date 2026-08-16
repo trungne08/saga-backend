@@ -1,3 +1,27 @@
+## DEC-106 — Realtime account-disable browser revocation over session SSE
+
+- Date: 2026-08-17; status: **ACCEPTED / IMPLEMENTED_SOURCE_TEST**.
+- Extends DEC-101; does not rewrite it. Request-level `401 ACCOUNT_DISABLED`, session invalidation, `/api/auth/me` gating, self-profile PATCH gating, and disabled OIDC callback behavior remain the hard security fallback.
+- New public operation: `GET /api/auth/session-events` (`text/event-stream`). Auth is the current browser `JSESSIONID` only. GET, no CSRF, no Bearer, no actor/profile/session id from the client. Actor is `SagaPrincipal`.
+- Canonical browser event is `account-disabled` with `{"code":"ACCOUNT_DISABLED","occurredAt":"<UTC ISO>"}`. INACTIVE and SUSPENDED map to the same code. Payload never includes identity, tokens, session id, Admin identity, or raw status.
+- After a successful Admin `PATCH /api/admin/users/{id}/status` to a non-ACTIVE status, an internal `AccountDisabledEvent` is published and handled `@TransactionalEventListener(AFTER_COMMIT)`. Same-JVM open Student/Lecturer SSE subscriptions are pushed, their `HttpSession`s are invalidated, and emitters are completed. A failed emitter cannot roll back the committed status change.
+- SSE registry is process-local in-memory, keyed by `ApplicationRole + localProfileId`. No Redis, Spring Session, shared event bus, or JSESSIONID persistence. `GLOBAL_CROSS_INSTANCE_EVENT_BUS = NO`. Replica B detects a disable committed on replica A by a single bounded 5s DB revalidation of currently connected profiles (`MAX_EXPECTED_DETECTION_DELAY <= 5s`). Do not claim millisecond-global revocation.
+- ADMIN may keep a heartbeat-only stream; Admin has no AccountStatus. Re-enable does not resurrect an invalidated session and does not send `account-enabled`. FCM/Bell remain notification transport and are not auth-revocation authority.
+- CORS stays explicit `FRONTEND_ORIGINS` with credentials; `Last-Event-ID` is allowed for EventSource reconnect. No wildcard, no token in URL.
+- Verification: targeted SSE hub/integration + DEC-101/OIDC/self-profile/auth/OpenAPI/CORS tests **PASS**. OpenAPI **154**. `MIGRATION_REQUIRED = NO`. `git diff --check` passes.
+
+## DEC-105 — Public commit review summary is additive on the existing commit list
+
+- Date: 2026-08-17; status: **ACCEPTED / IMPLEMENTED_SOURCE_TEST**.
+- **PUBLIC_API_OPERATION_CHANGED = NO.** No new endpoint. `GET /api/projects/{projectId}/github/repositories/{repositoryId}/commits` keeps its path, `branch`/`page`/`size` params, authorization, and GitHub provider pagination/error semantics unchanged. Internal `/internal/**` commit-review routes remain non-FE-contract.
+- **PUBLIC_API_SCHEMA_CHANGED = YES (additive only).** Each `Commit` item gains a nullable `review: CommitReviewSummary | null`. New `CommitReviewSummary` schema: `intentStatus` (exact persisted `CommitReviewIntentStatus`, 8 values, no synthetic public enum), `reviewMode` (nullable, see below), `startedAt`/`completedAt` (both nullable — `CommitReviewIntent.started_at`/`completed_at` are nullable DB columns), and `result` (nullable `{traceabilityStatus, messageQuality, codeQuality, taskAlignment, verdictEligible, verdict, overallStatus}`, all source-backed from persisted `CommitReviewResult`, no `findings[]` in this list projection).
+- `review = null` when the provider commit has no matching local `CommitData` (exact repo + full SHA only, never message/short SHA/author/timestamp), or `CommitData` exists but no `CommitReviewIntent` was ever queued for it.
+- `FAILED`/`CANCELLED` intents always map to `result = null`; the resolver forces this even if a `CommitReviewResult` row unexpectedly exists, so a processing failure can never be misread as a `NEEDS_CHANGES` verdict. A `COMPLETED` intent without a persisted result also maps to `result = null` rather than fabricating a verdict — an already-known invariant gap, not new behavior introduced here.
+- `reviewMode` is populated only from a persisted `CommitReviewResult` (`HISTORICAL_LIGHT`/`TASK_LINKED`/`UNLINKED_ADVISORY`), never from `CommitReviewIntent.reviewMode`'s own two-value `CommitReviewMode` enum (`HISTORICAL_LIGHT`/`LIVE_TASK_AWARE`). Those are different concepts: an intent's `LIVE_TASK_AWARE` mode only resolves into the public `TASK_LINKED` vs `UNLINKED_ADVISORY` distinction once the AI result exists, so exposing it earlier would misrepresent an undecided outcome as decided; the field is `null` until then.
+- Batch resolution (`CommitReviewSummaryResolver`) loads local `CommitData`, `CommitReviewIntent`, and `CommitReviewResult` for the entire requested commit page in three bounded repository queries, independent of page size (bounded by the existing `size<=100` cap) — no per-commit query.
+- Never exposes `aiJobId`, provider/model identifiers, internal AI URLs, raw error text, or OAuth/session/token material. Enrichment is read-only: it never calls AI, enqueues/polls a review job, or triggers a GitHub sync as a side effect of this GET.
+- No migration. No auth/permission change. No Contribution/Jira change.
+
 ## DEC-104 — Disabled OIDC browser callback redirects safely to Frontend
 
 - Date: 2026-08-17; status: **ACCEPTED / IMPLEMENTED_SOURCE_TEST**.

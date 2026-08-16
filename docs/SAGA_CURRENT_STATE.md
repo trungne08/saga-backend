@@ -1,3 +1,16 @@
+## Realtime account-disable SSE (DEC-106) — 2026-08-17
+
+- **CONFIRMED_SOURCE_TEST:** `GET /api/auth/session-events` is a session-authenticated SSE stream. After Admin PATCH commits a Student/Lecturer to INACTIVE/SUSPENDED, same-JVM open browsers receive `event: account-disabled` / `{"code":"ACCOUNT_DISABLED","occurredAt"}`, attached `HttpSession`s are invalidated, and emitters close. ADMIN is heartbeat-only.
+- **AUTHORITY:** DB `AccountStatus` remains source of truth. DEC-101 request-level `401 ACCOUNT_DISABLED` is unchanged. There is no Redis/Spring Session/shared event bus; cross-replica detection is a single bounded 5s sweep of connected profile IDs. FCM is not used for auth revocation. Re-enable requires a new login.
+- **VERIFICATION:** targeted hub + session-events + DEC-101/OIDC/self-profile/auth/OpenAPI/CORS tests **PASS**. OpenAPI **154**. No migration. `git diff --check` passes.
+
+## Agent Task create reserved contribution label — 2026-08-17
+
+- **CONFIRMED_SOURCE_TEST:** `propose_task_create` now requires exactly one reserved Contribution marker: `saga:code`, `saga:test`, `saga:document`, or `saga:research`. Backend validate copies that exact string into the pending payload and Confirm card `summary` (`label 'saga:code'`). Confirm still writes it through existing `JiraTaskCreateRequest.labels`.
+- **FAIL-CLOSED:** omit/empty → `AGENT_TASK_CREATE_LABEL_REQUIRED`. Ordinary labels, wrong case, extras, or two reserved markers → `AGENT_TASK_CREATE_LABEL_INVALID`. AI pydantic rejects the same before Backend. The model must ask if the user named none or more than one; it must not infer a marker from title/type/description.
+- **UNCHANGED:** public Task HTTP create remains optional-labels. DEC-090 scoring still exact-match only. DEC-099/100, session+CSRF, no Jira before Confirm. No public route/schema/migration.
+- **VERIFICATION:** AI label + leader/sprint/proposal tests **PASS**. Full deterministic AI **396 passed / 4 deselected**. Backend `AgentTaskProposalValidationServiceTest` + confirm/gateway **PASS**. `git diff --check` clean.
+
 ## Sequential Task proposals in one Course conversation — 2026-08-17
 
 - **CONFIRMED_SOURCE_TEST:** Same-Course conversation reuse is valid for multiple sequential Task proposals. After P1 is `COMPLETED`, `REJECTED`, `EXPIRED`, or `FAILED`, the next user Task-create message may create P2 (`id` new, same `conversationId`). A new conversation is required only on Course change (`409 AI_AGENT_COURSE_SCOPE_MISMATCH`).
@@ -907,3 +920,11 @@ BASE HEAD của snapshot cũ: `0bc30be`. HEAD audit hiện hành là `4f3dee9`; 
 - **IMPLEMENTED / CONFIRMED_SOURCE_TEST:** successful Contribution and Interaction graph projections each write an immutable fail-open `graph_processing_run` telemetry snapshot. UTC time comes from injected `Clock`; count values are the completed response node/edge list sizes.
 - `GET /api/admin/reports/graph-processing` remains the same ADMIN browser-session GET route and now returns real persisted seven-day `Asia/Ho_Chi_Minh` buckets with `historySupported=true` and nullable `coverageStart`. No historic rows/zeros are synthesized; pre-cutover remains empty until actual projections are read.
 - Migration `V44__add_graph_processing_run.sql` has no FK, payload, seed, scheduler, provider or AI change. Targeted recorder, aggregation/window, route-security, migration and OpenAPI tests pass; deployed migration and browser smoke remain **TBD_DEPLOYMENT_SMOKE**.
+
+## Public commit review summary on commit list (DEC-105) — 2026-08-17
+
+- **IMPLEMENTED / CONFIRMED_SOURCE_TEST:** `GET /api/projects/{projectId}/github/repositories/{repositoryId}/commits` gains an additive nullable `review: CommitReviewSummary` field per item. No new endpoint; path, query params, provider pagination/error semantics, and Project-read authorization (ADMIN all / Lecturer own-Course / Student Team MEMBER+LEADER) are byte-identical to before.
+- `review = null` when the provider SHA has no matching local `CommitData` (exact repo + full SHA only) or no `CommitReviewIntent` was ever queued. `FAILED`/`CANCELLED` intents always resolve `result = null` (never `NEEDS_CHANGES`); a `COMPLETED` intent without a persisted `CommitReviewResult` also resolves `result = null` rather than fabricating a verdict. `reviewMode` is populated only from a persisted `CommitReviewResult`, not from the intent's own two-value `CommitReviewMode` enum.
+- `CommitReviewSummaryResolver` batch-resolves the whole requested commit page (`CommitData`, `CommitReviewIntent`, `CommitReviewResult`) in three bounded repository queries regardless of page size; verified with a 20-commit page test asserting exactly one call per repository.
+- Public OpenAPI operation count unchanged at **154**; new `CommitReviewSummary`/`Result` schemas added additively. No `aiJobId`, provider/model identifier, internal AI URL, or raw error text is exposed.
+- **VERIFICATION:** `CommitReviewSummaryResolverTest` (8), `GitHubProjectReadServiceTest` (6, includes 3 new review-enrichment cases), `ProjectGitHubCommitsReviewSummaryIntegrationTest` (3, real H2 + MockMvc, covers ADMIN/Lecturer/Student MEMBER/Student LEADER allow, outsider Lecturer/Student forbidden, anonymous unauthorized), `GeneratedOpenApiDocumentationIntegrationTest` (1) all pass. Full existing suite re-run green after the change. No migration, no auth change, no Contribution/Jira change.

@@ -1,11 +1,17 @@
 package com.saga.be.service;
 
+import com.saga.be.entity.Lecturer;
+import com.saga.be.entity.Student;
 import com.saga.be.entity.enums.AccountStatus;
 import com.saga.be.repository.LecturerRepository;
 import com.saga.be.repository.StudentRepository;
 import com.saga.be.security.ApplicationRole;
 import com.saga.be.security.SagaPrincipal;
+import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -45,6 +51,39 @@ public class CurrentAccountStatusService {
             return null;
         }
         return currentStatus(principal).orElse(principal.accountStatus());
+    }
+
+    /**
+     * Deduplicated status lookup for connected SSE profiles. ADMIN is never status-gated.
+     * Missing profiles keep the established "disappeared profile remains allowed" behavior.
+     */
+    @Transactional(readOnly = true)
+    public Set<UUID> findDisabledIds(ApplicationRole role, Collection<UUID> ids) {
+        if (role == null || ids == null || ids.isEmpty() || role == ApplicationRole.ADMIN) {
+            return Set.of();
+        }
+        Set<UUID> uniqueIds = new LinkedHashSet<>(ids);
+        Set<UUID> disabled = new LinkedHashSet<>();
+        if (role == ApplicationRole.STUDENT) {
+            for (Student student : studentRepository.findAllById(uniqueIds)) {
+                if (student.getAccountStatus() != AccountStatus.ACTIVE) {
+                    disabled.add(student.getId());
+                }
+            }
+            return disabled;
+        }
+        if (role == ApplicationRole.LECTURER) {
+            for (Lecturer lecturer : lecturerRepository.findAllById(uniqueIds)) {
+                AccountStatus status = lecturer.getAccountStatus() == null
+                        ? AccountStatus.ACTIVE
+                        : lecturer.getAccountStatus();
+                if (status != AccountStatus.ACTIVE) {
+                    disabled.add(lecturer.getId());
+                }
+            }
+            return disabled;
+        }
+        return Set.of();
     }
 
     private Optional<AccountStatus> currentStatus(SagaPrincipal principal) {

@@ -15,6 +15,8 @@ public interface CommitDataRepository extends JpaRepository<CommitData, UUID> {
     @org.springframework.data.jpa.repository.EntityGraph(attributePaths = {"repo", "repo.project"})
     Optional<CommitData> findByRepoIdAndShaHash(UUID repoId, String shaHash);
 
+    List<CommitData> findByRepoIdAndShaHashIn(UUID repoId, Collection<String> shaHashes);
+
     @Query("select count(commit) from CommitData commit "
             + "where commit.repo.project.id = :projectId and commit.author.id = :studentId")
     long countByProjectIdAndAuthorId(

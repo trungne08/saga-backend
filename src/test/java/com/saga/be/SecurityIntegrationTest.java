@@ -254,6 +254,27 @@ class SecurityIntegrationTest {
     }
 
     @Test
+    void corsPreflightAllowsSessionEventStreamCredentialsAndLastEventId() throws Exception {
+        MvcResult result = mockMvc.perform(options("/api/auth/session-events")
+                        .header("Origin", "http://localhost:3000")
+                        .header("Access-Control-Request-Method", "GET")
+                        .header("Access-Control-Request-Headers", "Last-Event-ID"))
+                .andExpect(status().isOk())
+                .andExpect(header().string(
+                        "Access-Control-Allow-Origin",
+                        "http://localhost:3000"
+                ))
+                .andExpect(header().string(
+                        "Access-Control-Allow-Credentials",
+                        "true"
+                ))
+                .andReturn();
+        String allowedHeaders = result.getResponse().getHeader("Access-Control-Allow-Headers");
+        assertNotNull(allowedHeaders);
+        assertTrue(allowedHeaders.toLowerCase(Locale.ROOT).contains("last-event-id"));
+    }
+
+    @Test
     void corsPreflightAllowsJiraSprintMutationIdempotencyHeader() throws Exception {
         assertJiraMutationPreflightIsAllowed(
                 "/api/v1/projects/10000000-0000-0000-0000-000000000001/sprints"

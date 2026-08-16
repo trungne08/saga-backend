@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -41,13 +42,15 @@ class AgentTaskProposalValidationServiceTest {
                 actor,
                 new InternalAgentToolRequests.TaskCreate(
                         UUID.randomUUID(), projectId, " Fix login ", TaskType.BUG,
-                        Priority.HIGH, null, null, List.of("auth"), null, null, null
+                        Priority.HIGH, null, null, List.of("saga:code"), null, null, null
                 )
         );
 
         verify(authorization).requireProjectManager(actor, projectId);
         assertEquals("Fix login", result.normalizedPayload().get("title"));
         assertEquals("BUG", result.normalizedPayload().get("type"));
+        assertEquals(List.of("saga:code"), result.normalizedPayload().get("labels"));
+        assertTrue(result.summary().contains("label 'saga:code'"));
         assertFalse(result.normalizedPayload().containsKey("status"));
         assertFalse(result.normalizedPayload().containsKey("sprintId"));
     }
@@ -128,14 +131,14 @@ class AgentTaskProposalValidationServiceTest {
                 actor,
                 new InternalAgentToolRequests.TaskCreate(
                         UUID.randomUUID(), projectId, "Thiết kế Database PostgreSQL", TaskType.TASK,
-                        null, null, null, null, null, null, sprintId
+                        null, null, null, List.of("saga:document"), null, null, sprintId
                 )
         );
 
         verify(authorization).requireProjectManager(actor, projectId);
         assertEquals(sprintId.toString(), result.normalizedPayload().get("sprintId"));
         assertEquals(
-                "Create Task 'Thiết kế Database PostgreSQL' as TASK, sprint 'Sprint 1'",
+                "Create Task 'Thiết kế Database PostgreSQL' as TASK, label 'saga:document', sprint 'Sprint 1'",
                 result.summary()
         );
     }
@@ -161,7 +164,7 @@ class AgentTaskProposalValidationServiceTest {
                         actor,
                         new InternalAgentToolRequests.TaskCreate(
                                 UUID.randomUUID(), projectId, "Task", TaskType.TASK,
-                                null, null, null, null, null, null, sprintId
+                                null, null, null, List.of("saga:code"), null, null, sprintId
                         )
                 )
         );
@@ -169,6 +172,55 @@ class AgentTaskProposalValidationServiceTest {
         assertEquals("JIRA_RESOURCE_NOT_FOUND", failure.getCode());
         assertTrue(failure.getStatus().is4xxClientError());
         verify(authorization).requireProjectManager(actor, projectId);
+    }
+
+    @Test
+    void createProposalRequiresExactlyOneReservedContributionLabel() {
+        ProjectIntegrationAuthorizationService authorization = mock(
+                ProjectIntegrationAuthorizationService.class
+        );
+        AgentTaskProposalValidationService service = new AgentTaskProposalValidationService(
+                authorization, mock(ProjectTaskReadService.class), mock(SprintRepository.class)
+        );
+        SagaPrincipal actor = actor();
+        UUID projectId = UUID.randomUUID();
+
+        IntegrationException missing = assertThrows(
+                IntegrationException.class,
+                () -> service.validateCreate(
+                        actor,
+                        new InternalAgentToolRequests.TaskCreate(
+                                UUID.randomUUID(), projectId, "Fix login", TaskType.BUG,
+                                null, null, null, null, null, null, null
+                        )
+                )
+        );
+        assertEquals("AGENT_TASK_CREATE_LABEL_REQUIRED", missing.getCode());
+
+        IntegrationException ordinary = assertThrows(
+                IntegrationException.class,
+                () -> service.validateCreate(
+                        actor,
+                        new InternalAgentToolRequests.TaskCreate(
+                                UUID.randomUUID(), projectId, "Fix login", TaskType.BUG,
+                                null, null, null, List.of("auth"), null, null, null
+                        )
+                )
+        );
+        assertEquals("AGENT_TASK_CREATE_LABEL_INVALID", ordinary.getCode());
+
+        IntegrationException conflicting = assertThrows(
+                IntegrationException.class,
+                () -> service.validateCreate(
+                        actor,
+                        new InternalAgentToolRequests.TaskCreate(
+                                UUID.randomUUID(), projectId, "Fix login", TaskType.BUG,
+                                null, null, null, List.of("saga:code", "saga:test"), null, null, null
+                        )
+                )
+        );
+        assertEquals("AGENT_TASK_CREATE_LABEL_INVALID", conflicting.getCode());
+        verify(authorization, times(3)).requireProjectManager(actor, projectId);
     }
 
     private SagaPrincipal actor() {

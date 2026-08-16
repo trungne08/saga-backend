@@ -94,8 +94,8 @@ class GeneratedOpenApiDocumentationIntegrationTest {
             }
         }
 
-        assertEquals(153, operationCount,
-                "Added PATCH self-profile update");
+        assertEquals(154, operationCount,
+                "Added GET /api/auth/session-events");
         System.out.println("Generated OpenAPI operation count: " + operationCount);
         assertEquals(usedTags, documentedTags, "Global tags phải đúng bằng tập tag thực sự có operation");
         assertEquals(documentedTags.size(), root.path("tags").size(), "Global tags không được trùng tên");
@@ -105,6 +105,7 @@ class GeneratedOpenApiDocumentationIntegrationTest {
         assertTrue(documentedTags.contains("Loại dự án"));
         assertFalse(root.path("components").path("securitySchemes").has("bearerAuth"));
         assertTrue(root.at("/paths/~1api~1auth~1me/patch").isObject());
+        assertTrue(root.at("/paths/~1api~1auth~1session-events/get").isObject());
         assertTrue(root.at("/components/schemas/AuthMeResponse/properties").has("studentCode"));
         assertTrue(root.at("/components/schemas/SelfProfileUpdateRequest/properties").has("fullName"));
         assertTrue(root.at("/components/schemas/SelfProfileUpdateRequest/properties").has("avatarUrl"));

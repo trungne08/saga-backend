@@ -9,11 +9,13 @@ import com.saga.be.exception.AccountStatusException;
 import com.saga.be.repository.AdminRepository;
 import com.saga.be.repository.LecturerRepository;
 import com.saga.be.repository.StudentRepository;
+import com.saga.be.security.AccountDisabledEvent;
 import com.saga.be.security.ApplicationRole;
 import com.saga.be.security.SagaPrincipal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,15 +27,18 @@ public class AdminUserStatusService {
     private final AdminRepository adminRepository;
     private final LecturerRepository lecturerRepository;
     private final StudentRepository studentRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
     public AdminUserStatusService(
             AdminRepository adminRepository,
             LecturerRepository lecturerRepository,
-            StudentRepository studentRepository
+            StudentRepository studentRepository,
+            ApplicationEventPublisher eventPublisher
     ) {
         this.adminRepository = adminRepository;
         this.lecturerRepository = lecturerRepository;
         this.studentRepository = studentRepository;
+        this.eventPublisher = eventPublisher;
     }
 
     @Transactional
@@ -77,6 +82,7 @@ public class AdminUserStatusService {
             Student student = (Student) target.entity();
             student.setAccountStatus(requestedStatus);
             Student saved = studentRepository.save(student);
+            publishDisabledAfterCommit(ApplicationRole.STUDENT, saved.getId(), saved.getAccountStatus());
             return new AdminUserReadResponse(
                     saved.getId(),
                     ApplicationRole.STUDENT,
@@ -90,6 +96,7 @@ public class AdminUserStatusService {
         Lecturer lecturer = (Lecturer) target.entity();
         lecturer.setAccountStatus(requestedStatus);
         Lecturer saved = lecturerRepository.save(lecturer);
+        publishDisabledAfterCommit(ApplicationRole.LECTURER, saved.getId(), saved.getAccountStatus());
         return new AdminUserReadResponse(
                 saved.getId(),
                 ApplicationRole.LECTURER,
@@ -98,6 +105,17 @@ public class AdminUserStatusService {
                 saved.getAccountStatus(),
                 null
         );
+    }
+
+    private void publishDisabledAfterCommit(
+            ApplicationRole role,
+            UUID localProfileId,
+            AccountStatus accountStatus
+    ) {
+        if (accountStatus == AccountStatus.ACTIVE) {
+            return;
+        }
+        eventPublisher.publishEvent(new AccountDisabledEvent(role, localProfileId, accountStatus));
     }
 
     private List<ProfileTarget> resolve(UUID profileId) {

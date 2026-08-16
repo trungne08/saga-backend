@@ -7,7 +7,11 @@ import com.saga.be.exception.IntegrationException;
 import com.saga.be.integration.security.ProjectIntegrationAuthorizationService;
 import com.saga.be.repository.SprintRepository;
 import com.saga.be.security.SagaPrincipal;
+import com.saga.be.service.contribution.ContributionMarkerClassification;
+import com.saga.be.service.contribution.ReservedContributionMarkerClassifier;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -40,7 +44,8 @@ public class AgentTaskProposalValidationService {
         put(payload, "priority", request.priority() == null ? null : request.priority().name());
         put(payload, "description", normalize(request.description()));
         put(payload, "dueDate", request.dueDate() == null ? null : request.dueDate().toString());
-        put(payload, "labels", request.labels());
+        List<String> labels = requireSingleReservedLabel(request.labels());
+        payload.put("labels", labels);
         put(payload, "componentIds", request.componentIds());
         put(payload, "assigneeId", request.assigneeId() == null ? null : request.assigneeId().toString());
         String sprintName = null;
@@ -64,7 +69,7 @@ public class AgentTaskProposalValidationService {
         return new ActionValidation(
                 true,
                 Map.copyOf(payload),
-                createSummary(request, payload, sprintName)
+                createSummary(request, payload, sprintName, labels.get(0))
         );
     }
 
@@ -104,12 +109,16 @@ public class AgentTaskProposalValidationService {
     private String createSummary(
             InternalAgentToolRequests.TaskCreate request,
             Map<String, Object> payload,
-            String sprintName
+            String sprintName,
+            String label
     ) {
         StringBuilder summary = new StringBuilder("Create Task '")
                 .append(request.title().trim())
                 .append("' as ")
-                .append(request.type().name());
+                .append(request.type().name())
+                .append(", label '")
+                .append(label)
+                .append("'");
         if (payload.containsKey("priority")) {
             summary.append(", priority ").append(payload.get("priority"));
         }
@@ -140,6 +149,31 @@ public class AgentTaskProposalValidationService {
         if (value != null) {
             payload.put(key, value);
         }
+    }
+
+    private List<String> requireSingleReservedLabel(List<String> labels) {
+        if (labels == null || labels.isEmpty()) {
+            throw IntegrationException.invalid(
+                    "AGENT_TASK_CREATE_LABEL_REQUIRED",
+                    "Task create requires exactly one reserved contribution label"
+            );
+        }
+        List<String> trimmed = new ArrayList<>();
+        for (String label : labels) {
+            String normalized = normalize(label);
+            if (normalized != null) {
+                trimmed.add(normalized);
+            }
+        }
+        ContributionMarkerClassification classification =
+                ReservedContributionMarkerClassifier.classify(trimmed);
+        if (trimmed.size() != 1 || !classification.isResolved()) {
+            throw IntegrationException.invalid(
+                    "AGENT_TASK_CREATE_LABEL_INVALID",
+                    "Task create requires exactly one reserved contribution label"
+            );
+        }
+        return List.copyOf(trimmed);
     }
 }
 

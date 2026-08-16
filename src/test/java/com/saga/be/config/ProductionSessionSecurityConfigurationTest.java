@@ -53,6 +53,13 @@ class ProductionSessionSecurityConfigurationTest {
         assertTrue(Boolean.TRUE.equals(configuration.getAllowCredentials()));
         assertTrue(configuration.getAllowedHeaders().contains("X-XSRF-TOKEN"));
         assertTrue(configuration.getAllowedHeaders().contains("Idempotency-Key"));
+        assertTrue(configuration.getAllowedHeaders().contains("Last-Event-ID"));
+        CorsConfiguration localAndProduction = new CorsConfig().corsConfigurationSource(
+                "http://localhost:3000, https://www.saga.autos"
+        ).getCorsConfiguration(new MockHttpServletRequest());
+        assertEquals(List.of("http://localhost:3000", "https://www.saga.autos"),
+                localAndProduction.getAllowedOrigins());
+        assertTrue(Boolean.TRUE.equals(localAndProduction.getAllowCredentials()));
         assertThrows(IllegalStateException.class,
                 () -> new CorsConfig().corsConfigurationSource("https://frontend.example.test,*"));
     }

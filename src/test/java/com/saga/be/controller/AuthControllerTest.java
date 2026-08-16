@@ -3,14 +3,17 @@ package com.saga.be.controller;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.saga.be.dto.response.AuthMeResponse;
 import com.saga.be.dto.response.CsrfTokenResponse;
 import com.saga.be.entity.enums.AccountStatus;
 import com.saga.be.exception.UnauthenticatedRequestException;
+import com.saga.be.security.AccountSessionEventHub;
 import com.saga.be.security.ApplicationRole;
 import com.saga.be.security.SagaPrincipal;
 import com.saga.be.service.CurrentAccountStatusService;
@@ -22,14 +25,22 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.web.csrf.CsrfToken;
 import org.springframework.security.web.csrf.DefaultCsrfToken;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 class AuthControllerTest {
 
     private final CurrentAccountStatusService accountStatusService = mock(CurrentAccountStatusService.class);
     private final SelfProfileService selfProfileService = mock(SelfProfileService.class);
-    private final AuthController controller = new AuthController(accountStatusService, selfProfileService);
+    private final AccountSessionEventHub accountSessionEventHub = mock(AccountSessionEventHub.class);
+    private final AuthController controller = new AuthController(
+            accountStatusService,
+            selfProfileService,
+            accountSessionEventHub
+    );
 
     @Test
     void loginRedirectsToTheBackendCognitoAuthorizationEndpoint() {
@@ -142,5 +153,39 @@ class AuthControllerTest {
                         .map(component -> component.getName())
                         .toList()
         );
+    }
+
+    @Test
+    void sessionEventsRejectsAMissingSessionPrincipal() {
+        assertThrows(
+                UnauthenticatedRequestException.class,
+                () -> controller.sessionEvents(
+                        null,
+                        new MockHttpServletRequest(),
+                        new MockHttpServletResponse()
+                )
+        );
+    }
+
+    @Test
+    void sessionEventsSubscribesTheCurrentSessionWithoutClientIdentityInput() {
+        SagaPrincipal principal = new SagaPrincipal(
+                "cognito-subject",
+                "student@fpt.edu.vn",
+                "Student Name",
+                ApplicationRole.STUDENT,
+                UUID.randomUUID(),
+                AccountStatus.ACTIVE
+        );
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        MockHttpSession session = new MockHttpSession();
+        request.setSession(session);
+        SseEmitter emitter = new SseEmitter(1_000L);
+        when(accountSessionEventHub.subscribe(principal, session)).thenReturn(emitter);
+
+        SseEmitter response = controller.sessionEvents(principal, request, new MockHttpServletResponse());
+
+        assertSame(emitter, response);
+        verify(accountSessionEventHub).subscribe(principal, session);
     }
 }
