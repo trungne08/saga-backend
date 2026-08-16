@@ -2016,6 +2016,24 @@ For `generatedArtifact`, use only the Backend download endpoint. Do not construc
 
 Logout destroys the Backend session and therefore Agent access. Chat delete/retention UI is deferred until product data policy is defined.
 
+## Disabled OIDC callback handling (DEC-104) — 2026-08-17
+
+After Cognito completes a normal ACTIVE login, Backend creates the token-free browser
+session and redirects to `AUTH_SUCCESS_REDIRECT_URI` as before. For a confirmed
+INACTIVE/SUSPENDED Student or Lecturer, Backend creates no usable SAGA session and
+redirects the top-level browser callback to:
+
+```text
+AUTH_FAILURE_REDIRECT_URI?error=ACCOUNT_DISABLED
+```
+
+`AUTH_FAILURE_REDIRECT_URI` is Backend configuration (absolute HTTP(S), non-secret) and
+falls back to `AUTH_SUCCESS_REDIRECT_URI` when not set. Frontend reads only the
+allowlisted `error` code on its auth callback page, clears local auth UI state, and
+displays the disabled-account message. No FE API call, Bearer token, identity value, or
+provider token is supplied in this redirect. Do not treat other OIDC failures as
+`ACCOUNT_DISABLED`.
+
 ## Account disabled session handling (DEC-101) — 2026-08-17
 
 All browser API calls continue to use `credentials: "include"`; do not use Bearer tokens. When a currently authenticated Student or Lecturer is changed to `INACTIVE` or `SUSPENDED`, the next request using that session can return the existing error shape:

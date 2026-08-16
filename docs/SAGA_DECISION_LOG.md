@@ -1,3 +1,12 @@
+## DEC-104 — Disabled OIDC browser callback redirects safely to Frontend
+
+- Date: 2026-08-17; status: **ACCEPTED / IMPLEMENTED_SOURCE_TEST**.
+- DEC-101 remains unchanged for API requests: disabled `/api/auth/me`, business `/api/**`, and self-profile PATCH invalidate the session and return JSON `401 ACCOUNT_DISABLED`.
+- The OIDC callback is a top-level browser navigation, not an XHR. Only a confirmed INACTIVE or SUSPENDED Student/Lecturer in `CognitoAuthenticationSuccessHandler` is redirected to the configured Frontend failure route instead of receiving the callback JSON body.
+- `AUTH_FAILURE_REDIRECT_URI` is a non-secret, absolute HTTP(S) property. It falls back to `AUTH_SUCCESS_REDIRECT_URI` when absent; no Java source hardcodes a Frontend host. Its existing query is discarded and the redirect contains only the allowlisted `error=ACCOUNT_DISABLED`.
+- Before redirect, the handler clears `SecurityContext` and invalidates any transient session. It does not save a `SagaPrincipal`, include identity/token/session/OAuth material in the URL, call Cognito, or change local account status.
+- ACTIVE login remains unchanged: synchronize, save token-free session principal, then redirect to `AUTH_SUCCESS_REDIRECT_URI`. Identity conflicts, invalid claims, and provider failures keep their existing failure semantics and are not reclassified as ACCOUNT_DISABLED.
+
 ## DEC-103 — Self Profile V1 uses local profile authority
 
 - Date: 2026-08-17; status: **ACCEPTED / IMPLEMENTED_SOURCE_TEST**.

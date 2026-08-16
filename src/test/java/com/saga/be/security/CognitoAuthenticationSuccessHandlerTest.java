@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -69,7 +70,8 @@ class CognitoAuthenticationSuccessHandlerTest {
                         auditService,
                         contextRepository,
                         errorWriter,
-                        "http://localhost:8080/api/auth/me"
+                        "http://localhost:8080/api/auth/me",
+                        "http://localhost:3000/auth/callback"
                 );
 
         String rawIdToken = "raw-id-token-that-must-not-reach-the-session";
@@ -111,7 +113,7 @@ class CognitoAuthenticationSuccessHandlerTest {
                 identity.fullName(),
                 identity.role(),
                 profileId,
-                AccountStatus.PENDING
+        AccountStatus.ACTIVE
         );
         when(identityService.extract(oidcUser)).thenReturn(identity);
         when(profileService.synchronize(identity)).thenReturn(profile);
@@ -188,7 +190,8 @@ class CognitoAuthenticationSuccessHandlerTest {
                         auditService,
                         new HttpSessionSecurityContextRepository(),
                         errorWriter,
-                        "http://localhost:8080/api/auth/me"
+                        "http://localhost:8080/api/auth/me",
+                        "http://localhost:3000/auth/callback"
                 );
 
         OidcUser oidcUser = mock(OidcUser.class);
@@ -250,7 +253,8 @@ class CognitoAuthenticationSuccessHandlerTest {
                         auditService,
                         new HttpSessionSecurityContextRepository(),
                         errorWriter,
-                        "http://localhost:8080/api/auth/me"
+                        "http://localhost:8080/api/auth/me",
+                        "http://localhost:3000/auth/callback"
                 );
 
         OidcUser oidcUser = mock(OidcUser.class);
@@ -294,7 +298,43 @@ class CognitoAuthenticationSuccessHandlerTest {
     }
 
     @Test
-    void rejectsInactiveAndSuspendedProfilesWithoutCreatingAUsableSession() throws Exception {
+    void redirectsActiveLecturerToTheConfiguredSuccessUri() throws Exception {
+        OidcIdentityService identityService = mock(OidcIdentityService.class);
+        AuthenticatedProfileService profileService = mock(AuthenticatedProfileService.class);
+        AuthenticationAuditService auditService = mock(AuthenticationAuditService.class);
+        CognitoAuthenticationSuccessHandler handler = new CognitoAuthenticationSuccessHandler(
+                identityService,
+                profileService,
+                auditService,
+                new HttpSessionSecurityContextRepository(),
+                mock(SecurityErrorResponseWriter.class),
+                "http://localhost:3000/auth/callback",
+                "http://localhost:3000/auth/failure"
+        );
+        OidcUser oidcUser = mock(OidcUser.class);
+        Authentication authentication = new OAuth2AuthenticationToken(oidcUser, List.of(), "cognito");
+        AuthenticatedIdentity identity = new AuthenticatedIdentity(
+                "lecturer-subject", "lecturer@example.test", "Lecturer", ApplicationRole.LECTURER
+        );
+        AuthenticatedProfile profile = new AuthenticatedProfile(
+                identity.cognitoSub(), identity.email(), identity.fullName(), identity.role(),
+                UUID.randomUUID(), AccountStatus.ACTIVE
+        );
+        when(identityService.extract(oidcUser)).thenReturn(identity);
+        when(profileService.synchronize(identity)).thenReturn(profile);
+
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        handler.onAuthenticationSuccess(request, response, authentication);
+
+        assertEquals(302, response.getStatus());
+        assertEquals("http://localhost:3000/auth/callback", response.getRedirectedUrl());
+        assertFalse(((MockHttpSession) request.getSession(false)).isInvalid());
+        verify(auditService).recordSuccessfulLogin(profile, "127.0.0.1");
+    }
+
+    @Test
+    void redirectsInactiveAndSuspendedProfilesWithoutCreatingAUsableSession() throws Exception {
         OidcIdentityService identityService = mock(OidcIdentityService.class);
         AuthenticatedProfileService profileService = mock(AuthenticatedProfileService.class);
         AuthenticationAuditService auditService = mock(AuthenticationAuditService.class);
@@ -305,7 +345,8 @@ class CognitoAuthenticationSuccessHandlerTest {
                 auditService,
                 new HttpSessionSecurityContextRepository(),
                 errorWriter,
-                "http://localhost:8080/api/auth/me"
+                "http://localhost:8080/api/auth/me",
+                "http://localhost:3000/auth/callback"
         );
         OidcUser oidcUser = mock(OidcUser.class);
         Authentication authentication = new OAuth2AuthenticationToken(oidcUser, List.of(), "cognito");
@@ -326,6 +367,8 @@ class CognitoAuthenticationSuccessHandlerTest {
                 when(profileService.synchronize(identity)).thenReturn(profile);
 
                 MockHttpServletRequest request = new MockHttpServletRequest();
+                request.setQueryString("next=https://attacker.example.test");
+                request.addHeader("X-Redirect-To", "https://attacker.example.test");
                 MockHttpSession session = new MockHttpSession();
                 request.setSession(session);
                 MockHttpServletResponse response = new MockHttpServletResponse();
@@ -333,7 +376,16 @@ class CognitoAuthenticationSuccessHandlerTest {
                 handler.onAuthenticationSuccess(request, response, authentication);
 
                 assertTrue(session.isInvalid());
-                verify(errorWriter).write(
+                assertEquals(302, response.getStatus());
+                assertEquals(
+                        "http://localhost:3000/auth/callback?error=ACCOUNT_DISABLED",
+                        response.getRedirectedUrl()
+                );
+                assertFalse(response.getRedirectedUrl().contains(identity.email()));
+                assertFalse(response.getRedirectedUrl().contains(identity.cognitoSub()));
+                assertFalse(response.getRedirectedUrl().contains("attacker"));
+                assertNull(SecurityContextHolder.getContext().getAuthentication());
+                verify(errorWriter, never()).write(
                         request,
                         response,
                         401,
@@ -345,5 +397,17 @@ class CognitoAuthenticationSuccessHandlerTest {
         verify(auditService, never()).recordSuccessfulLogin(
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString()
         );
+    }
+    @Test
+    void validatesFailureRedirectAsAbsoluteHttpUri() {
+        assertThrows(IllegalStateException.class, () -> new CognitoAuthenticationSuccessHandler(
+                mock(OidcIdentityService.class),
+                mock(AuthenticatedProfileService.class),
+                mock(AuthenticationAuditService.class),
+                new HttpSessionSecurityContextRepository(),
+                mock(SecurityErrorResponseWriter.class),
+                "http://localhost:3000/auth/callback",
+                "/relative-callback"
+        ));
     }
 }

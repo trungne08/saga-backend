@@ -1,3 +1,9 @@
+## Disabled OIDC callback Frontend redirect (DEC-104) — 2026-08-17
+
+- **CONFIRMED_SOURCE_TEST:** A confirmed INACTIVE/SUSPENDED Student/Lecturer at the Cognito success callback clears `SecurityContext`, invalidates the transient session, saves no `SagaPrincipal`, and receives `302 AUTH_FAILURE_REDIRECT_URI?error=ACCOUNT_DISABLED`. The configured URI must be absolute HTTP(S), falls back to `AUTH_SUCCESS_REDIRECT_URI`, and is not request-controlled.
+- **UNCHANGED:** ACTIVE login still creates the token-free session and redirects to `AUTH_SUCCESS_REDIRECT_URI`. OIDC identity/provider failures retain existing semantics. DEC-101 API behavior remains JSON `401 ACCOUNT_DISABLED` for disabled `/api/auth/me`, business APIs, and self-profile PATCH; no global redirect rule is introduced.
+- **SAFETY / VERIFICATION:** redirect replaces any configured query and contains only safe `error=ACCOUNT_DISABLED`, never identity/token/session/OAuth request data. Targeted Cognito handler + DEC-101 + self profile/auth/security tests: **42 passed**. `git diff --check` passes.
+
 ## Self Profile V1 (DEC-103) — 2026-08-17
 
 - **CONFIRMED_SOURCE_TEST:** `GET /api/auth/me` remains the canonical local-profile read. New `PATCH /api/auth/me` is sparse and self-scoped to active STUDENT/LECTURER, returning `AuthMeResponse`; only `fullName` and `avatarUrl` change. Browser session + CSRF are required; no Bearer, target ID, provider call, file upload, or migration.

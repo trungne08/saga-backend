@@ -47,6 +47,7 @@ public class CognitoAuthenticationSuccessHandler implements AuthenticationSucces
     private final SecurityContextRepository securityContextRepository;
     private final SecurityErrorResponseWriter errorResponseWriter;
     private final URI successRedirectUri;
+    private final URI failureRedirectUri;
 
     public CognitoAuthenticationSuccessHandler(
             OidcIdentityService identityService,
@@ -54,7 +55,8 @@ public class CognitoAuthenticationSuccessHandler implements AuthenticationSucces
             AuthenticationAuditService auditService,
             SecurityContextRepository securityContextRepository,
             SecurityErrorResponseWriter errorResponseWriter,
-            @Value("${app.auth.success-redirect-uri}") String successRedirectUri
+            @Value("${app.auth.success-redirect-uri}") String successRedirectUri,
+            @Value("${app.auth.failure-redirect-uri:${app.auth.success-redirect-uri}}") String failureRedirectUri
     ) {
         this.identityService = identityService;
         this.profileService = profileService;
@@ -64,6 +66,10 @@ public class CognitoAuthenticationSuccessHandler implements AuthenticationSucces
         this.successRedirectUri = requireHttpUri(
                 successRedirectUri,
                 "AUTH_SUCCESS_REDIRECT_URI"
+        );
+        this.failureRedirectUri = requireHttpUri(
+                failureRedirectUri,
+                "AUTH_FAILURE_REDIRECT_URI"
         );
     }
 
@@ -79,7 +85,7 @@ public class CognitoAuthenticationSuccessHandler implements AuthenticationSucces
             identity = identityService.extract(oidcUser);
             AuthenticatedProfile profile = profileService.synchronize(identity);
             if (isDisabled(profile)) {
-                rejectAccountDisabled(request, response);
+                redirectAccountDisabledToFrontend(request, response);
                 return;
             }
             auditService.recordSuccessfulLogin(profile, request.getRemoteAddr());
@@ -184,6 +190,23 @@ public class CognitoAuthenticationSuccessHandler implements AuthenticationSucces
         return profile.role() != ApplicationRole.ADMIN
                 && (profile.accountStatus() == AccountStatus.INACTIVE
                 || profile.accountStatus() == AccountStatus.SUSPENDED);
+    }
+
+    private void redirectAccountDisabledToFrontend(
+            HttpServletRequest request,
+            HttpServletResponse response
+    ) throws IOException {
+        SecurityContextHolder.clearContext();
+        HttpSession session = request.getSession(false);
+        if (session != null) {
+            session.invalidate();
+        }
+        URI redirect = org.springframework.web.util.UriComponentsBuilder.fromUri(failureRedirectUri)
+                .replaceQuery(null)
+                .queryParam("error", "ACCOUNT_DISABLED")
+                .build()
+                .toUri();
+        response.sendRedirect(redirect.toString());
     }
 
     private void rejectAccountDisabled(
