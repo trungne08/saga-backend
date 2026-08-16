@@ -44,11 +44,12 @@ Current Backend contracts: OpenAPI **149**, migration head **V41**. Public `/api
 - HF/runtime/browser AI product smoke **not claimed**.
 ## Contribution flowchart graph (DEC-096) — 2026-08-16
 
-Current Backend contracts: OpenAPI **150**. No migration.
+Current Backend contracts: OpenAPI **152**. No migration. Query `sprintId` additive, no new route.
 
 FE: khác nhau evaluation vs graph nằm ở `docs/CONTRIBUTION_EVALUATION_VS_GRAPH_API.md`.
 
 - `GET /api/v1/teams/{teamId}/contribution-graph` — flowchart (node/edge). **LECTURER** đúng Course và **STUDENT LEADER** đúng Team. **ADMIN 403.** MEMBER/MENTOR 403. GET, không CSRF, không Bearer.
+- Query `sprintId` tùy chọn: bỏ trống = cả Project; có = flowchart đúng Sprint đó (slice, `P_s`, %, cạnh). Sprint không thuộc Project → **404**.
 - Công thức **giữ SAGA** (`slice = Σ SP_criterion × weightRatio`; `P = stars_i / teamStars`; `% = (slice × P) / Σadjust × 100`). Không dùng hệ số mockup CODE×2.0 / DESIGN / DOCS. Không GHOSTING, không Chốt số/publish.
 - `nodes[]`: `kind` = `CRITERION` (bốn tiêu chí, luôn có) hoặc `STUDENT` (`sliceScore`, `peerCoefficient`, `adjustedScore` = slice×P, `finalContributionPercentage`, warnings hiện có).
 - `edges[]`: tiêu chí → sinh viên. `storyPoints` đã được công nhận; `weightedSlice` = SP × weightRatio. `tasks[]` để click cạnh (taskId, title, externalKey, sprint). Cạnh 0 SP không trả.
@@ -254,7 +255,7 @@ Không đưa Firebase Admin service account, private key, Gmail App Password, Co
 | Current user | `GET /api/auth/me` | Authenticated | App boot/sau login |
 | CSRF | `GET /api/auth/csrf` | Authenticated | Trước mutation |
 | Team contribution | `GET /api/v1/teams/{teamId}/contribution-evaluation` | LECTURER đúng Course; STUDENT exact Team LEADER | Xem current aggregate, không CSRF. ADMIN 403 |
-| Team contribution flowchart | `GET /api/v1/teams/{teamId}/contribution-graph` | LECTURER đúng Course; STUDENT exact Team LEADER | Vẽ flowchart node/edge, không CSRF. ADMIN 403 |
+| Team contribution flowchart | `GET /api/v1/teams/{teamId}/contribution-graph` | LECTURER đúng Course; STUDENT exact Team LEADER | Vẽ flowchart; `?sprintId=` lọc một Sprint, không CSRF. ADMIN 403 |
 | Course grouping import | `POST /api/v1/courses/{courseId}/import-students` | ADMIN hoặc LECTURER phụ trách | Upload XLSX |
 | Admin Course import | `POST /api/v1/courses/{courseId}/admin-import-students-template` | ADMIN | Upload XLSX 5 cột |
 | Bell list | `GET /api/me/notifications?page=0&size=20` | ADMIN/LECTURER/STUDENT | App boot, refresh, sau FCM |

@@ -27,9 +27,10 @@ OpenAPI **149** (unchanged). Migration head **V41**. Public AI routes unchanged.
 - Internal AI tools and Backend→AI commit-review routes are **not** a frontend contract.
 ## Contribution flowchart graph (DEC-096) — 2026-08-16
 
-OpenAPI **150**. No migration.
+OpenAPI **150**. Query `sprintId` additive (2026-08-16); OpenAPI still **152**. No new operation.
 
 - `GET /api/v1/teams/{teamId}/contribution-graph` — flowchart nodes/edges. Same auth as evaluation (LECTURER exact Course / STUDENT exact Team LEADER). ADMIN 403. Session cookie, no CSRF, no Bearer.
+- Optional `?sprintId=` filters the flowchart to that Sprint on the Team Project (slice, `P_s`, %, edges). Omit for the whole Project. Unknown/other-project Sprint → **404**.
 - Formula stays SAGA (DEC-092). Do not apply mockup CODE×2.0 / DESIGN / DOCS. `peerCoefficient` is team-star share. `tasks[]` on each edge is drill-down only.
 - Radar / member comparison / sprint line still use `GET .../contribution-evaluation` (DEC-094). Do not call `/api/analytics/*`.
 - Chi tiết chọn API: `docs/CONTRIBUTION_EVALUATION_VS_GRAPH_API.md`.
@@ -1439,7 +1440,7 @@ Contribution API dùng session. Tất cả mutation phải gửi CSRF; GET khôn
 | Method | Exact path | Role annotation | Effective behavior | Success |
 | --- | --- | --- | --- | --- |
 | GET | `/api/v1/teams/{teamId}/contribution-evaluation` | LECTURER, STUDENT | LECTURER chỉ Course mình phụ trách; STUDENT chỉ exact `RoleInTeam.LEADER` của chính Team. ADMIN/MEMBER/MENTOR/cross-Team Leader 403 | `200 TeamContributionEvaluationResponse` |
-| GET | `/api/v1/teams/{teamId}/contribution-graph` | LECTURER, STUDENT | Cùng quyền evaluation. Flowchart SAGA (không hệ số mockup). ADMIN/MEMBER/MENTOR 403 | `200 TeamContributionGraphResponse` |
+| GET | `/api/v1/teams/{teamId}/contribution-graph` | LECTURER, STUDENT | Cùng quyền evaluation. Query `sprintId` tùy chọn: có thì flowchart đúng Sprint (404 nếu không thuộc Project); không có thì cả Project. ADMIN/MEMBER/MENTOR 403 | `200 TeamContributionGraphResponse` |
 | POST | `/api/v1/teams/{teamId}/contribution-override` | ADMIN, LECTURER | ADMIN mọi Team; LECTURER phải là Course instructor | `200 ContributionOverrideResponse` |
 | GET | `/api/v1/courses/{courseId}/contribution-slice-weights` | ADMIN, LECTURER | ADMIN mọi Course; LECTURER chỉ exact Course instructor. Actor từ `SagaPrincipal` | `200 CourseContributionSliceWeightResponse` |
 | PUT | `/api/v1/courses/{courseId}/contribution-slice-weights` | LECTURER | Official new FE mutation. Exact Course instructor; no `lecturerId`. Other Course / STUDENT / ADMIN 403. CSRF required. Scale 0–100, sum 100 ± 0.01. `{codeWeight,testWeight,documentWeight,researchWeight}`. Only authoritative while Course is in `COURSE` mode | `200 CourseContributionSliceWeightResponse` |

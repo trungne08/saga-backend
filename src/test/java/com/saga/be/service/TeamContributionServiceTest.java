@@ -1,6 +1,7 @@
 package com.saga.be.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.when;
 
@@ -254,6 +255,8 @@ class TeamContributionServiceTest {
         assertEquals(5.0, bob.sprintBreakdowns().get(0).codeStoryPoints(), 0.0001);
 
         TeamContributionGraphResponse graph = service.graph(teamId);
+        assertNull(graph.sprintId());
+        assertNull(graph.sprintName());
         assertEquals(TeamContributionGraphResponse.FORMULA, graph.formula());
         assertEquals(0.25, graph.weights().codeWeightRatio(), 0.0001);
         assertEquals(25.0, graph.weights().codeWeightPercent(), 0.0001);
@@ -395,6 +398,78 @@ class TeamContributionServiceTest {
         // Σslice Alice = 10×0.40 + 1×0.35 = 4.35; Bob = 0.35; project P = 0.5 → 92.553 / 7.447.
         assertEquals(92.5532, alice.finalContributionPercentage(), 0.001);
         assertEquals(7.4468, bob.finalContributionPercentage(), 0.001);
+
+        when(sprintRepository.findByIdAndBoardProjectIdAndDeletedAtIsNull(sprintOneId, projectId))
+                .thenReturn(Optional.of(sprintOne));
+        when(sprintRepository.findByIdAndBoardProjectIdAndDeletedAtIsNull(sprintTwoId, projectId))
+                .thenReturn(Optional.of(sprintTwo));
+
+        TeamContributionGraphResponse sprintOneGraph = service.graph(teamId, sprintOneId);
+        assertEquals(sprintOneId, sprintOneGraph.sprintId());
+        assertEquals("Sprint 1", sprintOneGraph.sprintName());
+        assertEquals(1, sprintOneGraph.edges().size());
+        var aliceSprintOne = sprintOneGraph.nodes().stream()
+                .filter(node -> studentOneId.equals(node.studentId()))
+                .findFirst()
+                .orElseThrow();
+        var bobSprintOne = sprintOneGraph.nodes().stream()
+                .filter(node -> studentTwoId.equals(node.studentId()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(4.0, aliceSprintOne.sliceScore(), 0.0001);
+        assertEquals(0.5, aliceSprintOne.peerCoefficient(), 0.0001);
+        assertEquals(2.0, aliceSprintOne.adjustedScore(), 0.0001);
+        assertEquals(100.0, aliceSprintOne.finalContributionPercentage(), 0.001);
+        assertEquals(0.0, bobSprintOne.sliceScore(), 0.0001);
+        assertEquals(0.0, bobSprintOne.finalContributionPercentage(), 0.001);
+        var sprintOneCodeEdge = sprintOneGraph.edges().get(0);
+        assertEquals("edge:CODE:" + studentOneId, sprintOneCodeEdge.id());
+        assertEquals(10.0, sprintOneCodeEdge.storyPoints(), 0.0001);
+        assertEquals(4.0, sprintOneCodeEdge.weightedSlice(), 0.0001);
+
+        TeamContributionGraphResponse sprintTwoGraph = service.graph(teamId, sprintTwoId);
+        assertEquals(sprintTwoId, sprintTwoGraph.sprintId());
+        assertEquals("Sprint 2", sprintTwoGraph.sprintName());
+        assertEquals(2, sprintTwoGraph.edges().size());
+        var aliceSprintTwo = sprintTwoGraph.nodes().stream()
+                .filter(node -> studentOneId.equals(node.studentId()))
+                .findFirst()
+                .orElseThrow();
+        var bobSprintTwo = sprintTwoGraph.nodes().stream()
+                .filter(node -> studentTwoId.equals(node.studentId()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(0.35, aliceSprintTwo.sliceScore(), 0.0001);
+        assertEquals(50.0, aliceSprintTwo.finalContributionPercentage(), 0.001);
+        assertEquals(0.35, bobSprintTwo.sliceScore(), 0.0001);
+        assertEquals(50.0, bobSprintTwo.finalContributionPercentage(), 0.001);
+        assertTrue(sprintTwoGraph.edges().stream().allMatch(edge -> "RESEARCH".equals(edge.criterion())));
+    }
+
+    @Test
+    void graphReturns404WhenSprintDoesNotBelongToProject() {
+        UUID teamId = UUID.randomUUID();
+        UUID projectId = UUID.randomUUID();
+        UUID unknownSprintId = UUID.randomUUID();
+
+        Course course = entityWithId(new Course(), UUID.randomUUID());
+        Project project = entityWithId(new Project(), projectId);
+        project.setCourse(course);
+        Team team = entityWithId(new Team(), teamId);
+        team.setCourse(course);
+        team.setProject(project);
+
+        when(teamRepository.findWithCourseAndInstructorById(teamId)).thenReturn(Optional.of(team));
+        when(teamMemberRepository.findByTeamId(teamId)).thenReturn(List.of());
+        when(sprintRepository.findByIdAndBoardProjectIdAndDeletedAtIsNull(unknownSprintId, projectId))
+                .thenReturn(Optional.empty());
+
+        ResponseStatusException exception = org.junit.jupiter.api.Assertions.assertThrows(
+                ResponseStatusException.class,
+                () -> service.graph(teamId, unknownSprintId)
+        );
+        assertEquals(org.springframework.http.HttpStatus.NOT_FOUND, exception.getStatusCode());
+        assertEquals("Sprint not found", exception.getReason());
     }
 
     @Test

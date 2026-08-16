@@ -37,8 +37,8 @@
 - **CONFIRMED_SOURCE_TEST:** canonical `upsertCommit` enqueue unique `commit_review_intent`; `review_cutover_at` dedicated. DEC-095 wires AI start/result HTTP. Early Warning V2 besides OVERDUE **not shipped**. OpenAPI **149**. Migration **V40** + **V41**.
 ## Contribution flowchart graph (DEC-096) — 2026-08-16
 
-- **CONFIRMED_SOURCE_TEST:** `GET /api/v1/teams/{teamId}/contribution-graph` is a separate flowchart payload (criterion/student nodes, criterion→student edges with recognized tasks). Arithmetic is the SAGA mixer (DEC-092). Same read access as evaluation (DEC-095). No GHOSTING, no publish snapshot, no `/api/analytics/*`.
-- **Contracts:** OpenAPI **150**. No migration.
+- **CONFIRMED_SOURCE_TEST:** `GET /api/v1/teams/{teamId}/contribution-graph` is a separate flowchart payload (criterion/student nodes, criterion→student edges with recognized tasks). Optional `sprintId` filters to that Sprint. Arithmetic is the SAGA mixer (DEC-092). Same read access as evaluation (DEC-095). No GHOSTING, no publish snapshot, no `/api/analytics/*`.
+- **Contracts:** OpenAPI **152**. No migration.
 
 ## Contribution evaluation is Lecturer + Student Leader only (DEC-095) — 2026-08-15
 

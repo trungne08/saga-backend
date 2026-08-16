@@ -343,7 +343,7 @@ quyết định quyền bằng UI.
 
 `GET /api/v1/teams/{teamId}/contribution-graph`
 
-Cùng quyền với evaluation. Payload node/edge dùng công thức SAGA (không hệ số mockup). `tasks[]` trên cạnh để drill-down. Không GHOSTING, không publish.
+Cùng quyền với evaluation. Query `sprintId` tùy chọn: không có = flowchart cả Project; có = đúng Sprint thuộc Project của Team (404 nếu không). Payload node/edge dùng công thức SAGA (không hệ số mockup). `tasks[]` trên cạnh để drill-down. Không GHOSTING, không publish.
 
 ---
 

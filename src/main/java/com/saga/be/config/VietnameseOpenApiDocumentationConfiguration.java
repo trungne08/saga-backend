@@ -57,7 +57,7 @@ public class VietnameseOpenApiDocumentationConfiguration {
             entry("CourseController#importStudents", "Import sinh viên và phân nhóm trong khóa học", "ADMIN hoặc giảng viên phụ trách Course tải file XLSX đúng mẫu. Sau khi membership được tạo thành công, backend enqueue email mời bất đồng bộ; lỗi gửi email không rollback import và FE không gọi API gửi mail riêng."),
             entry("CourseController#importStudentsByAdminTemplate", "Import sinh viên vào khóa học bằng mẫu Admin", "Chỉ ADMIN tải file XLSX theo mẫu 5 cột. Backend enqueue email mời bất đồng bộ sau khi dữ liệu import được lưu; lỗi gửi email không rollback import và không có API SMTP/send-mail cho FE."),
             entry("TeamContributionController#getContributionEvaluation", "Xem đánh giá đóng góp hiện tại của nhóm", "LECTURER chỉ xem Team thuộc Course mình phụ trách. STUDENT chỉ xem khi có đúng TeamMember role LEADER của chính Team đang yêu cầu. ADMIN, MEMBER và MENTOR không có quyền. Response chỉ chứa định danh học vụ tối thiểu và metric Contribution, không chứa email, Cognito subject, reviewer/comment, token, credential hoặc raw provider payload."),
-            entry("TeamContributionController#getContributionGraph", "Xem sơ đồ flowchart đóng góp của nhóm", "Cùng quyền với đánh giá đóng góp: LECTURER chỉ Course mình phụ trách; STUDENT chỉ exact TeamMember role LEADER. ADMIN, MEMBER và MENTOR không có quyền. Node và cạnh dùng công thức SAGA (CODE/TEST/DOCUMENT/RESEARCH và P = sao / sao team), không dùng hệ số mockup. Response không chứa email, Cognito subject, reviewer/comment, token hoặc credential."),
+            entry("TeamContributionController#getContributionGraph", "Xem sơ đồ flowchart đóng góp của nhóm", "Cùng quyền với đánh giá đóng góp: LECTURER chỉ Course mình phụ trách; STUDENT chỉ exact TeamMember role LEADER. ADMIN, MEMBER và MENTOR không có quyền. Query sprintId tùy chọn: có thì flowchart đúng Sprint đó (slice, P_s, %, cạnh/task); không có thì cả Project. Sprint không thuộc Project của Team trả 404. Node và cạnh dùng công thức SAGA (CODE/TEST/DOCUMENT/RESEARCH và P = sao / sao team), không dùng hệ số mockup. Response không chứa email, Cognito subject, reviewer/comment, token hoặc credential."),
             entry("PersonalIntegrationController#connections", "Xem trạng thái liên kết Jira và GitHub của tôi", "Trả trạng thái liên kết Jira/GitHub của tài khoản đang đăng nhập; không trả access token hoặc provider credential."),
             entry("PersonalIntegrationController#connectJira", "Bắt đầu liên kết tài khoản Jira", "Trả redirect để browser đi vào luồng ủy quyền Jira. FE dùng browser navigation và không gửi Jira token."),
             entry("PersonalIntegrationController#connectGitHub", "Bắt đầu liên kết tài khoản GitHub", "Trả redirect để browser đi vào luồng ủy quyền GitHub. FE dùng browser navigation và không gửi GitHub token."),
@@ -376,6 +376,7 @@ public class VietnameseOpenApiDocumentationConfiguration {
             case "CourseNotificationBroadcastRequest" -> "Nội dung phát thông báo của LECTURER đến các Course được phép.";
             case "NotificationBroadcastResponse" -> "Kết quả fanout Notification Bell và số delivery FCM đã xếp hàng.";
             case "JiraTaskAttachmentsResponse" -> "Danh sách file và liên kết bằng chứng hiện có trên Task.";
+            case "TeamContributionGraphResponse" -> "Sơ đồ flowchart đóng góp của nhóm. sprintId/sprintName null khi xem cả Project; có giá trị khi lọc đúng một Sprint.";
             default -> "Schema dữ liệu " + vietnameseSchemaName(name) + " của SAGA.";
         };
     }
@@ -419,6 +420,11 @@ public class VietnameseOpenApiDocumentationConfiguration {
             case "SprintContributionBreakdown.testStoryPoints" -> "Tổng story point TEST được công nhận trong sprint; dùng cho stacked bar, không phải %.";
             case "SprintContributionBreakdown.documentStoryPoints" -> "Tổng story point DOCUMENT được công nhận trong sprint; Task thiếu file/link không cộng.";
             case "SprintContributionBreakdown.researchStoryPoints" -> "Tổng story point RESEARCH được công nhận trong sprint; Task thiếu file/link không cộng.";
+            case "TeamContributionGraphResponse.sprintId" -> "UUID Sprint đang lọc flowchart; null khi xem cả Project.";
+            case "TeamContributionGraphResponse.sprintName" -> "Tên Sprint đang lọc; null khi xem cả Project.";
+            case "ContributionGraphNode.sliceScore" -> "Slice trước peer. Không lọc sprint thì giống evaluation cả Project; có sprintId thì là slice của đúng Sprint.";
+            case "ContributionGraphNode.peerCoefficient" -> "Hệ số peer. Không lọc sprint thì P cả Project; có sprintId thì P_s của Sprint đó. Đã nhân vào %; client không nhân thêm.";
+            case "ContributionGraphNode.finalContributionPercentage" -> "% đóng góp trên flowchart. Không lọc sprint thì % cuối cả Project; có sprintId thì % của đúng Sprint, không dùng override giảng viên cả dự án.";
             default -> "Trường " + vietnameseSchemaName(propertyName) + ".";
         };
     }

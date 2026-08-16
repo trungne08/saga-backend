@@ -44,8 +44,8 @@
 ## Contribution flowchart graph (DEC-096) — 2026-08-16
 
 - `GET /api/v1/teams/{teamId}/contribution-graph` is LECTURER exact instructor or STUDENT exact Team LEADER only. ADMIN 403. Do not copy mockup CODE×2.0 / DESIGN multipliers; keep SAGA CODE/TEST/DOCUMENT/RESEARCH + team-star P.
-- Do not add GHOSTING, publish/snapshot, or `/api/analytics/*`. Radar/bar/line stay on evaluation.
-- OpenAPI **150**. Không migration.
+- Optional query `sprintId` filters the flowchart to that Sprint on the Team Project; omit for whole Project. Other-project Sprint is 404. Do not add GHOSTING, publish/snapshot, or `/api/analytics/*`. Radar/bar/line stay on evaluation.
+- OpenAPI **152**. Không migration.
 
 ## Contribution evaluation read is not ADMIN (DEC-095) — 2026-08-15
 
