@@ -96,7 +96,7 @@ OpenAPI operation count baseline = **150**. Migration head = **V33**. Browser Be
 | GET | `/api/v1/courses/{courseId}/dashboard/trends` | dashboard payload | ADMIN/LECTURER; no CSRF | Implemented Lecturer Dashboard |
 | GET | `/api/v1/courses/{courseId}/dashboard/at-risk-summary` | dashboard payload | ADMIN/LECTURER; no CSRF | Deterministic risk; no AI-derived warning types |
 | GET | `/api/admin/reports/anomalies` | signals array | ADMIN; no CSRF | OVERDUE_TASK supported; unsupported = TBD + `count: null` |
-| GET | `/api/admin/reports/graph-processing` | stub envelope | ADMIN; no CSRF | `periodDays=7`, `historySupported=false`, `points=[]` |
+| GET | `/api/admin/reports/graph-processing` | persisted history envelope | ADMIN; no CSRF | `periodDays=7`, `historySupported=true`, nullable `coverageStart`, non-synthetic `Asia/Ho_Chi_Minh` points `{date,nodesBuilt,edgesBuilt,runCount}` |
 | * | `/api/v1/ai/**` (7 public ops) | see AI section in FRONTEND_API_INTEGRATION | Session; CSRF on POST | Internal `/internal/ai/**` not OpenAPI/FE |
 
 OpenAPI operation count baseline = **149** (DEC-082 historical snapshot). Migration head = **V32**. Browser Bearer = **NO**. Current baseline = **150 / V33** in the section above.

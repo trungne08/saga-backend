@@ -65,6 +65,11 @@ public class CourseService {
     @Transactional(readOnly = true)
     public CourseResponse getCourseById(UUID id) {
         Course course = requireActiveCourse(id);
+        return toResponse(course);
+    }
+
+    /** Maps a persisted Course to its public API representation without exposing storage fields. */
+    public CourseResponse toResponse(Course course) {
         return CourseResponse.from(course, courseStatusResolver.resolve(course.getSemester()));
     }
 
@@ -143,7 +148,7 @@ public class CourseService {
         }
 
         return courseRepository.findAll(specification, pageable)
-                .map(course -> CourseResponse.from(course, courseStatusResolver.resolve(course.getSemester())));
+                .map(this::toResponse);
     }
 
     private CourseReferences resolveActiveReferences(CourseRequest request) {

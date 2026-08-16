@@ -1,7 +1,18 @@
+## DEC-103 — Self Profile V1 uses local profile authority
+
+- Date: 2026-08-17; status: **ACCEPTED / IMPLEMENTED_SOURCE_TEST**.
+- Active `STUDENT` and `LECTURER` may update only their own local `fullName` and `avatarUrl` with `PATCH /api/auth/me`. The actor is only `SagaPrincipal` from the browser session; the operation accepts no target/actor ID. Session + CSRF are required and Bearer authentication is not used. ADMIN self-update is outside this scope.
+- `cognitoSub`, email, application role, Student identity/studentCode, account status, local profile ID, Team role, and Course membership remain read-only. The self endpoint never changes provider state, account status, Team/Course/Project data, or any integration.
+- SAGA local profile is authoritative for `fullName` and `avatarUrl`. A newly created profile initializes them from valid OIDC name/picture. On every existing-profile login, OIDC continues to synchronize identity fields but never overwrites locally edited name/avatar.
+- `AuthMeResponse` is retained as the canonical read/update response and adds nullable `studentCode`: canonical Student code for STUDENT and null for LECTURER/ADMIN.
+- DEC-101 is preserved: PENDING/non-ACTIVE Student and INACTIVE/SUSPENDED Student/Lecturer remain gated before controller execution; disabled sessions receive `401 ACCOUNT_DISABLED` and are invalidated. `GET /api/auth/me` is gated too.
+- `avatarUrl` is string-validated only using the OIDC URL sanitizer: absolute HTTP(S), host, no user-info, bounded length. Explicit null clears the local avatar. Backend never fetches the URL or calls a provider. Existing Student/Lecturer `full_name` and nullable `avatar_url` columns are sufficient; no migration is required.
+
 ## DEC-102 — Course read status is computed from the Course Semester
 
 - Date: 2026-08-17; status: **ACCEPTED / IMPLEMENTED_SOURCE_TEST**.
-- `GET /api/v1/courses` and `GET /api/v1/courses/{id}` return the stable `CourseResponse`. `academicClass` is the canonical nested Class JSON name; `clazz` remains a deprecated compatibility alias. `academicClazz` is not exposed. The JPA field remains `Course.clazz` mapped through `class_id`; the Class entity/table remains in use.
+- `GET /api/v1/courses`, `GET /api/v1/courses/{id}`, and ADMIN `POST`/`PUT` return the stable `CourseResponse`. `academicClass` is the sole nested Class JSON name; `clazz` and `academicClazz` are not exposed. The JPA field remains `Course.clazz` mapped through `class_id`; the Class entity/table remains in use.
+- Public Course responses expose only active Contribution weights (`codeContributionWeight`, `testContributionWeight`, `documentContributionWeight`, `researchContributionWeight`) and never `designContributionWeight`. Legacy DESIGN storage remains internal for schema validation/history; no migration or Contribution arithmetic change is implied.
 - `courseStatus` is a computed-only enum: `OPEN` or `CLOSED`. It is not persisted, has no scheduler, and requires no migration.
 - The only status authority is the Course's Semester `startDate`/`endDate`. Its business timezone is `Asia/Ho_Chi_Minh`; an injected `Clock` is converted from `instant` to that zone and then to `LocalDateTime`. Do not use the system-default timezone or the Jira timezone.
 - Both boundaries are inclusive: `OPEN` iff Semester and both dates are non-null and `startDate <= now <= endDate`; otherwise (including a missing Semester or either legacy null date) the response is `CLOSED` without an error.
@@ -1244,3 +1255,11 @@ Không có secret hoặc thông tin đăng nhập thật trong decision log này
 - OIDC synchronization remains local-DB authority. When an existing Student or Lecturer resolves as `INACTIVE`/`SUSPENDED`, the success handler clears/invalidate any callback session and returns `401 ACCOUNT_DISABLED` without saving a SAGA authentication. PENDING Student provisioning behavior is unchanged. There is no Cognito Admin call, role mutation, or status reset on re-login.
 - This is current-request-session invalidation only. The application still has no SessionRegistry/shared Spring Session infrastructure, therefore it does not claim immediate global or cross-instance revocation.
 - Verification: `AdminAccountStatusIntegrationTest` and `CognitoAuthenticationSuccessHandlerTest` pass (10 tests). No migration, public operation, or public response schema changed.
+
+## DEC-102 — Persisted graph-processing history is projection-work telemetry
+
+- Date: 2026-08-17; status: ACCEPTED / IMPLEMENTED / CONFIRMED_SOURCE_TEST.
+- `graph_processing_run` records one immutable run after each successfully built `CONTRIBUTION` or `INTERACTION` response. A run contains UTC `occurred_at`, graph kind, optional Course/Team/Student snapshot IDs, and the exact response `nodesBuilt` / `edgesBuilt` counts. It stores neither graph payload nor personal data/secrets and intentionally has no foreign keys, so source-row cleanup cannot block telemetry retention.
+- Recording uses the injected `Clock` and an independent transaction. Telemetry persistence is fail-open: a sanitized warning is logged, while an already-built graph response remains successful. No scheduler, backfill, seed, provider call, AI behavior, contribution formula, or interaction-edge semantic changed.
+- `GET /api/admin/reports/graph-processing` remains ADMIN session-only GET/no-CSRF/no-Bearer. It now returns `historySupported=true`, `coverageStart`, and only persisted daily buckets in the rolling seven local calendar days of `Asia/Ho_Chi_Minh`; it aggregates both kinds by `nodesBuilt`, `edgesBuilt`, and `runCount`. It never fabricates pre-cutover or zero points.
+- Schema migration is `V44__add_graph_processing_run.sql`; it adds UTC timestamp and `(occurred_at)`, `(graph_kind, occurred_at)` indexes only. The public response schema replaces the obsolete created/updated counters with build/run counters.

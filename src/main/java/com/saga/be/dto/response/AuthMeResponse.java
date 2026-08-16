@@ -12,7 +12,8 @@ public record AuthMeResponse(
         ApplicationRole applicationRole,
         UUID localProfileId,
         AccountStatus accountStatus,
-        String avatarUrl
+        String avatarUrl,
+        String studentCode
 ) {
     public static AuthMeResponse from(SagaPrincipal principal) {
         return from(principal, principal.accountStatus());
@@ -26,7 +27,49 @@ public record AuthMeResponse(
                 principal.applicationRole(),
                 principal.localProfileId(),
                 accountStatus,
-                principal.avatarUrl()
+                principal.avatarUrl(),
+                null
+        );
+    }
+
+    public static AuthMeResponse from(
+            SagaPrincipal principal,
+            AccountStatus accountStatus,
+            String fullName,
+            String avatarUrl,
+            String studentCode
+    ) {
+        return new AuthMeResponse(
+                principal.cognitoSub(),
+                principal.email(),
+                fullName,
+                principal.applicationRole(),
+                principal.localProfileId(),
+                accountStatus,
+                avatarUrl,
+                studentCode
+        );
+    }
+
+    public static AuthMeResponse from(
+            String cognitoSub,
+            String email,
+            String fullName,
+            ApplicationRole applicationRole,
+            UUID localProfileId,
+            AccountStatus accountStatus,
+            String avatarUrl,
+            String studentCode
+    ) {
+        return new AuthMeResponse(
+                cognitoSub,
+                email,
+                fullName,
+                applicationRole,
+                localProfileId,
+                accountStatus,
+                avatarUrl,
+                studentCode
         );
     }
 }

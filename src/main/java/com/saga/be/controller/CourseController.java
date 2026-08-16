@@ -58,17 +58,18 @@ public class CourseController {
 
     @PostMapping
     @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<Course> createCourse(@Valid @RequestBody CourseRequest request) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(courseService.createCourse(request));
+    public ResponseEntity<CourseResponse> createCourse(@Valid @RequestBody CourseRequest request) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(
+                courseService.toResponse(courseService.createCourse(request)));
     }
 
     @PutMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<Course> updateCourse(
+    public ResponseEntity<CourseResponse> updateCourse(
             @PathVariable UUID id,
             @Valid @RequestBody CourseRequest request
     ) {
-        return ResponseEntity.ok(courseService.updateCourse(id, request));
+        return ResponseEntity.ok(courseService.toResponse(courseService.updateCourse(id, request)));
     }
 
     @DeleteMapping("/{id}")

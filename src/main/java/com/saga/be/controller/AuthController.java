@@ -2,16 +2,22 @@ package com.saga.be.controller;
 
 import com.saga.be.dto.response.AuthMeResponse;
 import com.saga.be.dto.response.CsrfTokenResponse;
+import com.saga.be.dto.request.SelfProfileUpdateRequest;
 import com.saga.be.exception.UnauthenticatedRequestException;
 import com.saga.be.security.SagaPrincipal;
 import com.saga.be.service.CurrentAccountStatusService;
+import com.saga.be.service.SelfProfileService;
+import jakarta.validation.Valid;
 import jakarta.servlet.http.HttpServletRequest;
 import java.net.URI;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.web.csrf.CsrfToken;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -21,9 +27,14 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
 
     private final CurrentAccountStatusService accountStatusService;
+    private final SelfProfileService selfProfileService;
 
-    public AuthController(CurrentAccountStatusService accountStatusService) {
+    public AuthController(
+            CurrentAccountStatusService accountStatusService,
+            SelfProfileService selfProfileService
+    ) {
         this.accountStatusService = accountStatusService;
+        this.selfProfileService = selfProfileService;
     }
 
     @GetMapping("/login")
@@ -47,7 +58,21 @@ public class AuthController {
         if (csrfAttribute instanceof CsrfToken csrfToken) {
             csrfToken.getToken();
         }
-        return AuthMeResponse.from(principal, accountStatusService.currentStatusForAuthRoute(principal));
+        accountStatusService.currentStatusForAuthRoute(principal);
+        return selfProfileService.read(principal);
+    }
+
+    @PatchMapping("/me")
+    @PreAuthorize("hasAnyRole('STUDENT', 'LECTURER')")
+    @io.swagger.v3.oas.annotations.Operation(
+            summary = "Cap nhat ho so ca nhan",
+            description = "Student va Lecturer chi cap nhat fullName/avatarUrl cua chinh minh qua session va CSRF; khong doi identity, vai tro hay trang thai."
+    )
+    public AuthMeResponse updateMe(
+            @AuthenticationPrincipal SagaPrincipal principal,
+            @Valid @RequestBody SelfProfileUpdateRequest request
+    ) {
+        return selfProfileService.update(principal, request);
     }
 
     @GetMapping("/csrf")

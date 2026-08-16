@@ -1,3 +1,8 @@
+## Public Course/Contribution legacy field boundary — 2026-08-17
+
+- `CourseResponse` is the public response for Course list/detail/create/update. `academicClass` is present; `clazz`, `academicClazz`, and `designContributionWeight` are absent. This does not rename `Course.clazz`, `class_id`, Class, or `CourseRequest.classId`.
+- Public Contribution weight/config and member-breakdown DTOs use only code/test/document/research fields. Legacy design storage columns and V37 must remain unchanged; no new migration, formula, mode, auth, or permission change is authorized by this cleanup.
+
 ## Active Course chat scope (DEC-099) — 2026-08-16
 
 - Browser may send optional `courseId` on AI conversation create/message. It must not send actor identity fields. Backend must validate Course access from the session actor before bind.

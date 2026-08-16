@@ -94,6 +94,39 @@ OpenAPI **150 → 149** (one public POST removed). Migration head **V33 → V34*
 - Project create is unchanged: `POST /api/teams/{teamId}/projects` still requires `projectTypeId` (missing → `PROJECT_TYPE_REQUIRED`; unknown → `PROJECT_TYPE_NOT_FOUND`). FE flow: `GET /api/project-types` first, then send the selected `projectTypeId`. Do not send `code`/`name` in place of the UUID.
 - Existing projects created before this migration read back `projectType: null` (legacy-compatible) since their old catalog row no longer exists — this is a product-approved reset, not a bug.
 
+## Self Profile V1 (DEC-103) — 2026-08-17
+
+Profile screen uses browser session only: `credentials: "include"`, `JSESSIONID`, and
+the existing `XSRF-TOKEN` / `X-XSRF-TOKEN` CSRF pair for the mutation. Do not use
+Bearer authentication and do not send actor/profile/student/lecturer IDs.
+
+| Method | Endpoint | Actor | Response |
+| --- | --- | --- | --- |
+| GET | `/api/auth/me` | authenticated session | canonical `AuthMeResponse` |
+| PATCH | `/api/auth/me` | active STUDENT or LECTURER + CSRF | canonical `AuthMeResponse` |
+
+```ts
+type SelfProfileUpdateRequest = {
+  fullName?: string;       // trim; non-blank if supplied; max 255
+  avatarUrl?: string | null; // null clears local avatar; otherwise absolute HTTP(S), max 2048
+};
+```
+
+PATCH is sparse: omitted values remain unchanged. Only `fullName` and `avatarUrl` are
+editable. `cognitoSub`, `email`, `studentCode`, `applicationRole`, `accountStatus`,
+`localProfileId`, Team role, and Course membership are read-only and must not be sent.
+The backend never fetches avatar URLs, uploads files, calls Google/Cognito, or accepts
+provider tokens. `studentCode` is returned for STUDENT and `null` for LECTURER/ADMIN.
+
+Backend owns the status gate. `401 ACCOUNT_DISABLED` for an inactive/suspended session
+also applies to `/api/auth/me` and PATCH; clear FE auth state and do not retry. PENDING
+Student behavior remains blocked by the same active-status gate. OIDC initializes name
+and valid picture only for a newly created local profile; later logins do not overwrite
+locally edited profile fields.
+
+This supersedes the earlier Avatar note that prohibited all browser avatar URLs; V1
+allows the validated local `avatarUrl` PATCH above.
+
 ## Avatar / Student progress / Lecturer Course weights — 2026-08-15
 
 Browser auth: `JSESSIONID` + `credentials: "include"`. GET không CSRF. POST/PUT/PATCH/DELETE cần CSRF. **Không Bearer.** OpenAPI **150**. Migration **V33**. Full suite **không** green (1019 / 23 fail / 8 error).
@@ -114,6 +147,7 @@ type AuthMeResponse = {
   localProfileId: string;
   accountStatus: "ACTIVE" | "INACTIVE" | "SUSPENDED" | "PENDING" | null;
   avatarUrl: string | null;
+  studentCode: string | null; // canonical only for STUDENT
 };
 ```
 
@@ -926,17 +960,20 @@ Tất cả endpoint trong phần này cần session. `page` là zero-based; mặ
 | POST | `/api/v1/semesters` | — | ADMIN + CSRF | 201 `Semester` |
 | GET | `/api/v1/courses` | `subjectId?`, `semesterId?`, `instructorId?`, `page?`, `size?` | Session | 200 `Page<CourseResponse>` |
 | GET | `/api/v1/courses/{id}` | — | Session | 200 `CourseResponse` |
-| POST | `/api/v1/courses` | — | ADMIN + CSRF | 201 `Course` |
+| POST | `/api/v1/courses` | — | ADMIN + CSRF | 201 `CourseResponse` |
+| PUT | `/api/v1/courses/{id}` | — | ADMIN + CSRF | 200 `CourseResponse` |
 
 ### Course read response
 
-`GET /api/v1/courses` returns `Page<CourseResponse>` and `GET /api/v1/courses/{id}`
-returns `CourseResponse`. The stable fields include `id`, `createdAt`, `updatedAt`,
+`GET /api/v1/courses` returns `Page<CourseResponse>`; detail plus ADMIN create/update
+also return `CourseResponse`. The stable fields include `id`, `createdAt`, `updatedAt`,
 `courseCode`, `name`, `subject`, `academicClass`, `semester`, `instructor`, and
 computed `courseStatus`.
 
-`academicClass` is the canonical nested Class field. `clazz` is still returned as a
-deprecated compatibility alias with the same value; `academicClazz` is not exposed.
+`academicClass` is the sole nested Class field. Do not send or read `clazz` or
+`academicClazz`; both are absent. Use only `codeContributionWeight`,
+`testContributionWeight`, `documentContributionWeight`, and `researchContributionWeight`.
+`designContributionWeight` is absent.
 
 `courseStatus` is `OPEN` or `CLOSED`, computed by Backend from the Course Semester in
 `Asia/Ho_Chi_Minh`, inclusively between `startDate` and `endDate`. Frontend must not
@@ -976,10 +1013,8 @@ type CourseRequest = {
 
 `Subject`, `Class` và `Semester` là JPA entity response trực tiếp, có các field
 base `id`, `createdAt`, `updatedAt` và các property domain tương ứng. `Course`
-cũng được trả trực tiếp từ entity với `id`, `createdAt`, `updatedAt`,
-`courseCode`, `name`, `subject`, `clazz`, `semester`, `instructor`; không có
-DTO response ổn định riêng. Kiểm tra schema đang chạy trên Swagger trước khi
-bind toàn bộ nested entity vào UI.
+không trả trực tiếp entity: mọi response Course dùng DTO `CourseResponse` ổn định;
+không bind UI vào storage field `clazz` hoặc `designContributionWeight`.
 
 Các service xác định rõ `404` khi không tìm thấy entity liên quan, `409` khi
 mã Subject/Class/Course/Semester trùng, và `400` khi `endDate` trước
@@ -1996,3 +2031,21 @@ All browser API calls continue to use `credentials: "include"`; do not use Beare
 Treat `401 ACCOUNT_DISABLED` as terminal for the local auth UI: clear authenticated state/CSRF state and show the disabled-account message, then use the normal logout/login UI flow. Do not retry the original request. `GET /api/auth/me` uses the same behavior for a disabled session, so it cannot bootstrap the app. `GET /api/auth/csrf` remains available solely for the CSRF-protected logout flow; it does not bypass the disabled gate for `/me` or business APIs. `POST /api/auth/logout` remains CSRF-protected and usable/idempotent; missing or invalid CSRF remains its normal `403`, not `ACCOUNT_DISABLED`.
 
 The backend invalidates only the session that reaches it. It does not claim instant global cross-browser/cross-instance revocation, and re-enabling an account does not revive an already invalidated session; the user must authenticate again.
+
+## Admin graph-processing density (DEC-102) — 2026-08-17
+
+`GET /api/admin/reports/graph-processing` remains an ADMIN-only browser-session GET (`credentials: "include"`), requires no CSRF header, and never accepts Bearer authentication. Backend returns real persisted processing work:
+
+```json
+{
+  "generatedAt": "2026-08-17T00:00:00Z",
+  "periodDays": 7,
+  "historySupported": true,
+  "coverageStart": "2026-08-15T00:00:00Z",
+  "points": [
+    { "date": "2026-08-17", "nodesBuilt": 14, "edgesBuilt": 10, "runCount": 3 }
+  ]
+}
+```
+
+`date` is bucketed by Backend in `Asia/Ho_Chi_Minh`. Do not recompute day buckets in browser timezone. `points` contains only dates with persisted runs inside the current rolling seven local calendar days; an empty array is normal for pre-cutover/no-activity and must not be padded with synthetic zero or historical values. `coverageStart` is the earliest persisted run overall and is `null` until the first actual run. The former `nodesCreated`, `nodesUpdated`, `edgesCreated`, and `edgesUpdated` fields are removed; use only `nodesBuilt`, `edgesBuilt`, and `runCount`.

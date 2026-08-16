@@ -80,7 +80,12 @@ class CourseUpdateSoftDeleteIntegrationTest {
     @Test
     void createAcceptsActiveReferencesAndRejectsEachTombstoneOrMissingLecturer() throws Exception {
         References active = references();
-        performAdminPost(courseJson("ACTIVE", "Active course", active)).andExpect(status().isCreated());
+        performAdminPost(courseJson("ACTIVE", "Active course", active))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.academicClass.id").value(active.clazz().getId().toString()))
+                .andExpect(jsonPath("$.clazz").doesNotExist())
+                .andExpect(jsonPath("$.academicClazz").doesNotExist())
+                .andExpect(jsonPath("$.designContributionWeight").doesNotExist());
 
         Subject deletedSubject = active.subject(); deletedSubject.setDeletedAt(LocalDateTime.now()); subjectRepository.saveAndFlush(deletedSubject);
         performAdminPost(courseJson("DELETED-SUBJECT", "No", active)).andExpect(status().isNotFound());
@@ -114,7 +119,12 @@ class CourseUpdateSoftDeleteIntegrationTest {
         mockMvc.perform(put("/api/v1/courses/{id}", course.getId()).with(authentication(authenticationFor(ApplicationRole.ADMIN)))
                         .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isForbidden());
         putAdmin(UUID.randomUUID(), body).andExpect(status().isNotFound());
-        putAdmin(course.getId(), body).andExpect(status().isOk()).andExpect(jsonPath("$.courseCode").value("UPDATED"));
+        putAdmin(course.getId(), body).andExpect(status().isOk())
+                .andExpect(jsonPath("$.courseCode").value("UPDATED"))
+                .andExpect(jsonPath("$.academicClass.id").value(references.clazz().getId().toString()))
+                .andExpect(jsonPath("$.clazz").doesNotExist())
+                .andExpect(jsonPath("$.academicClazz").doesNotExist())
+                .andExpect(jsonPath("$.designContributionWeight").doesNotExist());
         assertEquals(course.getId(), teamRepository.findById(team.getId()).orElseThrow().getCourse().getId());
         assertEquals(course.getId(), projectRepository.findById(project.getId()).orElseThrow().getCourse().getId());
     }
@@ -152,7 +162,7 @@ class CourseUpdateSoftDeleteIntegrationTest {
     }
 
     @Test
-    void readEndpointsReturnStableCourseResponseWithAcademicClassAndDeprecatedClazzAlias() throws Exception {
+    void readEndpointsReturnCanonicalCourseResponseWithoutLegacyClassOrDesignFields() throws Exception {
         References matchingReferences = references();
         Course matching = course("READ-MATCH", matchingReferences);
         Course other = course("READ-OTHER", references());
@@ -172,18 +182,27 @@ class CourseUpdateSoftDeleteIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].id").value(matching.getId().toString()))
                 .andExpect(jsonPath("$.content[0].academicClass.id").value(matchingReferences.clazz().getId().toString()))
-                .andExpect(jsonPath("$.content[0].clazz.id").value(matchingReferences.clazz().getId().toString()))
+                .andExpect(jsonPath("$.content[0].clazz").doesNotExist())
+                .andExpect(jsonPath("$.content[0].academicClazz").doesNotExist())
                 .andExpect(jsonPath("$.content[0].subject.id").value(matchingReferences.subject().getId().toString()))
                 .andExpect(jsonPath("$.content[0].semester.id").value(matchingReferences.semester().getId().toString()))
                 .andExpect(jsonPath("$.content[0].courseStatus").value("OPEN"))
                 .andExpect(jsonPath("$.content[0].instructor.id").value(matchingReferences.lecturer().getId().toString()))
+                .andExpect(jsonPath("$.content[0].codeContributionWeight").exists())
+                .andExpect(jsonPath("$.content[0].testContributionWeight").exists())
+                .andExpect(jsonPath("$.content[0].documentContributionWeight").exists())
+                .andExpect(jsonPath("$.content[0].researchContributionWeight").exists())
+                .andExpect(jsonPath("$.content[0].contributionConfigMode").exists())
+                .andExpect(jsonPath("$.content[0].designContributionWeight").doesNotExist())
                 .andExpect(jsonPath("$.content[*].id", not(hasItem(other.getId().toString()))));
 
         mockMvc.perform(get("/api/v1/courses/{id}", matching.getId())
                         .with(authentication(authenticationFor(ApplicationRole.ADMIN))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.academicClass.classCode").value(matchingReferences.clazz().getClassCode()))
-                .andExpect(jsonPath("$.clazz.classCode").value(matchingReferences.clazz().getClassCode()))
+                .andExpect(jsonPath("$.clazz").doesNotExist())
+                .andExpect(jsonPath("$.academicClazz").doesNotExist())
+                .andExpect(jsonPath("$.designContributionWeight").doesNotExist())
                 .andExpect(jsonPath("$.courseStatus").value("OPEN"));
         assertEquals(courseCountBeforeRead, courseRepository.count());
     }

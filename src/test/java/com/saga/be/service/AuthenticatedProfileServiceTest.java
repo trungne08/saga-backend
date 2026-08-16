@@ -239,7 +239,7 @@ class AuthenticatedProfileServiceTest {
         verify(lecturerRepository).saveAndFlush(existing);
         assertEquals(subject, existing.getCognitoSub());
         assertEquals(email, existing.getEmail());
-        assertEquals("Updated Name", existing.getFullName());
+        assertEquals("Old Name", existing.getFullName());
         assertEquals(profileId, profile.localProfileId());
         assertEquals(ApplicationRole.LECTURER, profile.role());
         assertEquals(AccountStatus.ACTIVE, profile.accountStatus());
@@ -482,13 +482,13 @@ class AuthenticatedProfileServiceTest {
     }
 
     @Test
-    void updatesAvatarWhenPictureChangesOnNextLogin() {
+    void preservesExistingStudentLocalNameAndAvatarOnRelogin() {
         String subject = "existing-avatar-subject";
         String email = "studenthe123456@fpt.edu.vn";
         Student existing = Student.builder()
                 .cognitoSub(subject)
                 .email(email)
-                .fullName("Existing Student")
+                .fullName("Local Student Name")
                 .studentCode("HE123456")
                 .avatarUrl("https://cdn.example.test/old.png")
                 .accountStatus(AccountStatus.ACTIVE)
@@ -504,13 +504,15 @@ class AuthenticatedProfileServiceTest {
         AuthenticatedProfile profile = profileService.synchronize(new AuthenticatedIdentity(
                 subject,
                 email,
-                "Existing Student",
+                "OIDC Changed Student Name",
                 ApplicationRole.STUDENT,
                 "https://cdn.example.test/new.png"
         ));
 
-        assertEquals("https://cdn.example.test/new.png", existing.getAvatarUrl());
-        assertEquals("https://cdn.example.test/new.png", profile.avatarUrl());
+        assertEquals("https://cdn.example.test/old.png", existing.getAvatarUrl());
+        assertEquals("https://cdn.example.test/old.png", profile.avatarUrl());
+        assertEquals("Local Student Name", existing.getFullName());
+        assertEquals("Local Student Name", profile.fullName());
         assertEquals(AccountStatus.ACTIVE, existing.getAccountStatus());
         assertEquals(subject, existing.getCognitoSub());
     }
@@ -544,6 +546,68 @@ class AuthenticatedProfileServiceTest {
 
         assertEquals("https://cdn.example.test/keep.png", existing.getAvatarUrl());
         assertEquals("https://cdn.example.test/keep.png", profile.avatarUrl());
+    }
+
+    @Test
+    void createsNewLecturerWithOidcNameAndAvatar() {
+        String subject = "new-lecturer-avatar-subject";
+        String email = "new-lecturer@example.test";
+        UUID profileId = UUID.randomUUID();
+        stubNoSubjectMatches(subject);
+        stubNoEmailMatches(email);
+        when(lecturerRepository.saveAndFlush(any(Lecturer.class))).thenAnswer(invocation -> {
+            Lecturer lecturer = invocation.getArgument(0);
+            lecturer.setId(profileId);
+            return lecturer;
+        });
+
+        AuthenticatedProfile profile = profileService.synchronize(new AuthenticatedIdentity(
+                subject,
+                email,
+                "OIDC Lecturer",
+                ApplicationRole.LECTURER,
+                "https://cdn.example.test/new-lecturer.png"
+        ));
+
+        ArgumentCaptor<Lecturer> captor = ArgumentCaptor.forClass(Lecturer.class);
+        verify(lecturerRepository).saveAndFlush(captor.capture());
+        assertEquals("OIDC Lecturer", captor.getValue().getFullName());
+        assertEquals("https://cdn.example.test/new-lecturer.png", captor.getValue().getAvatarUrl());
+        assertEquals("OIDC Lecturer", profile.fullName());
+        assertEquals("https://cdn.example.test/new-lecturer.png", profile.avatarUrl());
+    }
+
+    @Test
+    void preservesExistingLecturerLocalNameAndAvatarOnRelogin() {
+        String subject = "existing-lecturer-avatar-subject";
+        String email = "existing-lecturer@example.test";
+        Lecturer existing = Lecturer.builder()
+                .cognitoSub(subject)
+                .email(email)
+                .fullName("Local Lecturer Name")
+                .avatarUrl("https://cdn.example.test/local-lecturer.png")
+                .accountStatus(AccountStatus.ACTIVE)
+                .build();
+        existing.setId(UUID.randomUUID());
+        when(adminRepository.findByCognitoSub(subject)).thenReturn(Optional.empty());
+        when(lecturerRepository.findByCognitoSub(subject)).thenReturn(Optional.of(existing));
+        when(studentRepository.findByCognitoSub(subject)).thenReturn(Optional.empty());
+        when(lecturerRepository.saveAndFlush(existing)).thenReturn(existing);
+
+        AuthenticatedProfile profile = profileService.synchronize(new AuthenticatedIdentity(
+                subject,
+                email,
+                "OIDC Changed Name",
+                ApplicationRole.LECTURER,
+                "https://cdn.example.test/oidc-changed.png"
+        ));
+
+        assertEquals("Local Lecturer Name", existing.getFullName());
+        assertEquals("https://cdn.example.test/local-lecturer.png", existing.getAvatarUrl());
+        assertEquals("Local Lecturer Name", profile.fullName());
+        assertEquals("https://cdn.example.test/local-lecturer.png", profile.avatarUrl());
+        assertEquals(subject, existing.getCognitoSub());
+        assertEquals(email, existing.getEmail());
     }
 
     private void stubImportedStudentForBinding(String subject, String email, Student imported) {

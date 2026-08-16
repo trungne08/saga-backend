@@ -6,16 +6,14 @@ import com.saga.be.entity.Semester;
 import com.saga.be.entity.Subject;
 import com.saga.be.entity.enums.AccountStatus;
 import com.saga.be.entity.enums.ContributionConfigMode;
-import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
 /**
  * Stable public representation for Course read endpoints.
  *
- * <p>The persistence association remains {@code Course.clazz} / {@code course.class_id}.
- * {@code academicClass} is the preferred public JSON name; {@code clazz} is retained during
- * the compatibility window for existing clients.</p>
+ * <p>The persistence association remains {@code Course.clazz} / {@code course.class_id};
+ * {@code academicClass} is the sole public JSON field for that association.</p>
  */
 public record CourseResponse(
         UUID id,
@@ -25,9 +23,6 @@ public record CourseResponse(
         String name,
         SubjectResponse subject,
         AcademicClassResponse academicClass,
-        @Deprecated
-        @Schema(description = "Deprecated compatibility alias for academicClass.", deprecated = true)
-        AcademicClassResponse clazz,
         SemesterResponse semester,
         CourseStatus courseStatus,
         InstructorResponse instructor,
@@ -35,7 +30,6 @@ public record CourseResponse(
         Double testContributionWeight,
         Double documentContributionWeight,
         Double researchContributionWeight,
-        Double designContributionWeight,
         ContributionConfigMode contributionConfigMode
 ) {
     public static CourseResponse from(Course course, CourseStatus courseStatus) {
@@ -48,7 +42,6 @@ public record CourseResponse(
                 course.getName(),
                 SubjectResponse.from(course.getSubject()),
                 classResponse,
-                classResponse,
                 SemesterResponse.from(course.getSemester()),
                 courseStatus,
                 InstructorResponse.from(course.getInstructor()),
@@ -56,7 +49,6 @@ public record CourseResponse(
                 course.getTestContributionWeight(),
                 course.getDocumentContributionWeight(),
                 course.getResearchContributionWeight(),
-                course.getDesignContributionWeight(),
                 course.getContributionConfigMode()
         );
     }

@@ -14,6 +14,7 @@ import com.saga.be.exception.UnauthenticatedRequestException;
 import com.saga.be.security.ApplicationRole;
 import com.saga.be.security.SagaPrincipal;
 import com.saga.be.service.CurrentAccountStatusService;
+import com.saga.be.service.SelfProfileService;
 import java.net.URI;
 import java.util.Arrays;
 import java.util.List;
@@ -27,7 +28,8 @@ import org.springframework.security.web.csrf.DefaultCsrfToken;
 class AuthControllerTest {
 
     private final CurrentAccountStatusService accountStatusService = mock(CurrentAccountStatusService.class);
-    private final AuthController controller = new AuthController(accountStatusService);
+    private final SelfProfileService selfProfileService = mock(SelfProfileService.class);
+    private final AuthController controller = new AuthController(accountStatusService, selfProfileService);
 
     @Test
     void loginRedirectsToTheBackendCognitoAuthorizationEndpoint() {
@@ -54,6 +56,7 @@ class AuthControllerTest {
         );
 
         when(accountStatusService.currentStatusForAuthRoute(principal)).thenReturn(AccountStatus.ACTIVE);
+        when(selfProfileService.read(principal)).thenReturn(AuthMeResponse.from(principal, AccountStatus.ACTIVE));
         AuthMeResponse response = controller.me(principal, new MockHttpServletRequest());
 
         assertEquals("cognito-subject", response.cognitoSub());
@@ -63,6 +66,7 @@ class AuthControllerTest {
         assertEquals(localProfileId, response.localProfileId());
         assertEquals(AccountStatus.ACTIVE, response.accountStatus());
         assertNull(response.avatarUrl());
+        assertNull(response.studentCode());
         assertEquals(
                 List.of(
                         "cognitoSub",
@@ -71,7 +75,8 @@ class AuthControllerTest {
                         "applicationRole",
                         "localProfileId",
                         "accountStatus",
-                        "avatarUrl"
+                        "avatarUrl",
+                        "studentCode"
                 ),
                 Arrays.stream(AuthMeResponse.class.getRecordComponents())
                         .map(component -> component.getName())
@@ -100,6 +105,7 @@ class AuthControllerTest {
                 "https://cdn.example.test/student.png"
         );
         when(accountStatusService.currentStatusForAuthRoute(principal)).thenReturn(AccountStatus.ACTIVE);
+        when(selfProfileService.read(principal)).thenReturn(AuthMeResponse.from(principal, AccountStatus.ACTIVE));
 
         AuthMeResponse response = controller.me(principal, new MockHttpServletRequest());
 

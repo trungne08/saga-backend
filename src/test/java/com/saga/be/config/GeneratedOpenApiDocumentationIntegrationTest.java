@@ -94,8 +94,8 @@ class GeneratedOpenApiDocumentationIntegrationTest {
             }
         }
 
-        assertEquals(152, operationCount,
-                "Added POST+DELETE GitIssue-Commit manual links");
+        assertEquals(153, operationCount,
+                "Added PATCH self-profile update");
         System.out.println("Generated OpenAPI operation count: " + operationCount);
         assertEquals(usedTags, documentedTags, "Global tags phải đúng bằng tập tag thực sự có operation");
         assertEquals(documentedTags.size(), root.path("tags").size(), "Global tags không được trùng tên");
@@ -104,6 +104,10 @@ class GeneratedOpenApiDocumentationIntegrationTest {
         assertTrue(documentedTags.contains("Trợ lý AI"));
         assertTrue(documentedTags.contains("Loại dự án"));
         assertFalse(root.path("components").path("securitySchemes").has("bearerAuth"));
+        assertTrue(root.at("/paths/~1api~1auth~1me/patch").isObject());
+        assertTrue(root.at("/components/schemas/AuthMeResponse/properties").has("studentCode"));
+        assertTrue(root.at("/components/schemas/SelfProfileUpdateRequest/properties").has("fullName"));
+        assertTrue(root.at("/components/schemas/SelfProfileUpdateRequest/properties").has("avatarUrl"));
         root.path("components").path("securitySchemes").properties().forEach(entry ->
                 assertFalse("http".equalsIgnoreCase(entry.getValue().path("type").asText())
                                 && "bearer".equalsIgnoreCase(entry.getValue().path("scheme").asText()),
@@ -111,14 +115,22 @@ class GeneratedOpenApiDocumentationIntegrationTest {
 
         assertTrue(root.path("paths").has("/api/admin/reports/anomalies"));
         assertTrue(root.path("paths").has("/api/admin/reports/graph-processing"));
+        JsonNode graphProcessingProperties = root.at("/components/schemas/AdminGraphProcessingReportResponse/properties");
+        assertTrue(graphProcessingProperties.has("coverageStart"));
+        JsonNode graphProcessingPointProperties = root.at(
+                "/components/schemas/AdminGraphProcessingPointResponse/properties");
+        assertTrue(graphProcessingPointProperties.has("nodesBuilt"));
+        assertTrue(graphProcessingPointProperties.has("edgesBuilt"));
+        assertTrue(graphProcessingPointProperties.has("runCount"));
+        assertFalse(graphProcessingPointProperties.has("nodesCreated"));
         assertTrue(root.path("paths").has("/api/project-types"));
         assertTrue(root.at("/paths/~1api~1v1~1courses/get/responses/200/content/*~1*/schema")
                 .toString().contains("CourseResponse"));
         JsonNode courseResponseProperties = root.at("/components/schemas/CourseResponse/properties");
         assertTrue(courseResponseProperties.has("academicClass"));
         assertFalse(courseResponseProperties.has("academicClazz"));
-        assertTrue(courseResponseProperties.has("clazz"));
-        assertTrue(courseResponseProperties.path("clazz").path("deprecated").asBoolean());
+        assertFalse(courseResponseProperties.has("clazz"));
+        assertFalse(courseResponseProperties.has("designContributionWeight"));
         assertTrue(courseResponseProperties.has("courseStatus"));
         assertTrue(courseResponseProperties.path("courseStatus").path("enum").toString()
                 .contains("OPEN"));
@@ -129,6 +141,15 @@ class GeneratedOpenApiDocumentationIntegrationTest {
         assertTrue(root.at("/paths/~1api~1v1~1courses~1{courseId}~1contribution-team-weights/get").isObject());
         assertTrue(root.at("/paths/~1api~1teams~1{teamId}~1projects/post").isObject());
         assertTrue(root.at("/paths/~1api~1v1~1courses~1{courseId}~1contribution-slice-weights/put").isObject());
+        String generatedSchema = root.path("components").path("schemas").toString();
+        assertFalse(generatedSchema.contains("\"designContributionWeight\""));
+        assertFalse(generatedSchema.contains("\"designWeight\""));
+        assertFalse(generatedSchema.contains("\"designContributionScore\""));
+        assertFalse(generatedSchema.contains("\"designContributionPercentage\""));
+        assertFalse(generatedSchema.contains("\"proposedDesignWeight\""));
+        assertFalse(generatedSchema.contains("\"clazz\""));
+        assertFalse(generatedSchema.contains("\"academicClazz\""));
+        assertTrue(generatedSchema.contains("DESIGN_ARCHITECTURE"));
         assertFalse(root.path("paths").has("/api/v1/courses/contribution-slice-weight-requests"));
         assertFalse(root.at("/paths/~1api~1v1~1courses~1{courseId}~1contribution-slice-weight-requests/post").isObject());
         assertFalse(root.at("/paths/~1api~1v1~1courses~1contribution-slice-weight-requests~1{requestId}~1decision/put").isObject());

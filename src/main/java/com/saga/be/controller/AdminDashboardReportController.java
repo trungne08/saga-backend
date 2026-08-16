@@ -33,7 +33,7 @@ public class AdminDashboardReportController {
     @GetMapping("/graph-processing")
     @Operation(
             summary = "Xem báo cáo xử lý graph",
-            description = "V1 trả khung 7 ngày với historySupported=false và points rỗng vì chưa có event graph-processing lịch sử authoritative."
+            description = "Trả các bucket graph-processing persisted trong rolling 7 ngày theo Asia/Ho_Chi_Minh; không tạo điểm lịch sử giả."
     )
     public ResponseEntity<AdminGraphProcessingReportResponse> graphProcessing() {
         return ResponseEntity.ok(adminDashboardReportService.graphProcessing());

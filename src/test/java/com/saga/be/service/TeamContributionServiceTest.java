@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
 
 import com.saga.be.dto.response.TeamContributionEvaluationResponse;
 import com.saga.be.dto.response.TeamContributionGraphResponse;
@@ -23,6 +24,7 @@ import com.saga.be.entity.ProjectGroupWeightConfig;
 import com.saga.be.entity.Team;
 import com.saga.be.entity.TeamMember;
 import com.saga.be.entity.enums.PolicyOverrideStatus;
+import com.saga.be.entity.enums.GraphProcessingKind;
 import com.saga.be.entity.enums.RoleInTeam;
 import com.saga.be.entity.enums.TaskStatus;
 import com.saga.be.repository.CommitDataRepository;
@@ -86,6 +88,9 @@ class TeamContributionServiceTest {
     @Mock
     private TaskWebLinkRepository taskWebLinkRepository;
 
+    @Mock
+    private GraphProcessingRunRecorder graphProcessingRunRecorder;
+
     private TeamContributionService service;
 
     @BeforeEach
@@ -101,7 +106,8 @@ class TeamContributionServiceTest {
                 lecturerRepository,
                 new ContributionSliceWeightResolver(projectGroupWeightConfigRepository),
                 taskAttachmentRepository,
-                taskWebLinkRepository
+                taskWebLinkRepository,
+                graphProcessingRunRecorder
         );
     }
 
@@ -262,6 +268,7 @@ class TeamContributionServiceTest {
         assertEquals(25.0, graph.weights().codeWeightPercent(), 0.0001);
         assertEquals(6, graph.nodes().size());
         assertEquals(2, graph.edges().size());
+        verify(graphProcessingRunRecorder).record(GraphProcessingKind.CONTRIBUTION, course.getId(), teamId, null, 6, 2);
         assertTrue(graph.nodes().stream().noneMatch(node -> "DESIGN".equals(node.criterion())));
 
         var aliceNode = graph.nodes().stream()

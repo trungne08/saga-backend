@@ -18,6 +18,7 @@ import com.saga.be.entity.TaskWebLink;
 import com.saga.be.entity.Team;
 import com.saga.be.entity.TeamMember;
 import com.saga.be.entity.enums.PolicyOverrideStatus;
+import com.saga.be.entity.enums.GraphProcessingKind;
 import com.saga.be.entity.enums.RoleInTeam;
 import com.saga.be.entity.enums.TaskStatus;
 import com.saga.be.repository.CommitDataRepository;
@@ -72,6 +73,7 @@ public class TeamContributionService {
     private final ContributionSliceWeightResolver sliceWeightResolver;
     private final TaskAttachmentRepository taskAttachmentRepository;
     private final TaskWebLinkRepository taskWebLinkRepository;
+    private final GraphProcessingRunRecorder graphProcessingRunRecorder;
 
     @Transactional(readOnly = true)
     public TeamContributionEvaluationResponse evaluate(SagaPrincipal principal, UUID teamId) {
@@ -171,7 +173,7 @@ public class TeamContributionService {
         if (projectId != null) {
             edges = buildCriterionEdges(projectId, weights, sprintFilterId);
         }
-        return new TeamContributionGraphResponse(
+        TeamContributionGraphResponse response = new TeamContributionGraphResponse(
                 teamId,
                 projectId,
                 evaluation.evaluatedAt(),
@@ -191,6 +193,14 @@ public class TeamContributionService {
                 nodes,
                 edges
         );
+        graphProcessingRunRecorder.record(
+                GraphProcessingKind.CONTRIBUTION,
+                team.getCourse() == null ? null : team.getCourse().getId(),
+                teamId,
+                null,
+                response.nodes().size(),
+                response.edges().size());
+        return response;
     }
 
     private Sprint resolveGraphSprint(UUID projectId, UUID sprintId) {

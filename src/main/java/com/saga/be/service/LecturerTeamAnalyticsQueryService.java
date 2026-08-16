@@ -11,6 +11,7 @@ import com.saga.be.entity.Task;
 import com.saga.be.entity.Team;
 import com.saga.be.entity.TeamMember;
 import com.saga.be.entity.enums.TaskStatus;
+import com.saga.be.entity.enums.GraphProcessingKind;
 import com.saga.be.entity.enums.TaskType;
 import com.saga.be.repository.CommitDataRepository;
 import com.saga.be.repository.CommentRepository;
@@ -50,6 +51,7 @@ public class LecturerTeamAnalyticsQueryService {
     private final CommentRepository commentRepository;
     private final SprintRepository sprintRepository;
     private final PeerReviewRepository peerReviewRepository;
+    private final GraphProcessingRunRecorder graphProcessingRunRecorder;
 
     @Transactional(readOnly = true)
     public LecturerAnalyticsResponses.TeamDetail detail(SagaPrincipal principal, UUID courseId,
@@ -103,7 +105,10 @@ public class LecturerTeamAnalyticsQueryService {
                 new LecturerAnalyticsResponses.InteractionNode(member.getStudent().getId(),
                         member.getStudent().getStudentCode(), member.getStudent().getFullName())).toList();
         if (team.getProject() == null) {
-            return new LecturerAnalyticsResponses.InteractionGraph(nodes, List.of());
+            LecturerAnalyticsResponses.InteractionGraph response = new LecturerAnalyticsResponses.InteractionGraph(nodes, List.of());
+            graphProcessingRunRecorder.record(GraphProcessingKind.INTERACTION, courseId, teamId, null,
+                    response.nodes().size(), response.edges().size());
+            return response;
         }
         List<UUID> memberIds = members.stream().map(member -> member.getStudent().getId()).toList();
         Map<String, Long> counts = new HashMap<>();
@@ -120,7 +125,10 @@ public class LecturerTeamAnalyticsQueryService {
             return new LecturerAnalyticsResponses.InteractionEdge(UUID.fromString(pair[0]), UUID.fromString(pair[1]),
                     "PEER_REVIEW", entry.getValue(), true);
         }).toList();
-        return new LecturerAnalyticsResponses.InteractionGraph(nodes, edges);
+        LecturerAnalyticsResponses.InteractionGraph response = new LecturerAnalyticsResponses.InteractionGraph(nodes, edges);
+        graphProcessingRunRecorder.record(GraphProcessingKind.INTERACTION, courseId, teamId, null,
+                response.nodes().size(), response.edges().size());
+        return response;
     }
 
     @Transactional(readOnly = true)
@@ -175,7 +183,11 @@ public class LecturerTeamAnalyticsQueryService {
                         entry.getValue(),
                         true))
                 .toList();
-        return new LecturerAnalyticsResponses.StudentInteractionGraph(courseId, teamId, studentId, nodes, edges);
+        LecturerAnalyticsResponses.StudentInteractionGraph response = new LecturerAnalyticsResponses.StudentInteractionGraph(
+                courseId, teamId, studentId, nodes, edges);
+        graphProcessingRunRecorder.record(GraphProcessingKind.INTERACTION, courseId, teamId, studentId,
+                response.nodes().size(), response.edges().size());
+        return response;
     }
 
     @Transactional(readOnly = true)

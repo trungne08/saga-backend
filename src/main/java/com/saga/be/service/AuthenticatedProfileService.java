@@ -240,7 +240,6 @@ public class AuthenticatedProfileService {
         if (student.getAccountStatus() == AccountStatus.PENDING) {
             student.setAccountStatus(AccountStatus.ACTIVE);
         }
-        applyAvatarIfPresent(student, identity);
         Student saved = studentRepository.saveAndFlush(student);
         return toProfile(saved);
     }
@@ -321,20 +320,16 @@ public class AuthenticatedProfileService {
     private AuthenticatedProfile updateAdmin(Admin admin, AuthenticatedIdentity identity) {
         admin.setCognitoSub(identity.cognitoSub());
         admin.setEmail(identity.email());
-        admin.setFullName(identity.fullName());
-        applyAvatarIfPresent(admin, identity);
         Admin saved = adminRepository.saveAndFlush(admin);
         return toProfile(saved);
     }
 
     private AuthenticatedProfile updateLecturer(
-            Lecturer lecturer,
+        Lecturer lecturer,
             AuthenticatedIdentity identity
     ) {
         lecturer.setCognitoSub(identity.cognitoSub());
         lecturer.setEmail(identity.email());
-        lecturer.setFullName(identity.fullName());
-        applyAvatarIfPresent(lecturer, identity);
         if (lecturer.getAccountStatus() == null) {
             lecturer.setAccountStatus(AccountStatus.ACTIVE);
         }
@@ -350,8 +345,6 @@ public class AuthenticatedProfileService {
         synchronizeStudentCode(student, identity, extractedStudentCode);
         student.setCognitoSub(identity.cognitoSub());
         student.setEmail(identity.email());
-        student.setFullName(identity.fullName());
-        applyAvatarIfPresent(student, identity);
         if (student.getAccountStatus() == null) {
             student.setAccountStatus(AccountStatus.PENDING);
         }
@@ -461,24 +454,6 @@ public class AuthenticatedProfileService {
             String avatarUrl
     ) {
         return new AuthenticatedProfile(cognitoSub, email, fullName, role, id, status, avatarUrl);
-    }
-
-    private void applyAvatarIfPresent(Admin admin, AuthenticatedIdentity identity) {
-        if (identity.avatarUrl() != null) {
-            admin.setAvatarUrl(identity.avatarUrl());
-        }
-    }
-
-    private void applyAvatarIfPresent(Lecturer lecturer, AuthenticatedIdentity identity) {
-        if (identity.avatarUrl() != null) {
-            lecturer.setAvatarUrl(identity.avatarUrl());
-        }
-    }
-
-    private void applyAvatarIfPresent(Student student, AuthenticatedIdentity identity) {
-        if (identity.avatarUrl() != null) {
-            student.setAvatarUrl(identity.avatarUrl());
-        }
     }
 
     private String cognitoSub(BaseEntity entity) {

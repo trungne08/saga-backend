@@ -427,7 +427,7 @@ class AgentRoleAwareProjectionServiceTest {
                 ))
         ));
         when(reports.graphProcessing()).thenReturn(new AdminGraphProcessingReportResponse(
-                OffsetDateTime.now(), 7, false, List.of()
+                OffsetDateTime.now(), 7, true, null, List.of()
         ));
         AgentRoleAwareProjectionService service = new AgentRoleAwareProjectionService(
                 mock(AgentToolProjectionService.class),
@@ -772,7 +772,7 @@ class AgentRoleAwareProjectionServiceTest {
                 ))
         ));
         when(reports.graphProcessing()).thenReturn(new AdminGraphProcessingReportResponse(
-                OffsetDateTime.now(), 7, false, List.of()
+                OffsetDateTime.now(), 7, true, null, List.of()
         ));
         when(intents.countStatusAll()).thenReturn(List.of(
                 new Object[]{CommitReviewIntentStatus.COMPLETED, 3L},

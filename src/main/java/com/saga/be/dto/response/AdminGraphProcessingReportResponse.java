@@ -8,22 +8,18 @@ public record AdminGraphProcessingReportResponse(
         OffsetDateTime generatedAt,
         int periodDays,
         boolean historySupported,
+        OffsetDateTime coverageStart,
         List<AdminGraphProcessingPointResponse> points
 ) {
     public AdminGraphProcessingReportResponse {
         points = points == null ? List.of() : List.copyOf(points);
     }
 
-    /**
-     * Reserved day-bucket shape for a future persisted graph-processing history.
-     * V1 always returns an empty {@code points} array because history is unsupported.
-     */
     public record AdminGraphProcessingPointResponse(
             LocalDate date,
-            long nodesCreated,
-            long nodesUpdated,
-            long edgesCreated,
-            long edgesUpdated
+            long nodesBuilt,
+            long edgesBuilt,
+            long runCount
     ) {
     }
 }

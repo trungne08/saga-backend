@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -21,6 +22,7 @@ import com.saga.be.entity.Task;
 import com.saga.be.entity.Team;
 import com.saga.be.entity.TeamMember;
 import com.saga.be.entity.enums.TaskStatus;
+import com.saga.be.entity.enums.GraphProcessingKind;
 import com.saga.be.entity.enums.TaskType;
 import com.saga.be.repository.CommitDataRepository;
 import com.saga.be.repository.CommentRepository;
@@ -367,11 +369,12 @@ class LecturerAnalyticsQueryServicesTest {
         when(f.members.findByTeamId(f.teamId)).thenReturn(List.of(f.membership));
         when(f.peers.findByRevieweeIdInAndSprintBoardProjectId(any(), any())).thenReturn(List.of());
         assertEquals(0, teamService(f).interactions(null, f.courseId, f.teamId).edges().size());
+        verify(f.recorder).record(GraphProcessingKind.INTERACTION, f.courseId, f.teamId, null, 1, 0);
     }
 
     private LecturerTeamAnalyticsQueryService teamService(Fixture f) {
         return new LecturerTeamAnalyticsQueryService(f.authorization, f.members, f.repositories, f.tasks, f.commits,
-                f.documents, f.comments, f.sprints, f.peers);
+                f.documents, f.comments, f.sprints, f.peers, f.recorder);
     }
 
     private Fixture fixture(boolean projectPresent) {
@@ -391,7 +394,8 @@ class LecturerAnalyticsQueryServicesTest {
                 mock(LecturerAnalyticsAuthorizationService.class), mock(TeamMemberRepository.class),
                 mock(GitRepoRepository.class),
                 mock(TaskRepository.class), mock(CommitDataRepository.class), mock(DocumentRepository.class),
-                mock(CommentRepository.class), mock(SprintRepository.class), mock(PeerReviewRepository.class));
+                mock(CommentRepository.class), mock(SprintRepository.class), mock(PeerReviewRepository.class),
+                mock(GraphProcessingRunRecorder.class));
     }
 
     private GitRepo repository(long repositoryId, String fullName) {
@@ -411,5 +415,6 @@ class LecturerAnalyticsQueryServicesTest {
                            TeamMember membership, LecturerAnalyticsAuthorizationService authorization,
                            TeamMemberRepository members, GitRepoRepository repositories,
                            TaskRepository tasks, CommitDataRepository commits,
-                           DocumentRepository documents, CommentRepository comments, SprintRepository sprints, PeerReviewRepository peers) { }
+                           DocumentRepository documents, CommentRepository comments, SprintRepository sprints,
+                           PeerReviewRepository peers, GraphProcessingRunRecorder recorder) { }
 }

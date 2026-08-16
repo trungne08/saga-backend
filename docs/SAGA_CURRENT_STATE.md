@@ -1,9 +1,16 @@
+## Self Profile V1 (DEC-103) — 2026-08-17
+
+- **CONFIRMED_SOURCE_TEST:** `GET /api/auth/me` remains the canonical local-profile read. New `PATCH /api/auth/me` is sparse and self-scoped to active STUDENT/LECTURER, returning `AuthMeResponse`; only `fullName` and `avatarUrl` change. Browser session + CSRF are required; no Bearer, target ID, provider call, file upload, or migration.
+- **AUTHORITY:** OIDC still owns subject/email/application role and Student identity/studentCode. New local profiles initialize name/avatar from valid OIDC claims; existing-profile logins synchronize identity without overwriting locally edited `fullName` or `avatarUrl`. `AuthMeResponse` adds nullable `studentCode` (Student canonical value, null otherwise).
+- **SECURITY:** strict request binding rejects forbidden identity/status fields. Avatar uses existing absolute HTTP(S)/host/no-user-info/2048 sanitizer and is never fetched; explicit null clears local avatar. DEC-101 remains: blocked status is rejected before PATCH and `/me` with `401 ACCOUNT_DISABLED` and session invalidation.
+- **VERIFICATION:** Auth controller, profile synchronization, self PATCH security/CSRF/DEC-101, and generated OpenAPI = **42 passed**. OpenAPI operation count **153**, with `PATCH /api/auth/me`, `SelfProfileUpdateRequest`, and `AuthMeResponse.studentCode` verified. `git diff --check` passes.
+
 ## Course read response + computed status (DEC-102) — 2026-08-17
 
-- **CONFIRMED_SOURCE_TEST:** `GET /api/v1/courses` and `GET /api/v1/courses/{id}` return `CourseResponse` / `Page<CourseResponse>`. `academicClass` is canonical; `clazz` remains the deprecated compatibility alias; `academicClazz` is absent. The JPA `Course.clazz` / `class_id` mapping and Class entity/table remain unchanged.
+- **CONFIRMED_SOURCE_TEST:** every public Course response (`GET` list/detail and ADMIN `POST`/`PUT`) uses `CourseResponse` / `Page<CourseResponse>`. `academicClass` is canonical; `clazz` and `academicClazz` are absent. Legacy `designContributionWeight` is absent; active public weights are code/test/document/research. The JPA `Course.clazz` / `class_id` mapping and Class entity/table remain unchanged.
 - **STATUS CONTRACT:** Computed-only `courseStatus` is `OPEN` iff the Course Semester and both dates are non-null and, in `Asia/Ho_Chi_Minh`, `startDate <= now <= endDate`. Both boundaries are inclusive; missing Semester/date, before, and after are `CLOSED`. It uses injected `Clock` converted from instant to the Semester business timezone, never the system-default or Jira timezone. Active Semester is not consulted.
-- **UNCHANGED:** no persistence column, scheduler, Flyway migration, auth/session/CSRF, Course create/update behavior, or Frontend source change.
-- **VERIFICATION:** fixed-Clock resolver 9 tests + Course read/create-update integration 6 tests + generated OpenAPI 1 test = **16 passed**. OpenAPI contains `courseStatus` enum `OPEN|CLOSED`; read operations use `CourseResponse`. `git diff --check` passes.
+- **UNCHANGED:** no persistence column, scheduler, Flyway migration, auth/session/CSRF, Course write semantics, contribution formula, or COURSE/TEAM mode change.
+- **VERIFICATION:** Course/contribution/OpenAPI targeted cleanup regressions pass. OpenAPI contains `courseStatus` enum `OPEN|CLOSED`, `academicClass`, the four active Contribution criteria, and no public legacy `clazz`/DESIGN properties. `git diff --check` passes.
 
 ## Active Course chat scope + natural-language Agent (DEC-099) — 2026-08-16
 
@@ -880,3 +887,9 @@ BASE HEAD của snapshot cũ: `0bc30be`. HEAD audit hiện hành là `4f3dee9`; 
 - **CONFIRMED_SOURCE_TEST:** OIDC sync preserves non-ACTIVE status. The success handler refuses to save a usable SAGA session for existing inactive/suspended Student or Lecturer; no Cognito Admin API/provider call, role mutation, or status reset occurs. PENDING provisioning behavior is unchanged.
 - **VERIFICATION:** targeted `AdminAccountStatusIntegrationTest` + `CognitoAuthenticationSuccessHandlerTest` = **10 passed**. No migration, public operation, or response-schema change.
 - **LIMIT:** supported target is `CURRENT_REQUEST_SESSION_INVALIDATION`; global immediate/cross-instance session revocation remains **TBD** without shared session infrastructure.
+
+## Admin graph-processing history (DEC-102) — 2026-08-17
+
+- **IMPLEMENTED / CONFIRMED_SOURCE_TEST:** successful Contribution and Interaction graph projections each write an immutable fail-open `graph_processing_run` telemetry snapshot. UTC time comes from injected `Clock`; count values are the completed response node/edge list sizes.
+- `GET /api/admin/reports/graph-processing` remains the same ADMIN browser-session GET route and now returns real persisted seven-day `Asia/Ho_Chi_Minh` buckets with `historySupported=true` and nullable `coverageStart`. No historic rows/zeros are synthesized; pre-cutover remains empty until actual projections are read.
+- Migration `V44__add_graph_processing_run.sql` has no FK, payload, seed, scheduler, provider or AI change. Targeted recorder, aggregation/window, route-security, migration and OpenAPI tests pass; deployed migration and browser smoke remain **TBD_DEPLOYMENT_SMOKE**.

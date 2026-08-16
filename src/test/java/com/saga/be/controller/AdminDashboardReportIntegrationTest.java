@@ -163,7 +163,7 @@ class AdminDashboardReportIntegrationTest {
     }
 
     @Test
-    void graphProcessingRequiresAdminAndReturnsUnsupportedHistoryContract() throws Exception {
+    void graphProcessingRequiresAdminAndReturnsPersistedHistoryContract() throws Exception {
         mockMvc.perform(get(GRAPH_PROCESSING_PATH)).andExpect(status().isUnauthorized());
         mockMvc.perform(get(GRAPH_PROCESSING_PATH).with(authentication(authenticationFor(ApplicationRole.LECTURER))))
                 .andExpect(status().isForbidden());
@@ -174,7 +174,8 @@ class AdminDashboardReportIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.generatedAt").exists())
                 .andExpect(jsonPath("$.periodDays").value(7))
-                .andExpect(jsonPath("$.historySupported").value(false))
+                .andExpect(jsonPath("$.historySupported").value(true))
+                .andExpect(jsonPath("$.coverageStart").value(nullValue()))
                 .andExpect(jsonPath("$.points", hasSize(0)));
     }
 
