@@ -3,6 +3,7 @@ package com.saga.be.controller;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -154,6 +155,149 @@ class NotificationBroadcastIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"audience\":\"STUDENTS\",\"title\":\"N\",\"message\":\"M\"}"))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void adminLecturersAndAllUsersCanonicalRequestsSucceedWithoutActionUrl() throws Exception {
+        student("S1");
+        lecturer("L1");
+        lecturer("L2");
+        Authentication admin = authFor(UUID.randomUUID(), ApplicationRole.ADMIN);
+
+        mockMvc.perform(post("/api/admin/notifications/broadcast")
+                        .with(authentication(admin)).with(csrf())
+                        .header("Idempotency-Key", "admin-lecturers-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"audience\":\"LECTURERS\",\"title\":\"Notice\",\"message\":\"Plain text\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.audience").value("LECTURERS"))
+                .andExpect(jsonPath("$.recipientCount").value(2))
+                .andExpect(jsonPath("$.actionUrl").doesNotExist());
+
+        mockMvc.perform(post("/api/admin/notifications/broadcast")
+                        .with(authentication(admin)).with(csrf())
+                        .header("Idempotency-Key", "admin-all-users-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"audience\":\"ALL_USERS\",\"title\":\"Notice\",\"message\":\"Plain text\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.audience").value("ALL_USERS"))
+                .andExpect(jsonPath("$.recipientCount").value(3));
+    }
+
+    @Test
+    void adminRejectsLegacyAllEnumUnknownActionUrlAndMissingIdempotencyKey() throws Exception {
+        Authentication admin = authFor(UUID.randomUUID(), ApplicationRole.ADMIN);
+        String canonical = "{\"audience\":\"STUDENTS\",\"title\":\"Notice\",\"message\":\"Plain text\"}";
+
+        mockMvc.perform(post("/api/admin/notifications/broadcast")
+                        .with(authentication(admin)).with(csrf())
+                        .header("Idempotency-Key", "admin-legacy-all")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"audience\":\"ALL\",\"title\":\"Notice\",\"message\":\"Plain text\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("INVALID_REQUEST"));
+
+        mockMvc.perform(post("/api/admin/notifications/broadcast")
+                        .with(authentication(admin)).with(csrf())
+                        .header("Idempotency-Key", "admin-extra-action-url")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"audience\":\"STUDENTS\",\"title\":\"Notice\",\"message\":\"Plain text\",\"actionUrl\":\"https://example.com\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("INVALID_REQUEST"));
+
+        mockMvc.perform(post("/api/admin/notifications/broadcast")
+                        .with(authentication(admin)).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(canonical))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("INVALID_REQUEST"));
+        assertThat(broadcastRepository.count()).isZero();
+    }
+
+    @Test
+    void lecturerHttpsActionUrlPersistsOnBellAndChangesIdempotencyIntent() throws Exception {
+        Lecturer owner = lecturer("owner");
+        Student recipient = student("shared");
+        Course owned = course(owner, "C1");
+        membership(owned, recipient, "A");
+        String httpsUrl = "https://example.com/resource";
+        String body = "{\"courseIds\":[\"" + owned.getId()
+                + "\"],\"title\":\"Reminder\",\"message\":\"Read this\",\"actionUrl\":\"" + httpsUrl + "\"}";
+        Authentication lecturerAuth = authFor(owner.getId(), ApplicationRole.LECTURER);
+
+        mockMvc.perform(post("/api/v1/courses/notifications/broadcast")
+                        .with(authentication(lecturerAuth)).with(csrf())
+                        .header("Idempotency-Key", "lecturer-link-1")
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.audience").value("COURSE_STUDENTS"))
+                .andExpect(jsonPath("$.notificationCount").value(1));
+
+        mockMvc.perform(post("/api/v1/courses/notifications/broadcast")
+                        .with(authentication(lecturerAuth)).with(csrf())
+                        .header("Idempotency-Key", "lecturer-link-1")
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.notificationCount").value(1));
+
+        assertThat(notificationRepository.findAll()).hasSize(1);
+        assertThat(notificationRepository.findAll().get(0).getActionUrl()).isEqualTo(httpsUrl);
+
+        mockMvc.perform(get("/api/me/notifications?page=0&size=20")
+                        .with(authentication(authFor(recipient.getId(), ApplicationRole.STUDENT))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content[0].actionUrl").value(httpsUrl));
+
+        mockMvc.perform(post("/api/v1/courses/notifications/broadcast")
+                        .with(authentication(lecturerAuth)).with(csrf())
+                        .header("Idempotency-Key", "lecturer-link-1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"courseIds\":[\"" + owned.getId()
+                                + "\"],\"title\":\"Reminder\",\"message\":\"Read this\",\"actionUrl\":\"https://example.com/other\"}"))
+                .andExpect(status().isConflict());
+        assertThat(notificationRepository.count()).isEqualTo(1);
+    }
+
+    @Test
+    void lecturerRejectsUnsafeActionUrlsEmptyCourseIdsAndMissingCourse() throws Exception {
+        Lecturer owner = lecturer("owner");
+        Course owned = course(owner, "C1");
+        Authentication lecturerAuth = authFor(owner.getId(), ApplicationRole.LECTURER);
+
+        for (String unsafe : List.of(
+                "http://example.com/resource",
+                "javascript:alert(1)",
+                "data:text/html,hi",
+                "file:///etc/passwd",
+                "not-a-url"
+        )) {
+            mockMvc.perform(post("/api/v1/courses/notifications/broadcast")
+                            .with(authentication(lecturerAuth)).with(csrf())
+                            .header("Idempotency-Key", "unsafe-" + unsafe.hashCode())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"courseIds\":[\"" + owned.getId()
+                                    + "\"],\"title\":\"Notice\",\"message\":\"Plain text\",\"actionUrl\":\""
+                                    + unsafe + "\"}"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.error").value("INVALID_REQUEST"));
+        }
+
+        mockMvc.perform(post("/api/v1/courses/notifications/broadcast")
+                        .with(authentication(lecturerAuth)).with(csrf())
+                        .header("Idempotency-Key", "empty-courses")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"courseIds\":[],\"title\":\"Notice\",\"message\":\"Plain text\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("VALIDATION_FAILED"));
+
+        mockMvc.perform(post("/api/v1/courses/notifications/broadcast")
+                        .with(authentication(lecturerAuth)).with(csrf())
+                        .header("Idempotency-Key", "missing-course")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"courseIds\":[\"" + UUID.randomUUID()
+                                + "\"],\"title\":\"Notice\",\"message\":\"Plain text\"}"))
+                .andExpect(status().isNotFound());
+        assertThat(broadcastRepository.count()).isZero();
     }
 
     private Student student(String code) {

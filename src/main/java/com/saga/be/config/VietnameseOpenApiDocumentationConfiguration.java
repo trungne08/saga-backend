@@ -53,7 +53,7 @@ public class VietnameseOpenApiDocumentationConfiguration {
             entry("MyFirebaseInstallationController#register", "Đăng ký trình duyệt hiện tại để nhận thông báo đẩy", "Đăng ký hoặc kích hoạt lại Firebase Installation ID thuộc tài khoản đang đăng nhập. FID là chuỗi opaque của Firebase Web SDK; không gửi Firebase Admin credential."),
             entry("MyFirebaseInstallationController#unregister", "Ngừng nhận thông báo đẩy trên trình duyệt này", "Thu hồi installation thuộc tài khoản đang đăng nhập. Notification Bell trong SAGA DB vẫn là lịch sử chuẩn sau khi ngừng FCM trên thiết bị."),
             entry("AdminNotificationBroadcastController#broadcast", "Gửi thông báo đến một nhóm người dùng", "Chỉ ADMIN. audience xác định STUDENTS, LECTURERS hoặc ALL_USERS theo profile local hiện tại; request cần Idempotency-Key và backend lưu Bell trước khi xếp hàng FCM."),
-            entry("CourseNotificationBroadcastController#broadcast", "Gửi thông báo đến sinh viên của các khóa học đang giảng dạy", "Chỉ LECTURER và chỉ chấp nhận các Course active do chính giảng viên phụ trách. Người nhận được lấy từ TeamMember, course và người nhận trùng được loại; request cần Idempotency-Key."),
+            entry("CourseNotificationBroadcastController#broadcast", "Gửi thông báo đến sinh viên của các khóa học đang giảng dạy", "Chỉ LECTURER và chỉ chấp nhận các Course active do chính giảng viên phụ trách. Người nhận được lấy từ TeamMember, course và người nhận trùng được loại; request cần Idempotency-Key. actionUrl HTTPS tùy chọn được lưu vào Bell; Admin broadcast không nhận field này."),
             entry("CourseController#importStudents", "Import sinh viên và phân nhóm trong khóa học", "ADMIN hoặc giảng viên phụ trách Course tải file XLSX đúng mẫu. Sau khi membership được tạo thành công, backend enqueue email mời bất đồng bộ; lỗi gửi email không rollback import và FE không gọi API gửi mail riêng."),
             entry("CourseController#importStudentsByAdminTemplate", "Import sinh viên vào khóa học bằng mẫu Admin", "Chỉ ADMIN tải file XLSX theo mẫu 5 cột. Backend enqueue email mời bất đồng bộ sau khi dữ liệu import được lưu; lỗi gửi email không rollback import và không có API SMTP/send-mail cho FE."),
             entry("TeamContributionController#getContributionEvaluation", "Xem đánh giá đóng góp hiện tại của nhóm", "LECTURER chỉ xem Team thuộc Course mình phụ trách. STUDENT chỉ xem khi có đúng TeamMember role LEADER của chính Team đang yêu cầu. ADMIN, MEMBER và MENTOR không có quyền. Response chỉ chứa định danh học vụ tối thiểu và metric Contribution, không chứa email, Cognito subject, reviewer/comment, token, credential hoặc raw provider payload."),
@@ -392,13 +392,14 @@ public class VietnameseOpenApiDocumentationConfiguration {
             case "NotificationResponse.type" -> "Loại sự kiện notification do backend tạo.";
             case "NotificationResponse.title" -> "Tiêu đề hiển thị trong Notification Bell.";
             case "NotificationResponse.message" -> "Nội dung thông báo dạng plain text.";
-            case "NotificationResponse.actionUrl" -> "Đường dẫn nội bộ đã được backend xác nhận; hiện có thể null.";
+            case "NotificationResponse.actionUrl" -> "Đường dẫn HTTPS tuyệt đối do Lecturer Course broadcast gửi, hoặc null. Admin broadcast không nhận field này.";
             case "NotificationResponse.read" -> "true nếu user đã đánh dấu thông báo là đã đọc.";
             case "NotificationResponse.readAt" -> "Thời điểm đọc; null khi chưa đọc.";
             case "NotificationResponse.createdAt" -> "Thời điểm Notification Bell được lưu trong SAGA DB.";
             case "NotificationUnreadCountResponse.unreadCount" -> "Số thông báo chưa đọc của user hiện tại.";
             case "NotificationBroadcastRequest.audience" -> "Nhóm nhận: STUDENTS, LECTURERS hoặc ALL_USERS.";
             case "CourseNotificationBroadcastRequest.courseIds" -> "Danh sách 1–100 UUID Course active do Lecturer hiện tại phụ trách.";
+            case "CourseNotificationBroadcastRequest.actionUrl" -> "Liên kết HTTPS tuyệt đối tùy chọn, tối đa 500 ký tự. Backend chỉ validate và lưu, không fetch URL.";
             case "NotificationBroadcastRequest.title", "CourseNotificationBroadcastRequest.title" -> "Tiêu đề plain text, tối đa 160 ký tự và không chứa dấu ngoặc HTML.";
             case "NotificationBroadcastRequest.message", "CourseNotificationBroadcastRequest.message" -> "Nội dung plain text, tối đa 1000 ký tự và không chứa dấu ngoặc HTML.";
             case "NotificationBroadcastResponse.audience" -> "Audience đã được backend áp dụng; Course broadcast trả COURSE_STUDENTS.";

@@ -254,13 +254,13 @@ Không đưa Firebase Admin service account, private key, Gmail App Password, Co
 | Register browser FID | `POST /api/me/firebase-installations` | Authenticated | Sau login và Firebase init |
 | Revoke browser FID | `DELETE /api/me/firebase-installations/{installationId}` | Owner | Tắt push/xóa device registration |
 | Admin broadcast | `POST /api/admin/notifications/broadcast` | ADMIN | Gửi manual audience |
-| Course broadcast | `POST /api/v1/courses/notifications/broadcast` | LECTURER | Gửi tới TeamMember của Course sở hữu |
+| Course broadcast | `POST /api/v1/courses/notifications/broadcast` | LECTURER | Gửi tới TeamMember của Course sở hữu; optional HTTPS `actionUrl` |
 
 ## Notification integration
 
 - SAGA DB/Bell API là source of truth; FCM chỉ báo có thay đổi.
 - Foreground/background push đều dẫn tới refetch Bell list và unread count.
-- `actionUrl` hiện nullable; không invent route.
+- `actionUrl` nullable. Lecturer Course broadcast có thể gửi optional HTTPS `actionUrl`; Admin broadcast không. Khi Bell item có `actionUrl`, Student render CTA `Mở liên kết` với `target="_blank"` và `rel="noopener noreferrer"`. Không dùng `dangerouslySetInnerHTML`. FCM chỉ refetch Bell.
 - Broadcast cần `Idempotency-Key`; cùng intent dùng lại key, intent khác tạo key mới.
 - Automatic Task/Sprint/Integration/deadline notification không có send endpoint cho FE.
 

@@ -1602,14 +1602,14 @@ All calls use the existing browser OIDC session. Do not send Bearer tokens or ow
 The client must obtain a Firebase Installation ID, not an FCM registration token. Register after authenticated session establishment and revoke the returned installation UUID on logout/device opt-out when practical. Notification list/read state always comes from SAGA APIs; FCM only prompts immediate refresh/display. Manual broadcast is available through the endpoints documented below.
 ## Manual notification broadcast — 2026-08-11
 
-All requests use `credentials: "include"`, existing `X-XSRF-TOKEN`, and an `Idempotency-Key` header. Do not use Bearer. Do not send actor/sender/recipient IDs, FIDs, external URLs, provider data, or Cognito IDs.
+All requests use `credentials: "include"`, existing `X-XSRF-TOKEN`, and an `Idempotency-Key` header. Do not use Bearer. Do not send actor/sender/recipient IDs, FIDs, provider data, or Cognito IDs. Admin must not send `actionUrl`/`url`/`link`. Lecturer may send optional HTTPS `actionUrl` only (DEC-098).
 
 | Endpoint | Role | Body | Result |
 | --- | --- | --- | --- |
 | `POST /api/admin/notifications/broadcast` | ADMIN | `{ "audience": "STUDENTS" | "LECTURERS" | "ALL_USERS", "title": "...", "message": "..." }` | 200 broadcast id, scope, safe counts, status |
-| `POST /api/v1/courses/notifications/broadcast` | LECTURER | `{ "courseIds": ["<course-uuid>"], "title": "...", "message": "..." }` | 200 COURSE_STUDENTS broadcast counters/status |
+| `POST /api/v1/courses/notifications/broadcast` | LECTURER | `{ "courseIds": ["<course-uuid>"], "title": "...", "message": "...", "actionUrl"?: "https://..." }` | 200 COURSE_STUDENTS broadcast counters/status |
 
-Title is max 160 and message max 1000; both must be nonblank plain text. Same `Idempotency-Key` plus same intent replays; reuse for different content/scope returns 409. Lecturer duplicate Course IDs are normalized. A non-owned/missing Course fails the entire request before any notification is created. ALL_USERS currently means Student + Lecturer only; Admin inclusion and AccountStatus filtering are not available UI controls.
+Title is max 160 and message max 1000; both must be nonblank plain text. Same `Idempotency-Key` plus same intent replays; reuse for different content/scope/link returns 409. Lecturer duplicate Course IDs are normalized. A non-owned/missing Course fails the entire request before any notification is created. ALL_USERS currently means Student + Lecturer only; Admin inclusion and AccountStatus filtering are not available UI controls. UI label “ALL” maps to `ALL_USERS`.
 
 Responses contain `broadcastId`, `audience`, `status`, `recipientCount`, `notificationCount`, `deliveryQueuedCount`, and `completedAt`; they never contain FID, email, recipient IDs, credentials, provider output or Cognito subject. Bell list/unread/read and Firebase FID registration remain as documented below.
 
@@ -1698,7 +1698,7 @@ Firebase Admin service account/private key tuyệt đối không đưa xuống F
 }
 ```
 
-`audience` chỉ nhận `STUDENTS`, `LECTURERS`, `ALL_USERS`. `ALL_USERS` hiện là toàn bộ Student + Lecturer local; không gồm Admin. Title tối đa 160, message tối đa 1000, đều là plain text không chứa `<` hoặc `>`.
+`audience` chỉ nhận `STUDENTS`, `LECTURERS`, `ALL_USERS`. UI “Tất cả” / “ALL” phải gửi `ALL_USERS`, không gửi `ALL`. `ALL_USERS` hiện là toàn bộ Student + Lecturer local; không gồm Admin. Title tối đa 160, message tối đa 1000, đều là plain text không chứa `<` hoặc `>`. Admin request không được gửi `actionUrl`, `url`, `link` hay field lạ — Backend fail-closed unknown properties và trả `400 INVALID_REQUEST`. Ẩn/disable link field trên màn Admin.
 
 Response 200 gồm `broadcastId`, `audience`, `status`, `recipientCount`, `notificationCount`, `deliveryQueuedCount`, `completedAt`. Cùng key + cùng intent trả lại kết quả; tái sử dụng key cho nội dung/scope khác trả `409`.
 
@@ -1710,9 +1710,12 @@ Response 200 gồm `broadcastId`, `audience`, `status`, `recipientCount`, `notif
 {
   "courseIds": ["11111111-1111-1111-1111-111111111111"],
   "title": "Nhắc lịch demo",
-  "message": "Các nhóm chuẩn bị demo vào thứ Sáu."
+  "message": "Các nhóm chuẩn bị demo vào thứ Sáu.",
+  "actionUrl": "https://example.com/resource"
 }
 ```
+
+`actionUrl` là optional. Bỏ field hoặc gửi blank/null khi không có link. Khi có giá trị phải là HTTPS tuyệt đối, tối đa 500 ký tự. FE không gửi `http`, `javascript:`, `data:`, `file:` hay URL malformed. Cùng `Idempotency-Key` với URL khác là intent khác (`409`).
 
 - `courseIds` có 1–100 phần tử; duplicate Course ID được normalize.
 - Mọi Course phải active và do Lecturer hiện tại phụ trách. Missing Course trả `404`; Course ngoài scope trả `403`; toàn request dừng trước fanout.

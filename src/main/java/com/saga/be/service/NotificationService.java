@@ -113,7 +113,8 @@ public class NotificationService {
             ApplicationRole recipientRole,
             NotificationType type,
             String title,
-            String message
+            String message,
+            String actionUrl
     ) {
         Notification existing = notificationRepository
                 .findByBroadcastIdAndRecipientProfileIdAndRecipientRole(
@@ -131,7 +132,7 @@ public class NotificationService {
                 type,
                 title,
                 message,
-                null,
+                actionUrl,
                 broadcastRepository.getReferenceById(broadcastId),
                 null
         );

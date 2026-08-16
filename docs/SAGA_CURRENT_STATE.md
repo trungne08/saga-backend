@@ -1,3 +1,12 @@
+## Lecturer Course broadcast optional HTTPS actionUrl (DEC-098) — 2026-08-16
+
+- **CONFIRMED_SOURCE:** Admin broadcast contract unchanged: `{audience, title, message}` only. `ALL` and extra `actionUrl`/`link` remain `400 INVALID_REQUEST` because Jackson fail-on-unknown-properties and enum binding stay fail-closed. Missing `Idempotency-Key` is the same generic `INVALID_REQUEST`.
+- **CONFIRMED_SOURCE:** Lecturer `POST /api/v1/courses/notifications/broadcast` accepts additive optional `actionUrl`. HTTPS absolute only, max 500, persisted on existing `user_notification.action_url`. Included in idempotency fingerprint when present. No new endpoint, no Admin link, no Flyway version, OpenAPI **152**.
+- **UNCHANGED:** Lecturer Course ownership, TeamMember recipients, session/CSRF/Idempotency-Key, no Bearer, Firebase delivery payload.
+- **FRONTEND:** production Admin/Lecturer broadcast UI that calls these SAGA routes was not present in this Backend workspace or in the local WDP-FE tree (that tree still uses Bearer + `/notifications/send-class`). FE mapping/Bell CTA remains a follow-up in the SAGA browser repo.
+- **VERIFICATION:** targeted `NotificationBroadcastIntegrationTest` + `NotificationActionUrlValidatorTest` + broadcast migration + Bell + OpenAPI **PASS**. OpenAPI still **152**. `git diff --check` clean. Full `mvnw test` captured the unchanged DEC-023 Course roster baseline failure only; do not claim FULL_SUITE=PASS.
+- **TBD_DEPLOYMENT_SMOKE:** browser Admin ALL→ALL_USERS, Lecturer HTTPS link, Student Bell click.
+
 ## Runtime hotfix Backend→AI message contract (2026-08-16)
 
 - **CONFIRMED_SOURCE:** `POST /internal/backend/v1/agent/conversations/{id}/messages` rejects extra fields. Backend no longer sends `currentActor` on conversation/message HTTP. `currentActor` remains on tool resource-context responses only.

@@ -1010,6 +1010,14 @@ chặn nullable repair.
 - `NOTIFICATION_DELIVERY_PROCESSING_ENABLED` defaults true; `NOTIFICATION_DELIVERY_RETRY_DELAY_MS` defaults 60000; `NOTIFICATION_DELIVERY_PROCESSING_TIMEOUT_MS` defaults 300000. Tests disable the processor and use mocks only.
 - Admin broadcast remains outside this contract and BLOCKED. The only producer is a new grouped-import `TeamMember`; it cannot redefine roster/enrollment/grouping/DEC-023/Cognito/session semantics.
 - Source/test evidence: targeted Notification/Firebase **16/16 PASS**; full **122 suites / 769 tests / 1 failure / 0 errors / 0 skipped**. The only failure is **PREEXISTING_BASELINE_SOURCE_CONFLICT_WITH_DEC_023**, not a notification/Firebase regression.
+## Lecturer Course broadcast actionUrl constraints — 2026-08-16
+
+- DEC-098 is additive on `POST /api/v1/courses/notifications/broadcast` only. Do not add `actionUrl` to Admin `NotificationBroadcastRequest`. Do not create a second send endpoint.
+- `actionUrl` is optional. Blank/null is stored as null. Present values must be absolute HTTPS, host required, max 500 characters (`user_notification.action_url`), no control characters, no `http`/`javascript:`/`data:`/`file:`/malformed URI. Backend must not fetch or follow the URL.
+- Idempotency fingerprint includes normalized `actionUrl` only when present so historical no-URL retries keep the same hash. Changed URL with the same key is a conflict.
+- Do not add a `notification_broadcast.action_url` column unless a later audit proves replay cannot recover the URL from the retried request. V25/V26/V27 remain untouched. Flyway head stays V42 unless a later change needs V43.
+- Authorization, audience, session, CSRF, required `Idempotency-Key`, and no-Bearer rules are unchanged. Admin `ALL` is not a valid audience.
+
 ## Notification broadcast and producer constraints — 2026-08-11
 
 - V26/V27 are additive after V25: `notification_broadcast` provides sender/audience/content/idempotency/status counters; `user_notification.broadcast_id` provides broadcast recipient dedup and nullable `event_key` provides event replay dedup. Do not edit V25 or legacy `notification`.

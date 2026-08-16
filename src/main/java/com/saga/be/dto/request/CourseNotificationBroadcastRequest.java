@@ -11,6 +11,7 @@ import java.util.UUID;
 public record CourseNotificationBroadcastRequest(
         @NotEmpty @Size(max = 100) List<@NotNull UUID> courseIds,
         @NotBlank @Size(max = 160) @Pattern(regexp = "^[^<>]*$") String title,
-        @NotBlank @Size(max = 1000) @Pattern(regexp = "^[^<>]*$") String message
+        @NotBlank @Size(max = 1000) @Pattern(regexp = "^[^<>]*$") String message,
+        @Size(max = 500) String actionUrl
 ) {
 }

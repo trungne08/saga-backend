@@ -22,7 +22,8 @@ public class NotificationBroadcastFanoutService {
             ApplicationRole recipientRole,
             NotificationType type,
             String title,
-            String message
+            String message,
+            String actionUrl
     ) {
         for (UUID recipientId : recipientIds) {
             notificationService.createForBroadcast(
@@ -31,7 +32,8 @@ public class NotificationBroadcastFanoutService {
                     recipientRole,
                     type,
                     title,
-                    message
+                    message,
+                    actionUrl
             );
         }
     }

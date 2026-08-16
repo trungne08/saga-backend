@@ -86,13 +86,15 @@ public class NotificationBroadcastService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "courseIds is required");
         }
         requireOwnedCourses(principal, courseIds);
+        String actionUrl = NotificationActionUrlValidator.normalizeOptionalHttps(request.actionUrl());
         NotificationBroadcast broadcast = claim(
                 principal,
                 NotificationBroadcastAudience.COURSE_STUDENTS,
                 request.title(),
                 request.message(),
                 idempotencyKey,
-                String.join(",", courseIds.stream().map(UUID::toString).sorted().toList())
+                String.join(",", courseIds.stream().map(UUID::toString).sorted().toList()),
+                actionUrl
         );
         if (broadcast.getStatus() != NotificationBroadcastStatus.COMPLETED) {
             int page = 0;
@@ -108,7 +110,8 @@ public class NotificationBroadcastService {
                         ApplicationRole.STUDENT,
                         NotificationType.MANUAL_LECTURER_COURSE_BROADCAST,
                         broadcast.getTitle(),
-                        broadcast.getMessage()
+                        broadcast.getMessage(),
+                        actionUrl
                 );
             } while (recipients.hasNext());
             broadcast = persistenceService.complete(broadcast.getId());
@@ -150,7 +153,8 @@ public class NotificationBroadcastService {
                     recipientRole,
                     type,
                     broadcast.getTitle(),
-                    broadcast.getMessage()
+                    broadcast.getMessage(),
+                    null
             );
         } while (recipients.hasNext());
     }
@@ -162,7 +166,7 @@ public class NotificationBroadcastService {
             String rawMessage,
             String rawIdempotencyKey
     ) {
-        return claim(principal, audience, rawTitle, rawMessage, rawIdempotencyKey, "");
+        return claim(principal, audience, rawTitle, rawMessage, rawIdempotencyKey, "", null);
     }
 
     private NotificationBroadcast claim(
@@ -171,12 +175,17 @@ public class NotificationBroadcastService {
             String rawTitle,
             String rawMessage,
             String rawIdempotencyKey,
-            String scopeFingerprint
+            String scopeFingerprint,
+            String actionUrl
     ) {
         String title = requiredPlainText(rawTitle, 160, "title");
         String message = requiredPlainText(rawMessage, 1000, "message");
         String key = requiredIdempotencyKey(rawIdempotencyKey);
-        String fingerprint = sha256(audience.name() + "\n" + scopeFingerprint + "\n" + title + "\n" + message);
+        String fingerprintInput = audience.name() + "\n" + scopeFingerprint + "\n" + title + "\n" + message;
+        if (actionUrl != null) {
+            fingerprintInput += "\n" + actionUrl;
+        }
+        String fingerprint = sha256(fingerprintInput);
         return persistenceService.claim(
                 principal.localProfileId(),
                 principal.applicationRole(),

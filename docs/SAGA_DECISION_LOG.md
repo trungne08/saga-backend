@@ -1,3 +1,15 @@
+## DEC-098 — Lecturer Course broadcast may include optional HTTPS actionUrl; Admin broadcast does not
+
+- Ngày: 2026-08-16; trạng thái: **CONFIRMED_SOURCE**. Không rewrite DEC-070. Không mở Admin link. Không Bearer. Không expose `/internal/**`. Không đổi Contribution/AI migration.
+- **Supersession (hẹp):** DEC-070 “request bodies never accept … external action URLs” is superseded **only** for `POST /api/v1/courses/notifications/broadcast` Lecturer Course manual broadcast. Admin `POST /api/admin/notifications/broadcast` still rejects unknown fields including `actionUrl`. Automatic Task/Sprint/integration producers remain `actionUrl=null`.
+- **Lecturer contract:** existing LECTURER-only route, session + CSRF + required `Idempotency-Key`. Additive optional `actionUrl`. Absent/null/blank → Bell `actionUrl=null`. Present → absolute HTTPS only, max 500 (existing `user_notification.action_url`). Reject `http`, `javascript:`, `data:`, `file:`, malformed URI, missing host, control characters. Backend validates and persists the trimmed string; it does not fetch or follow the URL.
+- **Idempotency:** normalized `actionUrl` is part of the request fingerprint when present. Same key + same courseIds/title/message + same URL replays; same key + changed URL is a different intent and conflicts. Existing no-URL fingerprints are unchanged.
+- **Persistence:** reuse `user_notification.action_url`. No `notification_broadcast` column and no new Flyway version; replay uses the request + fingerprint, not a master URL column.
+- **Authorization unchanged:** every Course must be active (`deletedAt` null) and assigned to the current Lecturer; recipients are distinct TeamMember Students only. Invitation is not enrollment. No school-wide Lecturer broadcast. No sender/recipient/FID/Cognito fields.
+- **Admin 400:** `audience` is only `STUDENTS|LECTURERS|ALL_USERS`. UI `ALL` and extra `actionUrl`/`link` bind to `400 INVALID_REQUEST`. Missing `Idempotency-Key` is the same binding error. Do not relax Jackson fail-closed unknown properties to accept a wrong Admin payload.
+- **Bell:** `GET /api/me/notifications` already returns nullable `actionUrl`. Student FE must render a safe `target="_blank" rel="noopener noreferrer"` CTA when present. FCM remains refetch-only; Firebase payload contract is unchanged.
+- OpenAPI **152** (no new operation). Flyway head remains **V42**.
+
 ## DEC-097 — Extra Master: manual GitIssue↔Commit writer, review result, warning pipeline, Early Warning V2, Leader Team DOCX
 
 - Ngày: 2026-08-16; trạng thái: **CONFIRMED_SOURCE** (tests/runtime numbers recorded after suite). Không rewrite DEC-094/095/096. Không sửa DEC-023. Không đổi Contribution formula. Không Bearer browser. Không expose `/internal/**`.
