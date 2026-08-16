@@ -1,3 +1,11 @@
+## Sequential Task proposals in one Course conversation — 2026-08-17
+
+- **CONFIRMED_SOURCE_TEST:** Same-Course conversation reuse is valid for multiple sequential Task proposals. After P1 is `COMPLETED`, `REJECTED`, `EXPIRED`, or `FAILED`, the next user Task-create message may create P2 (`id` new, same `conversationId`). A new conversation is required only on Course change (`409 AI_AGENT_COURSE_SCOPE_MISMATCH`).
+- **ROOT CAUSE (fixed in AI):** planner/guard treated historical assistant “vui lòng xác nhận” text as current proposal authority and blocked `propose_task_create`. Schema already allowed multiple `agent_pending_action` rows per conversation (`UNIQUE` only on `idempotency_key`). Confirm/Reject already finalized the AI row; that was not the blocker.
+- **V1 ACTIVE:** one `PENDING` or `EXECUTING` action at a time. A second Task request does not overwrite P1 or create a parallel pending row; the message may return the current active `pendingAction`.
+- **UNCHANGED:** DEC-099 Course bind, DEC-100 Sprint compose + `REMOTE_SUCCEEDED` recovery, session + CSRF, no Bearer, no Jira before Confirm, `requireProjectManager`, ZERO/MULTIPLE no pick-first. No public route/schema/migration.
+- **VERIFICATION:** AI targeted multi-task + leader/sprint/repository/guard **PASS**. Full deterministic AI **391 passed / 4 deselected** (`real_provider` excluded). Backend targeted Agent confirm/scope/client tests **PASS**. `git diff --check` clean on both repos.
+
 ## Disabled OIDC callback Frontend redirect (DEC-104) — 2026-08-17
 
 - **CONFIRMED_SOURCE_TEST:** A confirmed INACTIVE/SUSPENDED Student/Lecturer at the Cognito success callback clears `SecurityContext`, invalidates the transient session, saves no `SagaPrincipal`, and receives `302 AUTH_FAILURE_REDIRECT_URI?error=ACCOUNT_DISABLED`. The configured URI must be absolute HTTP(S), falls back to `AUTH_SUCCESS_REDIRECT_URI`, and is not request-controlled.
