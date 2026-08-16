@@ -1,4 +1,13 @@
+## Lecturer/Admin Home AI + four-type report E2E (DEC-107) — 2026-08-17
+
+- **CONFIRMED_SOURCE_TEST:** Lecturer Home chat does not require clicking a Course first. Unbound `discover_resource_context` returns the instructed-course portfolio (Teams + nullable Project). Named Course uses `lecturer_course_context`. Export uses `lecturer_progress_report` → `LECTURER_PROGRESS_REPORT` + `COURSE`. DEC-099 bound Course A vs B remains `409`. No pick-first.
+- **NO-PROJECT TEAM:** A Course with mixed Project / no-Project Teams builds context and report. The no-Project Team is included, marked `PROJECT_ABSENT`, and is not 0% progress. All-Teams-no-Project and zero-Team Courses stay controlled.
+- **ADMIN HOME:** SYSTEM_SCOPE Q&A uses hidden `admin-system-context` (same projection as the system report, no DOCX). Export uses `admin-system-report` → `ADMIN_SYSTEM_REPORT` + `SYSTEM` without a Course. Safe health language only; MSR/DEADLINE_PROCESS/SNA_ISOLATION remain TBD/null.
+- **DOWNLOAD:** `GET /api/v1/ai/artifacts/{artifactId}/download` reauthorizes current actor. Public `generatedArtifact` now includes `scopeType`/`scopeId`/`conversationId` in the chat payload. Course XLSX export is unchanged and separate.
+- **VERIFICATION:** Backend targeted Agent/dashboard/scope/gateway tests **PASS**. AI lecturer/admin report + Home routing tests **PASS**. OpenAPI **154**. No migration. Browser smoke **TBD**. `READY_FOR_COMMIT` after user request only.
+
 ## Realtime account-disable SSE (DEC-106) — 2026-08-17
+
 
 - **CONFIRMED_SOURCE_TEST:** `GET /api/auth/session-events` is a session-authenticated SSE stream. After Admin PATCH commits a Student/Lecturer to INACTIVE/SUSPENDED, same-JVM open browsers receive `event: account-disabled` / `{"code":"ACCOUNT_DISABLED","occurredAt"}`, attached `HttpSession`s are invalidated, and emitters close. ADMIN is heartbeat-only.
 - **AUTHORITY:** DB `AccountStatus` remains source of truth. DEC-101 request-level `401 ACCOUNT_DISABLED` is unchanged. There is no Redis/Spring Session/shared event bus; cross-replica detection is a single bounded 5s sweep of connected profile IDs. FCM is not used for auth revocation. Re-enable requires a new login.

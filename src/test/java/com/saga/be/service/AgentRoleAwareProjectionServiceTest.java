@@ -4,7 +4,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -427,7 +430,7 @@ class AgentRoleAwareProjectionServiceTest {
                 ))
         ));
         when(reports.graphProcessing()).thenReturn(new AdminGraphProcessingReportResponse(
-                OffsetDateTime.now(), 7, true, null, List.of()
+                OffsetDateTime.now(), 7, false, null, List.of()
         ));
         AgentRoleAwareProjectionService service = new AgentRoleAwareProjectionService(
                 mock(AgentToolProjectionService.class),
@@ -518,6 +521,223 @@ class AgentRoleAwareProjectionServiceTest {
         InternalAgentToolResponses.LecturerCourseContext result = service.lecturerCourseContext(lecturer, null);
         assertEquals("SINGLE_MATCH", result.selectionState());
         assertEquals(course.getId(), result.courseId());
+    }
+
+    @Test
+    void lecturerCourseContextDoesNotPickFirstWhenMultipleInstructedCourses() {
+        UUID lecturerId = UUID.randomUUID();
+        SagaPrincipal lecturer = new SagaPrincipal(
+                "lecturer-sub", "lecturer@example.test", "Lecturer",
+                ApplicationRole.LECTURER, lecturerId, AccountStatus.ACTIVE
+        );
+        Course first = course(UUID.randomUUID(), "PRN231");
+        Course second = course(UUID.randomUUID(), "SWP391");
+        Lecturer instructor = new Lecturer();
+        instructor.setId(lecturerId);
+        first.setInstructor(instructor);
+        second.setInstructor(instructor);
+        CourseRepository courses = mock(CourseRepository.class);
+        LecturerCourseDashboardQueryService dashboard = mock(LecturerCourseDashboardQueryService.class);
+        when(courses.findByInstructorIdAndDeletedAtIsNullOrderByCourseCodeAscIdAsc(lecturerId))
+                .thenReturn(List.of(first, second));
+        AgentRoleAwareProjectionService service = new AgentRoleAwareProjectionService(
+                mock(AgentToolProjectionService.class),
+                mock(TeamMemberRepository.class),
+                courses,
+                mock(IdentityMapRepository.class),
+                mock(CommitDataRepository.class),
+                mock(TaskRepository.class),
+                mock(LecturerStudentAnalyticsQueryService.class),
+                dashboard,
+                mock(CourseEarlyWarningQueryService.class),
+                mock(LecturerTeamAnalyticsQueryService.class),
+                mock(AdminReadService.class),
+                mock(AdminDashboardReportService.class),
+                mock(LecturerAnalyticsAuthorizationService.class),
+                mock(CommitReviewIntentRepository.class),
+                mock(BusinessWarningRepository.class),
+                new com.saga.be.config.JiraTimeZoneProperties("UTC")
+        );
+
+        InternalAgentToolResponses.LecturerCourseContext result = service.lecturerCourseContext(lecturer, null);
+        assertEquals("MULTIPLE_MATCH", result.selectionState());
+        assertEquals(null, result.courseId());
+        assertEquals(2, result.candidates().size());
+        assertEquals("PRN231", result.candidates().get(0).courseCode());
+        assertEquals("SWP391", result.candidates().get(1).courseCode());
+        verifyNoInteractions(dashboard);
+    }
+
+    @Test
+    void lecturerCourseAndReportKeepNoProjectTeamWithoutFabricatingProgress() {
+        UUID lecturerId = UUID.randomUUID();
+        UUID courseId = UUID.randomUUID();
+        UUID withProjectTeamId = UUID.randomUUID();
+        UUID noProjectTeamId = UUID.randomUUID();
+        UUID otherProjectTeamId = UUID.randomUUID();
+        UUID projectOne = UUID.randomUUID();
+        UUID projectThree = UUID.randomUUID();
+        SagaPrincipal lecturer = new SagaPrincipal(
+                "lecturer-sub", "lecturer@example.test", "Lecturer",
+                ApplicationRole.LECTURER, lecturerId, AccountStatus.ACTIVE
+        );
+        Course course = course(courseId, "SE123");
+        Lecturer instructor = new Lecturer();
+        instructor.setId(lecturerId);
+        course.setInstructor(instructor);
+        CourseRepository courses = mock(CourseRepository.class);
+        LecturerCourseDashboardQueryService dashboard = mock(LecturerCourseDashboardQueryService.class);
+        CourseEarlyWarningQueryService warnings = mock(CourseEarlyWarningQueryService.class);
+        LecturerTeamAnalyticsQueryService teamAnalytics = mock(LecturerTeamAnalyticsQueryService.class);
+        LecturerCourseDashboardResponses.TeamProgress team1 = new LecturerCourseDashboardResponses.TeamProgress(
+                withProjectTeamId, "Team 1", projectOne, null, List.of(),
+                4, 2, 8, 3, 0, 7, null
+        );
+        LecturerCourseDashboardResponses.TeamProgress team2 = new LecturerCourseDashboardResponses.TeamProgress(
+                noProjectTeamId, "Team 2", null, null, List.of(),
+                0, 0, 0, 0, 0, 0, null
+        );
+        LecturerCourseDashboardResponses.TeamProgress team3 = new LecturerCourseDashboardResponses.TeamProgress(
+                otherProjectTeamId, "Team 3", projectThree, null, List.of(),
+                1, 0, 2, 0, 1, 3, null
+        );
+        when(courses.findByInstructorIdAndDeletedAtIsNullOrderByCourseCodeAscIdAsc(lecturerId))
+                .thenReturn(List.of(course));
+        when(courses.findWithReportDetailsByIdAndDeletedAtIsNull(courseId)).thenReturn(Optional.of(course));
+        when(dashboard.teamsProgress(lecturer, courseId))
+                .thenReturn(new LecturerCourseDashboardResponses.TeamsProgress(
+                        courseId, List.of(team1, team2, team3)
+                ));
+        when(dashboard.contributionSummary(lecturer, courseId))
+                .thenReturn(new LecturerCourseDashboardResponses.ContributionSummary(
+                        courseId, 3, null, 3, null, null
+                ));
+        when(dashboard.trends(lecturer, courseId))
+                .thenReturn(new LecturerCourseDashboardResponses.Trends(courseId, List.of()));
+        when(dashboard.atRiskSummary(lecturer, courseId))
+                .thenReturn(new LecturerCourseDashboardResponses.AtRiskSummary(
+                        courseId, 0, 0, 0, java.util.Map.of(), List.of()
+                ));
+        when(warnings.get(lecturer, courseId))
+                .thenReturn(new LecturerAnalyticsResponses.EarlyWarnings(courseId, List.of()));
+        when(teamAnalytics.velocity(eq(lecturer), eq(courseId), any()))
+                .thenAnswer(invocation -> new LecturerAnalyticsResponses.SprintVelocity(
+                        courseId, invocation.getArgument(2), List.of()
+                ));
+        when(teamAnalytics.overview(eq(lecturer), eq(courseId), any(), any(), any()))
+                .thenReturn(new LecturerAnalyticsResponses.ActivityOverview(
+                        courseId, withProjectTeamId, LocalDate.now(), LocalDate.now(), List.of(),
+                        new LecturerAnalyticsResponses.ActivityTotals(0, 0, 0, 0, 0, 0, 0)
+                ));
+        AgentRoleAwareProjectionService service = new AgentRoleAwareProjectionService(
+                mock(AgentToolProjectionService.class),
+                mock(TeamMemberRepository.class),
+                courses,
+                mock(IdentityMapRepository.class),
+                mock(CommitDataRepository.class),
+                mock(TaskRepository.class),
+                mock(LecturerStudentAnalyticsQueryService.class),
+                dashboard,
+                warnings,
+                teamAnalytics,
+                mock(AdminReadService.class),
+                mock(AdminDashboardReportService.class),
+                mock(LecturerAnalyticsAuthorizationService.class),
+                mock(CommitReviewIntentRepository.class),
+                mock(BusinessWarningRepository.class),
+                new com.saga.be.config.JiraTimeZoneProperties("UTC")
+        );
+
+        InternalAgentToolResponses.LecturerCourseContext context = service.lecturerCourseContext(lecturer, courseId);
+        assertEquals("SINGLE_MATCH", context.selectionState());
+        assertEquals(3, context.teamsProgress().teams().size());
+        assertEquals(noProjectTeamId, context.teamsProgress().teams().get(1).teamId());
+        assertEquals(null, context.teamsProgress().teams().get(1).projectId());
+
+        InternalAgentToolResponses.LecturerProgressReport report = service.lecturerProgressReport(lecturer, courseId);
+        assertEquals("SINGLE_MATCH", report.selectionState());
+        assertEquals(3, report.teamSections().size());
+        InternalAgentToolResponses.TeamReportSection missingProject = report.teamSections().get(1);
+        assertEquals(noProjectTeamId, missingProject.teamId());
+        assertEquals("Team 2", missingProject.teamName());
+        assertEquals(null, missingProject.projectId());
+        assertEquals(null, missingProject.contribution());
+        assertEquals(null, missingProject.velocity());
+        assertEquals(null, missingProject.activities());
+        assertEquals(null, missingProject.burndown());
+        assertTrue(missingProject.dataLimitations().contains("PROJECT_ABSENT"));
+        assertEquals(projectOne, report.teamSections().get(0).projectId());
+        assertEquals(projectThree, report.teamSections().get(2).projectId());
+        verify(teamAnalytics, never()).velocity(lecturer, courseId, noProjectTeamId);
+        verify(teamAnalytics, never()).overview(eq(lecturer), eq(courseId), eq(noProjectTeamId), any(), any());
+        verify(teamAnalytics).velocity(lecturer, courseId, withProjectTeamId);
+        verify(teamAnalytics).velocity(lecturer, courseId, otherProjectTeamId);
+    }
+
+    @Test
+    void lecturerReportSucceedsWhenEveryTeamHasNoProject() {
+        UUID lecturerId = UUID.randomUUID();
+        UUID courseId = UUID.randomUUID();
+        UUID teamId = UUID.randomUUID();
+        SagaPrincipal lecturer = new SagaPrincipal(
+                "lecturer-sub", "lecturer@example.test", "Lecturer",
+                ApplicationRole.LECTURER, lecturerId, AccountStatus.ACTIVE
+        );
+        Course course = course(courseId, "EMPTY-P");
+        Lecturer instructor = new Lecturer();
+        instructor.setId(lecturerId);
+        course.setInstructor(instructor);
+        CourseRepository courses = mock(CourseRepository.class);
+        LecturerCourseDashboardQueryService dashboard = mock(LecturerCourseDashboardQueryService.class);
+        LecturerTeamAnalyticsQueryService teamAnalytics = mock(LecturerTeamAnalyticsQueryService.class);
+        when(courses.findByInstructorIdAndDeletedAtIsNullOrderByCourseCodeAscIdAsc(lecturerId))
+                .thenReturn(List.of(course));
+        when(courses.findWithReportDetailsByIdAndDeletedAtIsNull(courseId)).thenReturn(Optional.of(course));
+        when(dashboard.teamsProgress(lecturer, courseId)).thenReturn(new LecturerCourseDashboardResponses.TeamsProgress(
+                courseId,
+                List.of(new LecturerCourseDashboardResponses.TeamProgress(
+                        teamId, "Waiting Team", null, null, List.of(),
+                        0, 0, 0, 0, 0, 0, null
+                ))
+        ));
+        when(dashboard.contributionSummary(lecturer, courseId))
+                .thenReturn(new LecturerCourseDashboardResponses.ContributionSummary(
+                        courseId, 1, null, 0, null, null
+                ));
+        when(dashboard.trends(lecturer, courseId))
+                .thenReturn(new LecturerCourseDashboardResponses.Trends(courseId, List.of()));
+        when(dashboard.atRiskSummary(lecturer, courseId))
+                .thenReturn(new LecturerCourseDashboardResponses.AtRiskSummary(
+                        courseId, 0, 0, 0, java.util.Map.of(), List.of()
+                ));
+        CourseEarlyWarningQueryService warnings = mock(CourseEarlyWarningQueryService.class);
+        when(warnings.get(lecturer, courseId))
+                .thenReturn(new LecturerAnalyticsResponses.EarlyWarnings(courseId, List.of()));
+        AgentRoleAwareProjectionService service = new AgentRoleAwareProjectionService(
+                mock(AgentToolProjectionService.class),
+                mock(TeamMemberRepository.class),
+                courses,
+                mock(IdentityMapRepository.class),
+                mock(CommitDataRepository.class),
+                mock(TaskRepository.class),
+                mock(LecturerStudentAnalyticsQueryService.class),
+                dashboard,
+                warnings,
+                teamAnalytics,
+                mock(AdminReadService.class),
+                mock(AdminDashboardReportService.class),
+                mock(LecturerAnalyticsAuthorizationService.class),
+                mock(CommitReviewIntentRepository.class),
+                mock(BusinessWarningRepository.class),
+                new com.saga.be.config.JiraTimeZoneProperties("UTC")
+        );
+
+        InternalAgentToolResponses.LecturerProgressReport report = service.lecturerProgressReport(lecturer, courseId);
+        assertEquals("SINGLE_MATCH", report.selectionState());
+        assertEquals(1, report.teamSections().size());
+        assertEquals(null, report.teamSections().get(0).projectId());
+        assertTrue(report.teamSections().get(0).dataLimitations().contains("PROJECT_ABSENT"));
+        verifyNoInteractions(teamAnalytics);
     }
 
     @Test

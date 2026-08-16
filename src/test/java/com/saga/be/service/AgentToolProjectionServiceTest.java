@@ -108,6 +108,10 @@ class AgentToolProjectionServiceTest {
         assertEquals("MULTIPLE_MATCH", result.selectionState());
         assertEquals(2, result.totalCourses());
         assertEquals(2, result.totalTeams());
+        assertEquals(1, result.totalProjects());
+        assertEquals("Project A", result.courses().get(0).teams().get(0).project().projectName());
+        assertEquals("Team B", result.courses().get(1).teams().get(0).teamName());
+        assertEquals(null, result.courses().get(1).teams().get(0).project());
         verify(courses).findByInstructorIdAndDeletedAtIsNullOrderByCourseCodeAscIdAsc(lecturerId);
     }
 

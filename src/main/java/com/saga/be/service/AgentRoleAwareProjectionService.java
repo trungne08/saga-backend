@@ -482,6 +482,29 @@ public class AgentRoleAwareProjectionService {
     ) {
         UUID teamId = team.teamId();
         UUID projectId = team.projectId();
+        if (projectId == null) {
+            WarningSplit split = warningSplit(
+                    List.of(),
+                    businessWarnings.findByTeamIdOrderByCreatedAtDescIdDesc(teamId),
+                    teamId,
+                    null
+            );
+            return new TeamReportSection(
+                    teamId,
+                    team.teamName(),
+                    null,
+                    team,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    split.confirmed(),
+                    split.advisories(),
+                    split.unsupported(),
+                    List.of("PROJECT_ABSENT")
+            );
+        }
         LecturerAnalyticsResponses.SprintVelocity velocity = teamAnalytics.velocity(actor, courseId, teamId);
         LecturerAnalyticsResponses.ActivityOverview activities = null;
         LecturerAnalyticsResponses.BurndownChart burndown = null;

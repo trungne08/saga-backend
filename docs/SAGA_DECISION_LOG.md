@@ -1,4 +1,16 @@
+## DEC-107 — Lecturer/Admin Home AI intelligence and four-type report E2E
+
+- Date: 2026-08-17; status: **CONFIRMED_SOURCE_TEST**. Does not rewrite DEC-095/096/097/099. No Bearer. No public `/internal/**`. No Contribution/Peer Review change. No Flyway/Alembic. OpenAPI remains **154**.
+- **HOME_UNBOUND_CONVERSATION_SUPPORTED = YES** for per-turn authorized reads. A Home conversation with no `courseId` stays unbound. Each turn may resolve an instructed Course (Lecturer) or SYSTEM_SCOPE (Admin) from current discovery/tool args. Historical assistant text is not Course authority. A conversation already bound to Course A still returns `409 AI_AGENT_COURSE_SCOPE_MISMATCH` if reused for Course B. Tool `courseId` cannot override a bound Course. No pick-first.
+- **Lecturer Home:** `discover_resource_context` lists every currently instructed Course with Teams and nullable Project. That list is the portfolio for “các lớp của tôi”. Named Course → exact code/name match from that list → hidden `lecturer_course_context` (`POST /internal/ai/v1/agent/tools/lecturer-course-context`, already existed; now wired in AI). Export → `lecturer_progress_report` → `LECTURER_PROGRESS_REPORT` + `COURSE`. Uninstructed Course → `ZERO_MATCH`. Several name matches → `MULTIPLE_MATCH` + candidates.
+- **No-project Team is first-class.** Dashboard already included Teams with `projectId=null`. Lecturer report/context no longer call velocity/activity/contribution/burndown for those Teams, do not omit them, and do not treat dashboard zeros as 0% progress. DOCX says the Team currently has no Project. `dataLimitations` includes `PROJECT_ABSENT`.
+- **Admin Home:** SYSTEM_SCOPE questions do not need Course/Team/Project. New hidden `POST /internal/ai/v1/agent/tools/admin-system-context` reuses `adminSystemReport()` as a read (no artifact). Export still `admin-system-report` → `ADMIN_SYSTEM_REPORT` + `SYSTEM`. No invented `SYSTEM_HEALTHY=true`. TBD/null (MSR, DEADLINE_PROCESS, SNA_ISOLATION, unsupported graph history) stay TBD/null. Named Admin Course questions still need explicit `courseId` + `requireCourseAccess`.
+- **Public `generatedArtifact` fields (unchanged schema, now populated):** `id`, `conversationId`, `artifactType`, `scopeType`, `scopeId`, `filename`, `mediaType`. Download remains `GET /api/v1/ai/artifacts/{artifactId}/download` (session, GET, no CSRF, no Bearer) with download-time reauthorization. Artifact UUID is not authority.
+- **Unchanged:** SRS `SRS_DOCX`+`PROJECT` (MEMBER or LEADER of owning Team, instructor, ADMIN). Leader `LEADER_TEAM_PROGRESS_REPORT`+`TEAM` (exact current LEADER only). Course XLSX `GET /api/admin/reports/courses/{courseId}/export` remains separate.
+- Browser/HF runtime smoke **TBD**. No commit/push/deploy in this change.
+
 ## DEC-106 — Realtime account-disable browser revocation over session SSE
+
 
 - Date: 2026-08-17; status: **ACCEPTED / IMPLEMENTED_SOURCE_TEST**.
 - Extends DEC-101; does not rewrite it. Request-level `401 ACCOUNT_DISABLED`, session invalidation, `/api/auth/me` gating, self-profile PATCH gating, and disabled OIDC callback behavior remain the hard security fallback.

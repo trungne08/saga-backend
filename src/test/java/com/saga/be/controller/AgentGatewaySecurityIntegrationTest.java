@@ -132,7 +132,8 @@ class AgentGatewaySecurityIntegrationTest {
 
         when(accountStatuses.isAllowedForBusinessApi(any())).thenReturn(false);
         mockMvc.perform(get("/api/v1/ai/conversations").with(authentication(student)))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error").value("ACCOUNT_DISABLED"));
     }
 
     @Test
@@ -287,6 +288,25 @@ class AgentGatewaySecurityIntegrationTest {
                 .thenThrow(new AccessDeniedException("Admin system report is available only to ADMIN"));
 
         mockMvc.perform(post("/internal/ai/v1/agent/tools/admin-system-report")
+                        .header(InternalAiServiceAuthenticationFilter.HEADER_NAME, INTERNAL_TOKEN)
+                        .header(InternalAgentToolController.DELEGATED_CONTEXT_HEADER, opaqueContext)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"conversationId\":\"" + CONVERSATION_ID + "\"}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value("Bạn không có quyền truy cập hoặc thực hiện thao tác này."));
+    }
+
+    @Test
+    void nonAdminSystemContextIsForbiddenWithSafeDenial() throws Exception {
+        SagaPrincipal lecturer = (SagaPrincipal) authFor(ApplicationRole.LECTURER).getPrincipal();
+        String opaqueContext = "opaque-delegated-context-value-1234567890";
+        when(delegations.resolveAccess(
+                opaqueContext, CONVERSATION_ID, AgentDelegationCapability.READ
+        )).thenReturn(new com.saga.be.service.AgentDelegatedAccess(lecturer, null));
+        when(roleAware.adminSystemReport(lecturer))
+                .thenThrow(new AccessDeniedException("Admin system report is available only to ADMIN"));
+
+        mockMvc.perform(post("/internal/ai/v1/agent/tools/admin-system-context")
                         .header(InternalAiServiceAuthenticationFilter.HEADER_NAME, INTERNAL_TOKEN)
                         .header(InternalAgentToolController.DELEGATED_CONTEXT_HEADER, opaqueContext)
                         .contentType(MediaType.APPLICATION_JSON)

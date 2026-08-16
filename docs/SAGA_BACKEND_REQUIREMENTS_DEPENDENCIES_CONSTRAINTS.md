@@ -1,4 +1,14 @@
+## Lecturer/Admin Home AI + report E2E (DEC-107) — 2026-08-17
+
+- Do not require FE `courseId` for Lecturer portfolio or Admin SYSTEM_SCOPE questions. Bound Course conversations still cannot be reused across Courses (`409`). Tool `courseId` must not override bound scope.
+- Do not treat a Team without Project as missing, failed, or 0% progress. Do not invent a Project placeholder.
+- Hidden tools: existing `lecturer-course-context`; new `admin-system-context` (same ADMIN projection as the system report, read-only). Do not expose `/internal/**` to FE.
+- Do not invent `SYSTEM_HEALTHY=true` or coerce TBD/null Admin signals (MSR, DEADLINE_PROCESS, SNA_ISOLATION) to zero.
+- Public AI operations/schema unchanged (OpenAPI **154**). Download remains `GET /api/v1/ai/artifacts/{artifactId}/download` with download-time reauthorization. Course XLSX export stays a separate Admin route.
+- No migration. No Bearer. No Contribution/Peer Review change.
+
 ## Realtime account-disable SSE constraints (DEC-106) — 2026-08-17
+
 
 - `GET /api/auth/session-events` is session-cookie GET, no CSRF, no Bearer, no client-supplied actor/profile/session identity. SSE registry is ephemeral process-local memory keyed by `ApplicationRole + localProfileId`. Do not persist JSESSIONID, add a session table, Redis, Spring Session, or a security-event table for V1.
 - Immediate push is AFTER_COMMIT in the same JVM only. `GLOBAL_CROSS_INSTANCE_EVENT_BUS = NO`. Cross-instance max delay is the 5s connected-profile DB revalidation (`STATUS_SWEEP_QUERY_COUNT` is 0–2 per sweep, IDs deduplicated). Do not claim global millisecond revocation. Heartbeat must not query DB or write notification/audit rows.

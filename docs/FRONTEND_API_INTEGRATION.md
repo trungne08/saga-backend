@@ -1,4 +1,29 @@
+## Lecturer/Admin Home AI + report download (DEC-107) — 2026-08-17
+
+Lecturer and Admin may chat from Home. Do not require the user to open a Course/Team/Project first for authorized reads.
+
+- Lecturer Home with no `courseId`: omit `courseId` on create/message. The assistant can list instructed classes and resolve a named class per turn. Do not send `lecturerId`. If the UI is inside Course A, keep sending that `courseId`; switching to Course B needs a **new** conversation (`409 AI_AGENT_COURSE_SCOPE_MISMATCH`).
+- Admin Home system questions: omit `courseId`. Do not send `adminId`. A named Course still needs an explicit resolved Course (do not pick the first Course in the tenant).
+- When a report is ready, render **Tải báo cáo** from `generatedArtifact` only:
+
+```json
+{
+  "id": "uuid",
+  "conversationId": "uuid",
+  "artifactType": "LECTURER_PROGRESS_REPORT | ADMIN_SYSTEM_REPORT | LEADER_TEAM_PROGRESS_REPORT | SRS_DOCX",
+  "scopeType": "COURSE | SYSTEM | TEAM | PROJECT",
+  "scopeId": "course-uuid | SYSTEM | team-uuid | project-uuid",
+  "filename": "Lecturer-Progress-Report-SE123.docx",
+  "mediaType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+}
+```
+
+Download: `GET /api/v1/ai/artifacts/{id}/download` with `credentials: "include"`. GET, no CSRF, no Bearer. Do not call `/internal/**`, Hugging Face, or a filesystem path. A missing `generatedArtifact` means no file — do not invent a download button from assistant text.
+
+Course Excel remains `GET /api/admin/reports/courses/{courseId}/export` and is not this DOCX.
+
 ## Realtime account disable / forced logout (DEC-106) — 2026-08-17
+
 
 OpenAPI **154**. No migration. DEC-101 request-level `401 ACCOUNT_DISABLED` is unchanged and remains the hard fallback.
 
@@ -2042,7 +2067,7 @@ For `pendingAction`, show the immutable summary and expiry with explicit **Confi
 
 Disable repeated confirmation after the first request. Backend/AI still enforce atomic `PENDING` claim once and stable idempotency. Expired/rejected/completed/failed actions require a **new proposal in the same conversation**, not a new conversation. While a currently active `PENDING` or `EXECUTING` action exists, V1 does not open a second parallel Confirm card; keep the current card and ask the user to Confirm or Cancel it first. **DEC-100 exception (narrow):** if this `TASK_CREATE` proposal had a Sprint and Confirm returns `409 JIRA_WRITE_RECOVERY_REQUIRED` or `409 JIRA_WRITE_OPERATION_IN_PROGRESS`, retry the **same** Confirm (`same actionId`, empty body, session + CSRF). Do not send a new proposal, do not derive keys, and do not call `PUT /api/v1/projects/{projectId}/tasks/{taskId}/sprint` for the happy path or this recovery. Do not retry Confirm for `TASK_UPDATE`, for create-only proposals, or for other 4xx/5xx. A concurrent double-submit may return `409`; that is fail-safe, not a second Confirm. Success remains `200` `{ actionId, status: "COMPLETED", task }`. Error bodies stay `ApiErrorResponse` without a Task.
 
-For `generatedArtifact`, use only the Backend download endpoint. Do not construct AI URLs. For `jobReference`, render `PENDING`, `RUNNING`, `WAITING_RETRY`, `COMPLETED`, or `FAILED`; the chat can ask for the latest conversation-scoped result without requiring the user to know a job ID.
+For `generatedArtifact`, use only the Backend download endpoint. Do not construct AI URLs. Expect `id`, `conversationId`, `artifactType`, `scopeType`, `scopeId`, `filename`, and `mediaType`. Types: `SRS_DOCX`+`PROJECT`, `LECTURER_PROGRESS_REPORT`+`COURSE`, `ADMIN_SYSTEM_REPORT`+`SYSTEM`, `LEADER_TEAM_PROGRESS_REPORT`+`TEAM`. For `jobReference`, render `PENDING`, `RUNNING`, `WAITING_RETRY`, `COMPLETED`, or `FAILED`; the chat can ask for the latest conversation-scoped result without requiring the user to know a job ID.
 
 Logout destroys the Backend session and therefore Agent access. Chat delete/retention UI is deferred until product data policy is defined.
 

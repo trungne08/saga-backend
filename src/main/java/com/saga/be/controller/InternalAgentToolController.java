@@ -253,6 +253,14 @@ public class InternalAgentToolController {
         );
     }
 
+    @PostMapping("/admin-system-context")
+    public InternalAgentToolResponses.AdminSystemReport adminSystemContext(
+            @RequestHeader(DELEGATED_CONTEXT_HEADER) String context,
+            @Valid @RequestBody InternalAgentToolRequests.Context request
+    ) {
+        return roleAware.adminSystemReport(access(context, request.conversationId(), false).actor());
+    }
+
     @PostMapping("/admin-system-report")
     public InternalAgentToolResponses.AdminSystemReport adminSystemReport(
             @RequestHeader(DELEGATED_CONTEXT_HEADER) String context,

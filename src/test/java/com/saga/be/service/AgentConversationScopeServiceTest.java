@@ -138,6 +138,25 @@ class AgentConversationScopeServiceTest {
         assertNull(service.resolveForMessage(student, conversationId, null));
     }
 
+    @Test
+    void unboundHomeConversationMaySelectCoursePerToolCallWithoutBindingMismatch() {
+        AgentConversationScopeService service = service(
+                mock(CourseRepository.class), mock(TeamMemberRepository.class)
+        );
+        UUID courseA = UUID.randomUUID();
+        UUID courseB = UUID.randomUUID();
+        assertEquals(courseA, service.effectiveCourseId(null, courseA));
+        assertEquals(courseB, service.effectiveCourseId(null, courseB));
+        assertNull(service.effectiveCourseId(null, null));
+        assertEquals(courseA, service.effectiveCourseId(courseA, null));
+        assertEquals(courseA, service.effectiveCourseId(courseA, courseA));
+        IntegrationException mismatch = assertThrows(
+                IntegrationException.class,
+                () -> service.effectiveCourseId(courseA, courseB)
+        );
+        assertEquals("AI_AGENT_COURSE_SCOPE_MISMATCH", mismatch.getCode());
+    }
+
     private AgentConversationScopeService service(
             CourseRepository courses, TeamMemberRepository memberships
     ) {
